@@ -575,7 +575,7 @@
           if (!cls) continue;
           const inTz = tzOn && D.tz.levels[String(lid)] !== undefined;
           const base = d === 0 ? cls.lv[0] : A.lvl[d];
-          const mlvl = inTz ? tzLevel(base, s.clvl, d) : base;
+          const mlvl = (inTz ? tzLevel(base, s.clvl, d) : base) + CONFIG.uniqueOffset;   // super uniques are unique-rank monsters (+3, may exceed the zone max); act bosses get no bonus
           let tcn = (inTz && su.dtc[d]) || su.tc[d];
           if (!tcn || !TC[tcn]) continue;
           out.push({ key: 'su|' + su.id + '|' + d, mon: su.cls, name: su.n, rank: 'super', diff: d, area: lid,

@@ -405,7 +405,7 @@ def main():
     info("Hell Andariel mlvl", C["Andariel|H|mf0|p1"]["mlvl"], n(ref.monstats["andariel"]["Level(H)"]), "monstats Level(H)")
     check("Hell Andariel mlvl", C["Andariel|H|mf0|p1"]["mlvl"], n(ref.monstats["andariel"]["Level(H)"]))
     check("Hell Mephisto mlvl", C["Mephisto|H|mf0|p1"]["mlvl"], n(ref.monstats["mephisto"]["Level(H)"]))
-    check("Hell Countess mlvl (Tower Cellar 5 MonLvlEx(H))", C["The Countess|H|mf0|p1"]["mlvl"], n(ref.levels[25]["MonLvlEx(H)"]))
+    check("Hell Countess mlvl (Tower Cellar 5 MonLvlEx(H) + 3 unique bonus)", C["The Countess|H|mf0|p1"]["mlvl"], n(ref.levels[25]["MonLvlEx(H)"]) + 3)
 
     # ---- independent TC traversal vs engine
     boss = {"Andariel": "andariel", "Mephisto": "mephisto", "The Countess": None, "Duriel": "duriel", "Baal": "baalcrab"}
@@ -465,9 +465,17 @@ def main():
             FAIL.append("equip mean " + tcn)
     # cap = null / 0 reproduces the old numbers; Cow King (never reaches 6 items) is unchanged with the cap on
     kn = CP["knell"]
-    check("Knell Striker from normal Cow King, 620 MF, cap off: ~1 in 449 (mlvl 28)", 1 / kn["0"]["target"], 449, 0.004, "1 in %.1f" % (1 / kn["0"]["target"]))
+    check("Knell Striker from normal Cow King, 620 MF, cap off: ~1 in 446 (mlvl 31)", 1 / kn["0"]["target"], 446, 0.004, "1 in %.1f" % (1 / kn["0"]["target"]))
     check("Knell Striker (cap off) P(base scepter) = 5.10%", kn["0"]["base"], 0.0510, 0.005)
     check("Knell Striker from Cow King identical with cap 6", kn["6"]["target"], kn["0"]["target"], 1e-12)
+    SU = CP["su"]
+    check("Pindleskin Hell mlvl 86", SU["pind"], 86)
+    check("Countess Hell mlvl 82", SU["countess"], 82)
+    check("Rakanishu Normal mlvl 8 (Carver lvl 5 + 3)", SU["rak"], 8)
+    check("Cow King Normal mlvl 31", SU["cow"], 31)
+    check("Hell Radament boss row keeps base level (no unique bonus)", SU["radament"], SU["radamentBase"])
+    ROWS.append(("PASS" if SU["bane"] > 0 else "FAIL", "Bane Ash from Normal Rakanishu, P(target) > 0", SU["bane"], ">0", ""))
+    if not SU["bane"] > 0: FAIL.append("bane ash")
     check("Cow King P(base) identical with cap 6", kn["6"]["base"], kn["0"]["base"], 1e-12)
     for q in ("unique", "set", "rare", "magic", "items"):
         check("Hell Duriel expected %s/kill: dropCap=0 == null" % q, CP["off"]["0"]["totals"][q], CP["off"]["null"]["totals"][q], 1e-12)

@@ -176,6 +176,10 @@
       const packsBase = A.sx[2] * A.sy[2] * E.CONFIG.run.areaFill * A.den[2] / 100000;
       const shares = rows.map((r) => ({ mon: r.mon, share: r.share, perRun: r.perRun }));
       res.cap.tal = { shares, packsBase, nmon: A.nmon, rows: rows.length, apparition: rows.filter((r) => /wraith/.test(r.mon)).map((r) => ({ mon: r.mon, n: r.name, perRun: r.perRun })) }; }
+    { E.CONFIG.dropCap = 6; const ctx = ctxFor(1, 1); const S = E.sources(ctx); const f1 = (n, d) => S.find((s) => s.name === n && s.diff === d && s.rank === 'super');
+      const rak = f1('Rakanishu', 0), rad = S.find((s) => s.name === 'Radament' && s.diff === 2);
+      res.cap.su = { pind: f1('Pindleskin', 2).mlvl, countess: f1('The Countess', 2).mlvl, rak: rak.mlvl, cow: S.find((s) => s.name === 'The Cow King' && s.diff === 0).mlvl,
+        bane: E.chanceFor(ctx, rak, { kind: 'unique', id: 'Bane Ash' }, 0).target, radament: rad.mlvl, radamentBase: data.monsters.radament.lv[2] }; }
     // performance: all Hell sources, cap on vs off (cold caches via a fresh context key)
     for (const cap of [null, 6]) {
       E.CONFIG.dropCap = cap;
