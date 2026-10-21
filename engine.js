@@ -58,6 +58,14 @@
       minionDefault: 2,            // minions with a unique when the monster has no PartyMin/PartyMax
     },
     maxMlvl: 110,
+    // --- per-kill drop cap ---
+    // The game's drop routine (decompiled TreasureClassDropper, https://gist.github.com/SeanSullivan86/e912b40bb85f9822b9ef507d91534c88)
+    // stops a kill once it has produced maxItems = 6 items: `if (*itemCount >= maxItems) return;`. Drops happen in order (depth-first
+    // through nested TCs, picks in sequence, negative-Picks entries in listed order). This is hard-coded in the game, not in the tables,
+    // and ASSUMED to still be present in 3.3. null / 0 = off (uncapped, the old numbers). Every dropped unit counts toward the cap:
+    // gold ('gld,mul=..'), potions, scrolls, keys, runes, ... Entries that are not items (quest flags, unknown names) drop nothing and
+    // do not count. Computed exactly (no Monte Carlo): see dist() / capNode().
+    dropCap: 6,
   };
 
   // small helpers ------------------------------------------------------
@@ -165,7 +173,7 @@
     function maxF(a, t) { return [Math.max(a[0], t.u), Math.max(a[1], t.s), Math.max(a[2], t.r), Math.max(a[3], t.m)]; }
     const ZERO = [0, 0, 0, 0];
 
-    function dist(name, ctx, mlvl, inh) {
+    function distRaw(name, ctx, mlvl, inh) {
       const ck = name + '|' + mlvl + '|' + inh.join(',');
       const hit = ctx.cache.get(ck);
       if (hit) return hit;
@@ -191,7 +199,7 @@
             for (const [nm, pr] of ents) {
               if (pr <= 0) continue;
               const q = pr / total;
-              const sub = dist(nm, ctx, mlvl, f);
+              const sub = distRaw(nm, ctx, mlvl, f);
               for (const [k, p] of sub) acc.set(k, (acc.get(k) || 0) + q * p);
             }
             for (const [k, s] of acc) out.set(k, tc.p === 1 ? s : 1 - Math.pow(1 - s, tc.p));
@@ -205,7 +213,7 @@
             const qty = Math.min(pr, remaining);
             if (qty <= 0) continue;
             remaining -= qty;
-            const sub = dist(nm, ctx, mlvl, f);
+            const sub = distRaw(nm, ctx, mlvl, f);
             for (const [k, p] of sub) miss.set(k, (miss.get(k) || 1) * Math.pow(1 - p, qty));
           }
           for (const [k, m] of miss) out.set(k, 1 - m);
@@ -225,6 +233,163 @@
         }
         // else: unknown entry (gold with modifier, quest flags, ...) -> contributes nothing
       }
+      ctx.cache.set(ck, out);
+      return out;
+    }
+
+    // ---------------- per-kill drop cap (exact) ----------------
+    // Count of items dropped so far c in 0..cap. A TC acts on that count as a node {T, D}:
+    //   T[c][c']   = P(roll ends with c' items | starts with c)                 (all matrices upper triangular, row-major (cap+1)^2)
+    //   D.get(k)[c][c'] = P(ends with c' items AND leaf k was produced at least once | starts with c)
+    // Sequence A then B:  T = TA TB,  D_k = DA_k TB + TA DB_k - DA_k DB_k     (the "k not produced" matrices T - D multiply)
+    // Pick mixture:       T = q0 I + sum q_e T_e,  D_k = sum_{e containing k} q_e D_k_e
+    // A leaf drops (c -> c+1) while c < cap and drops nothing at c == cap. P(leaf k) = row 0 of D_k summed.
+    // Matrices stored in nodes are never mutated after creation (they are shared and cached).
+    const kits = new Map();
+    function capKit(cap) {
+      let kit = kits.get(cap);
+      if (kit) return kit;
+      const n = cap + 1;
+      const I = new Float64Array(n * n), S = new Float64Array(n * n), TL = new Float64Array(n * n);
+      for (let c = 0; c <= cap; c++) { I[c * n + c] = 1; if (c < cap) { S[c * n + c + 1] = 1; TL[c * n + c + 1] = 1; } else TL[c * n + c] = 1; }
+      kit = { n, I, S, TL, ident: { T: I, D: new Map(), id: true } };
+      kits.set(cap, kit);
+      return kit;
+    }
+    function mmul(A, B, n) {
+      const R = new Float64Array(n * n);
+      for (let i = 0; i < n; i++) for (let k = i; k < n; k++) {
+        const a = A[i * n + k]; if (a === 0) continue;
+        for (let j = k; j < n; j++) R[i * n + j] += a * B[k * n + j];
+      }
+      return R;
+    }
+    function seqNode(X, Y, kit) {
+      if (X.id) return Y;
+      if (Y.id) return X;
+      const n = kit.n;
+      const D = new Map();
+      for (const [k, dx] of X.D) {
+        const dy = Y.D.get(k);
+        const a = mmul(dx, Y.T, n);
+        if (dy) { const b = mmul(X.T, dy, n), c = mmul(dx, dy, n); for (let i = 0; i < a.length; i++) a[i] += b[i] - c[i]; }
+        D.set(k, a);
+      }
+      for (const [k, dy] of Y.D) if (!X.D.has(k)) D.set(k, mmul(X.T, dy, n));
+      return { T: mmul(X.T, Y.T, n), D };
+    }
+    function powNode(X, q, kit) {
+      let res = kit.ident, base = X;
+      while (q > 0) { if (q & 1) res = seqNode(res, base, kit); q >>= 1; if (q) base = seqNode(base, base, kit); }
+      return res;
+    }
+    function leafMat(w, kit) {
+      if (w === 1) return kit.S;
+      const d = new Float64Array(kit.S.length);
+      for (let i = 0; i < d.length; i++) d[i] = kit.S[i] * w;
+      return d;
+    }
+    function mixNode(parts, q0, kit) {   // parts: [[q, node]], q0 = probability that the pick drops nothing
+      const T = new Float64Array(kit.I.length), D = new Map();
+      for (let i = 0; i < T.length; i++) T[i] = q0 * kit.I[i];
+      for (const [q, nd] of parts) {
+        for (let i = 0; i < T.length; i++) T[i] += q * nd.T[i];
+        for (const [k, d] of nd.D) {
+          let a = D.get(k);
+          if (!a) { a = new Float64Array(T.length); D.set(k, a); }
+          for (let i = 0; i < a.length; i++) a[i] += q * d[i];
+        }
+      }
+      return { T, D };
+    }
+    /** upper bound on the number of items one roll of this TC can produce (the cap is irrelevant when this is <= cap) */
+    function maxItems(name, ctx) {
+      const memo = ctx.maxMemo || (ctx.maxMemo = new Map());
+      let v = memo.get(name);
+      if (v !== undefined) return v;
+      const tc = TC[name];
+      v = 0;
+      if (tc) {
+        if (ladderOK(tc.fl, tc.ll, ctx.ladder)) {
+          const subs = [];
+          for (const e of tc.e) {
+            const nm = e[0].split(',')[0], sub = TC[nm];
+            if (sub && !ladderOK(sub.fl, sub.ll, ctx.ladder)) continue;
+            subs.push([nm, e[1]]);
+          }
+          if (tc.p > 0) { let m = 0; for (const [nm, pr] of subs) if (pr > 0) m = Math.max(m, maxItems(nm, ctx)); v = tc.p * m; }
+          else if (tc.p < 0) { let rem = -tc.p; for (const [nm, pr] of subs) { const q = Math.min(pr, rem); if (q <= 0) continue; rem -= q; v += q * maxItems(nm, ctx); } }
+        }
+      } else if (items[name] || uniqById[name] || setById[name] || genericInfo(name)) v = 1;
+      memo.set(name, v);
+      return v;
+    }
+    function capNode(name, ctx, mlvl, inh, kit) {
+      const ck = 'N' + kit.n + '|' + name + '|' + mlvl + '|' + inh.join(',');
+      const hit = ctx.cache.get(ck);
+      if (hit) return hit;
+      let res = kit.ident;
+      const tc = TC[name];
+      if (tc) {
+        if (ladderOK(tc.fl, tc.ll, ctx.ladder)) {
+          const f = maxF(inh, tc);
+          const ents = [];
+          let sum = 0;
+          for (const e of tc.e) {
+            const nm = e[0].split(',')[0];
+            const sub = TC[nm];
+            if (sub && !ladderOK(sub.fl, sub.ll, ctx.ladder)) continue;
+            ents.push([nm, e[1]]);
+            if (e[1] > 0) sum += e[1];
+          }
+          if (tc.p > 0) {
+            const nd = adjNoDrop(tc.nd, sum, ctx.N);
+            const total = sum + nd;
+            if (total > 0) {
+              const parts = [];
+              for (const [nm, pr] of ents) if (pr > 0) parts.push([pr / total, capNode(nm, ctx, mlvl, f, kit)]);
+              res = powNode(mixNode(parts, nd / total, kit), tc.p, kit);
+            }
+          } else if (tc.p < 0) {
+            let remaining = -tc.p;
+            for (const [nm, pr] of ents) {
+              if (remaining <= 0) break;
+              const qty = Math.min(pr, remaining);
+              if (qty <= 0) continue;
+              remaining -= qty;
+              res = seqNode(res, powNode(capNode(nm, ctx, mlvl, f, kit), qty, kit), kit);
+            }
+          }
+        }
+      } else if (items[name]) res = { T: kit.TL, D: new Map([[leafKey('i', name, inh), kit.S]]) };
+      else if (uniqById[name]) res = { T: kit.TL, D: new Map([[leafKey('u', name, inh), kit.S]]) };
+      else if (setById[name]) res = { T: kit.TL, D: new Map([[leafKey('s', name, inh), kit.S]]) };
+      else {
+        const g = genericInfo(name);
+        if (g) {
+          let W = 0;
+          for (const c of g) if (c.q <= mlvl) W += c.w;
+          if (W > 0) {
+            const D = new Map();
+            for (const c of g) if (c.q <= mlvl) D.set(leafKey('i', c.code, inh), leafMat(c.w / W, kit));
+            res = { T: kit.TL, D };
+          }
+        }
+        // else: not an item (quest flag, unknown name) -> drops nothing, does not count toward the cap
+      }
+      ctx.cache.set(ck, res);
+      return res;
+    }
+    /** dist(name, ctx, mlvl, inheritedFactors) -> Map(leafKey -> P(this kill yields the leaf at least once)); honours CONFIG.dropCap */
+    function dist(name, ctx, mlvl, inh) {
+      const cap = CONFIG.dropCap;
+      if (!(cap > 0) || maxItems(name, ctx) <= cap) return distRaw(name, ctx, mlvl, inh);
+      const ck = 'C' + cap + '|' + name + '|' + mlvl + '|' + inh.join(',');
+      const hit = ctx.cache.get(ck);
+      if (hit) return hit;
+      const kit = capKit(cap), nd = capNode(name, ctx, mlvl, inh, kit), n = kit.n;
+      const out = new Map();
+      for (const [k, d] of nd.D) { let p = 0; for (let j = 0; j < n; j++) p += d[j]; if (p > 0) out.set(k, Math.min(1, p)); }
       ctx.cache.set(ck, out);
       return out;
     }
@@ -363,7 +528,8 @@
           const inTz = tzOn && D.tz.levels[lid] !== undefined;
           const types_ = list.map((id) => D.monsters[id]).filter(Boolean);
           let rarSum = 0;
-          for (const id of list) { const m = D.monsters[id]; if (m && m.rar > 0) rarSum += m.rar; }
+          const rarOf = {};   // a monster listed twice has double weight
+          for (const id of list) { const m = D.monsters[id]; if (m && m.rar > 0) { rarSum += m.rar; rarOf[id] = (rarOf[id] || 0) + m.rar; } }
           if (rarSum <= 0) continue;
           const packs = A.sx[d] * A.sy[d] * R.areaFill * A.den[d] / 100000;
           const U = (A.umin[d] + A.umax[d]) / 2;
@@ -372,7 +538,7 @@
             const m = D.monsters[id];
             if (!m || m.rar <= 0 || seen[id]) continue;
             seen[id] = 1;
-            const share = m.rar / rarSum;
+            const share = rarOf[id] / rarSum;
             const base = d === 0 ? m.lv[0] : A.lvl[d];
             const lv0 = inTz ? tzLevel(base, s.clvl, d) : base;
             const avgGrp = (m.g[0] + m.g[1]) / 2;
@@ -395,12 +561,13 @@
               const tcn = pickTC(m, d, rank, inTz);
               if (!tcn || !TC[tcn]) continue;
               out.push({ key: id + '|' + rank + '|' + lid + '|' + d, mon: id, name: m.n, rank, diff: d, area: +lid,
-                areaName: A.name, act: A.act, mlvl, tc: tcn, boss: false, perRun, tz: inTz });
+                areaName: A.name, act: A.act, mlvl, tc: tcn, boss: false, perRun, tz: inTz, share });
             }
           }
         }
         // superuniques
         for (const su of D.su) {
+          if (D.boss_area[su.cls]) continue;   // Radament / Summoner / Nihlathak / Griswold are also act-boss rows below: keep that one
           const lid = D.su_area[su.id];
           if (!lid || !D.levels[lid]) continue;
           const A = D.levels[lid];

@@ -6,6 +6,7 @@
   try {
     const data = await (await fetch('data.json')).json();
     const E = Engine.create(data);
+    E.CONFIG.dropCap = null;   // the legacy comparisons below are against the uncapped independent re-implementation
     const ctxFor = (players, party) => E.getCtx({ players: players || 1, party: party || 1, ladder: true, tz: false, mf: 0 });
     const find = (ctx, name, diff, ranks) => E.sources(ctx).find((s) => s.name === name && s.diff === diff && ranks.indexOf(s.rank) >= 0);
 
@@ -137,6 +138,53 @@
       const nonH = E.sources(ctx).find((s) => s.rank === 'unique' && s.mon === 'zombie1' && s.areaName === 'Blood Moor' && s.diff === 2);
       res.sunderPaths.adj.nonHerald = [manual(ctx, nonH), tot(ctx, nonH)];
       E.CONFIG.heraldQualityAdj = { t12: { unique: 1, set: 1, rare: 1 }, t3plus: { rarePlus: 1 } }; }
+    // ---- per-kill drop cap (CONFIG.dropCap) ----------------------------------------------------------------
+    res.cap = { dist: {}, knell: {}, off: {}, dups: {}, tal: {}, perf: {} };
+    const dumpDist = (ctx, tc, mlvl) => { const o = []; for (const [k, p] of E.dist(tc, ctx, mlvl, [0, 0, 0, 0])) { const m = E.metaCache.get(k); o.push([m.kind, m.id, m.f, p]); } return o; };
+    const CAP_TCS = ['Duriel (H)', 'Duriel (H) Desecrated D', 'Mephisto (H) Desecrated D', 'Countess (H)', 'Andarielq (H)', 'Andarielq (H) Desecrated H'];
+    for (const cap of [6, null]) {
+      E.CONFIG.dropCap = cap;
+      for (const tc of CAP_TCS) for (const pl of [1, 8]) {
+        const ctx = ctxFor(pl, 1);
+        res.cap.dist[(cap || 0) + '|' + tc + '|' + pl] = { N: ctx.N, leaves: dumpDist(ctx, tc, 85) };
+      }
+    }
+    // Knell Striker (unique scepter) from normal Cow King, 620 MF, 1 player: Cow King never reaches 6 items, so cap on == cap off
+    for (const cap of [null, 6]) {
+      E.CONFIG.dropCap = cap;
+      const ctx = ctxFor(1, 1);
+      const cow = E.sources(ctx).find((s) => s.name === 'The Cow King' && s.diff === 0);
+      const c = E.chanceFor(ctx, cow, { kind: 'unique', id: 'Knell Striker' }, 620);
+      res.cap.knell[cap || 0] = { target: c.target, base: c.base, tc: cow.tc, mlvl: cow.mlvl };
+    }
+    // dropCap = null / 0 must be the old engine: compare with the Hell Duriel totals of the legacy section (uncapped Ref match above)
+    for (const cap of [null, 0, 6]) {
+      E.CONFIG.dropCap = cap;
+      const ctx = ctxFor(1, 1);
+      const s = find(ctx, 'Duriel', 2, ['boss']);
+      res.cap.off[String(cap)] = { totals: E.qualityTotals(ctx, s, 0) };
+    }
+    // duplicates in sources()
+    { const ctx = ctxFor(1, 1); const seen = {}; const dup = [];
+      for (const s of E.sources(ctx)) { const k = s.name + '|' + s.mon + '|' + s.rank + '|' + s.area + '|' + s.diff; if (seen[k]) dup.push(k); seen[k] = 1; }
+      const nm = {}; const dupName = [];
+      for (const s of E.sources(ctx)) { if (s.rank === 'regular' || s.rank === 'champion' || s.rank === 'unique' || s.rank === 'minion' || s.rank === 'herald') continue; const k = s.name + '|' + s.area + '|' + s.diff; if (nm[k]) dupName.push(k); nm[k] = 1; }
+      res.cap.dups = { dup, dupName, bossNames: ['Nihlathak', 'Radament', 'The Summoner', 'Griswold'].map((n) => E.sources(ctx).filter((s) => s.name === n && s.diff === 2).map((s) => s.rank)) }; }
+    // Tal Rasha's Tomb: Unraveler listed twice
+    { const ctx = ctxFor(1, 1); const rows = E.sources(ctx).filter((s) => s.diff === 2 && s.rank === 'regular' && s.areaName === "Tal Rasha's Tomb" && s.area === 66);
+      const A = data.levels['66']; const names = {}; for (const r of rows) names[r.mon] = r;
+      const packsBase = A.sx[2] * A.sy[2] * E.CONFIG.run.areaFill * A.den[2] / 100000;
+      const shares = rows.map((r) => ({ mon: r.mon, share: r.share, perRun: r.perRun }));
+      res.cap.tal = { shares, packsBase, nmon: A.nmon, rows: rows.length, apparition: rows.filter((r) => /wraith/.test(r.mon)).map((r) => ({ mon: r.mon, n: r.name, perRun: r.perRun })) }; }
+    // performance: all Hell sources, cap on vs off (cold caches via a fresh context key)
+    for (const cap of [null, 6]) {
+      E.CONFIG.dropCap = cap;
+      const ctx = E.getCtx({ players: cap ? 6 : 5, party: 1, ladder: true, tz: true, clvl: 96, mf: 620, tier: 1 });   // same N=3, separate cold caches
+      const t0 = Date.now(); let n = 0;
+      for (const s of E.sources(ctx)) { if (s.diff !== 2) continue; E.srcDist(ctx, s); n++; }
+      res.cap.perf[cap || 0] = { ms: Date.now() - t0, n };
+    }
+    E.CONFIG.dropCap = 6;
     res.trials = { half: [0.25, 0.5, 0.75, 0.99].map((q) => E.trialsFor(0.5, q)), p449: E.trialsFor(1 / 449, 0.5), p449_99: E.trialsFor(1 / 449, 0.99), zero: E.trialsFor(0, 0.5), neg: E.trialsFor(-1, 0.5), one: E.trialsFor(1, 0.99), tiny: E.trialsFor(1e-12, 0.5) };
     res.sourcesCount = E.sources(ctxFor(1, 1)).length;
     res.config = E.CONFIG;

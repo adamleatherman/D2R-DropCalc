@@ -245,6 +245,124 @@ class Ref:
         return total
 
 
+# ------------------------------------------------------------ Monte Carlo of the raw TC tree (drop cap check)
+import random
+
+
+class MC:
+    """Independent simulation of the game's drop routine (depth-first, picks in sequence, 6-item cap) on the raw tables."""
+
+    def __init__(self, ref):
+        self.ref = ref
+        self.uset = {u["index"] for u in ref.uniq}
+        self.sset = {x["index"] for x in ref.sets}
+        self.comp = {}
+        self.gen = {}
+
+    def tcinfo(self, name, N):
+        key = (name, N)
+        if key in self.comp:
+            return self.comp[key]
+        tc = self.ref.tc[name]
+        ents = []
+        for i in range(1, 11):
+            it, pr = tc.get("Item%d" % i, ""), tc.get("Prob%d" % i, "")
+            if it:
+                ents.append((it.strip('"').split(",")[0], n(pr)))
+        picks = n(tc.get("Picks"), 1) if tc.get("Picks") != "" else 1
+        f = tuple(n(tc.get(c)) for c in ("Unique", "Set", "Rare", "Magic"))
+        s = sum(p for _, p in ents if p > 0)
+        cum, tot = [], 0
+        if picks > 0:
+            tot = s + self.ref.adj_nodrop(n(tc.get("NoDrop")), s, N)
+            acc = 0
+            for nm, p in ents:
+                if p > 0:
+                    acc += p
+                    cum.append((acc, nm))
+        r = (picks, f, ents, cum, tot)
+        self.comp[key] = r
+        return r
+
+    def run(self, top, mlvl, N, kills, seed, cap, branch=None):
+        """returns ({leaf: P(at least once per kill)}, mean number of items dropped under TCs whose name contains `branch`)"""
+        rnd = random.Random(seed)
+        ref = self.ref
+        counts = {}
+        branch_items = [0]
+        gen_cache = self.gen
+
+        def drop(name, inh, st, inbranch):
+            if cap and st[0] >= cap:
+                return
+            if name in ref.tc:
+                picks, f, ents, cum, tot = self.tcinfo(name, N)
+                f = tuple(max(a, b) for a, b in zip(inh, f))
+                ib = inbranch or (branch is not None and branch in name)
+                if picks > 0:
+                    for _ in range(picks):
+                        if cap and st[0] >= cap:
+                            return
+                        if tot <= 0:
+                            return
+                        r = rnd.random() * tot
+                        for c, nm in cum:
+                            if r < c:
+                                drop(nm, f, st, ib)
+                                break
+                else:
+                    rem = -picks
+                    for nm, p in ents:
+                        q = min(p, rem)
+                        if q <= 0:
+                            continue
+                        rem -= q
+                        for _ in range(q):
+                            if cap and st[0] >= cap:
+                                return
+                            drop(nm, f, st, ib)
+                return
+            key = None
+            if name in ref.items:
+                key = ("i", name, inh)
+            elif name in self.uset:
+                key = ("u", name, inh)
+            elif name in self.sset:
+                key = ("s", name, inh)
+            else:
+                g = gen_cache.get((name, mlvl))
+                if g is None:
+                    lst = ref.generic(name)
+                    g = [(c, w) for c, q, w in lst if q <= mlvl] if lst else []
+                    gen_cache[(name, mlvl)] = g
+                W = sum(w for _, w in g)
+                if W > 0:
+                    r = rnd.random() * W
+                    for c, w in g:
+                        r -= w
+                        if r < 0:
+                            key = ("i", c, inh)
+                            break
+                    else:
+                        key = ("i", g[-1][0], inh)
+            if key is None:
+                return
+            st[0] += 1
+            st[1].add(key)
+            if inbranch:
+                branch_items[0] += 1
+
+        for _ in range(kills):
+            st = [0, set()]
+            drop(top, (0, 0, 0, 0), st, False)
+            for k in st[1]:
+                counts[k] = counts.get(k, 0) + 1
+        return {k: v / kills for k, v in counts.items()}, branch_items[0] / kills
+
+    def branch_mean(self, top, mlvl, N, kills, seed, cap, branch):
+        return self.run(top, mlvl, N, kills, seed, cap, branch)[1]
+
+
 # ------------------------------------------------------------------- browser run
 def find_browser():
     for p in (r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
@@ -312,6 +430,66 @@ def main():
         check("%s Hell MF%d: P(%s) per kill" % (name, mf, ident), c["c"]["target"], want, 1e-9,
               "1 in %.0f" % (1 / want) if want else "")
 
+    # ---- per-kill 6-item cap: engine vs independent Monte Carlo of the raw TC tree ---------------------
+    CP = js["cap"]
+    mc = MC(ref)
+    KILLS = 60000
+    for tcn in ("Duriel (H)", "Duriel (H) Desecrated D", "Mephisto (H) Desecrated D", "Countess (H)", "Andarielq (H)", "Andarielq (H) Desecrated H"):
+        for pl in (1, 8):
+            eng = CP["dist"]["6|%s|%d" % (tcn, pl)]
+            sim, _ = mc.run(tcn, 85, eng["N"], KILLS, 1234 + pl, 6)
+            worst, nchk, bad = 0.0, 0, 0
+            for kind, ident, f, p in eng["leaves"]:
+                q = sim.get((kind, ident, tuple(f)), 0.0)
+                if max(p, q) < 0.01:
+                    continue
+                sd = math.sqrt(max(p, 1e-4) * (1 - p) / KILLS)
+                z = abs(p - q) / sd
+                worst = max(worst, z)
+                nchk += 1
+                bad += z > 5
+            ekeys = {(k, i, tuple(f)) for k, i, f, p in eng["leaves"]}
+            miss = sum(1 for k, v in sim.items() if v >= 0.01 and k not in ekeys)
+            ROWS.append(("PASS" if bad == 0 and miss == 0 else "FAIL",
+                         "cap=6 vs Monte Carlo (%dk kills): %s, players %d (N=%d): %d leaves with P>=1%%, max |z|" % (KILLS // 1000, tcn, pl, eng["N"], nchk),
+                         worst, "<5", "leaves missing from engine: %d" % miss))
+            if bad or miss:
+                FAIL.append("cap MC " + tcn)
+    # expected Equip-branch items per kill (reference simulation from the task: 6.41 -> 2.02, Mephisto 4.50 -> 4.31, Andariel 3.16 -> 3.15)
+    for tcn, br, unc, cap_ in (("Duriel (H) Desecrated D", "Equip", 6.41, 2.02), ("Mephisto (H) Desecrated D", "Equip", 4.50, 4.31), ("Andarielq (H) Desecrated H", "Equip", 3.16, 3.15)):
+        a = mc.branch_mean(tcn, 85, 1, 30000, 7, None, br)
+        b = mc.branch_mean(tcn, 85, 1, 30000, 8, 6, br)
+        ok = abs(a - unc) < 0.1 and abs(b - cap_) < 0.08
+        ROWS.append(("PASS" if ok else "FAIL", "MC expected '%s' items/kill, %s: uncapped / capped" % (br, tcn), "%.2f / %.2f" % (a, b), "%.2f / %.2f" % (unc, cap_), "reference simulation from the task"))
+        if not ok:
+            FAIL.append("equip mean " + tcn)
+    # cap = null / 0 reproduces the old numbers; Cow King (never reaches 6 items) is unchanged with the cap on
+    kn = CP["knell"]
+    check("Knell Striker from normal Cow King, 620 MF, cap off: ~1 in 449 (mlvl 28)", 1 / kn["0"]["target"], 449, 0.004, "1 in %.1f" % (1 / kn["0"]["target"]))
+    check("Knell Striker (cap off) P(base scepter) = 5.10%", kn["0"]["base"], 0.0510, 0.005)
+    check("Knell Striker from Cow King identical with cap 6", kn["6"]["target"], kn["0"]["target"], 1e-12)
+    check("Cow King P(base) identical with cap 6", kn["6"]["base"], kn["0"]["base"], 1e-12)
+    for q in ("unique", "set", "rare", "magic", "items"):
+        check("Hell Duriel expected %s/kill: dropCap=0 == null" % q, CP["off"]["0"]["totals"][q], CP["off"]["null"]["totals"][q], 1e-12)
+        lower = CP["off"]["6"]["totals"][q] < CP["off"]["null"]["totals"][q]
+        ROWS.append(("PASS" if lower else "FAIL", "Hell Duriel expected %s/kill: cap 6 < uncapped" % q, CP["off"]["6"]["totals"][q], CP["off"]["null"]["totals"][q], ""))
+        if not lower:
+            FAIL.append("duriel capped lower " + q)
+    ratio = CP["off"]["null"]["totals"]["items"] / CP["off"]["6"]["totals"]["items"]
+    ROWS.append(("PASS" if 1.5 < ratio < 4 else "FAIL", "Hell Duriel items/kill uncapped / capped (task: ~3x overstated)", ratio, "1.5-4", ""))
+    if not 1.5 < ratio < 4:
+        FAIL.append("duriel ratio")
+    # ---- duplicate rows / duplicate monster entries ------------------------------------------------
+    check("no duplicate (monster, rank, area, difficulty) rows in sources()", len(CP["dups"]["dup"]), 0, 0, ",".join(CP["dups"]["dup"][:3]))
+    check("no duplicate (name, area, difficulty) among super/boss rows", len(CP["dups"]["dupName"]), 0, 0, ",".join(CP["dups"]["dupName"][:3]))
+    for nm, ranks in zip(("Nihlathak", "Radament", "The Summoner", "Griswold"), CP["dups"]["bossNames"]):
+        check("%s appears exactly once in Hell sources" % nm, len(ranks), 1, 0, "rank " + ",".join(ranks))
+    T = CP["tal"]
+    unr = [r for r in T["shares"] if r["mon"] == "unraveler3"]
+    check("Tal Rasha's Tomb (Hell): Unraveler listed twice -> share 2/7", unr[0]["share"], 2 / 7, 1e-12)
+    check("Tal Rasha's Tomb (Hell): shares of all distinct monsters sum to 1", sum(r["share"] for r in T["shares"]), 1.0, 1e-12)
+    check("Tal Rasha's Tomb (Hell): Apparition regular kills/run ~151", T["apparition"][0]["perRun"], 151, 0.01, "%.1f" % T["apparition"][0]["perRun"])
+    ROWS.append(("INFO", "all Hell sources srcDist, cold context (ms): cap off / cap on", "%d / %d" % (CP["perf"]["0"]["ms"], CP["perf"]["6"]["ms"]), "-", "%d sources" % CP["perf"]["6"]["n"]))
     # ---- published figures
     f = js["formula"]
     check("effective MF for 200%% MF, unique (PureDiablo example: 111)", f["effMF200"], 111)
