@@ -51,6 +51,11 @@ def n(v, d=0):
         return d
 
 
+def rd_sub(name, sub):
+    with open(os.path.join(SRC, sub, name + ".txt"), encoding="utf-8", errors="replace") as f:
+        lines = [l.rstrip("\r\n").split("\t") for l in f]
+    return [{h: (l[i] if i < len(l) else "") for i, h in enumerate(lines[0])} for l in lines[1:] if l and l[0]]
+
 # ------------------------------------------------ independent reference implementation
 class Ref:
     def __init__(self):
@@ -328,6 +333,69 @@ def main():
     info("Hell Countess Ist (r24) per kill, 1 player", "1 in %.0f" % (1 / ist), "1 in 287 (old forum figure)",
          "rune table alone gives 1 in %.0f; the item table's 'Act 2 (H) Good' -> Runes 14 -> ... -> Runes 12 chain adds the rest. 287 is a 1.10-era number." % (1 / rune_only))
     check("Hell Countess Ist is within 2%% of the rune-table-only hand value", ist / rune_only, 1.0, 0.02)
+    # ---- game modes (LoD = excel\base, RotW = root) ------------------------------------------------
+    M = js["modes"]
+    base_armor = {r["code"]: r for r in rd_sub("armor", "base") if r.get("code")}
+    grims = [c for c, r in ref.items.items() if r.get("type") == "grim"]
+    check("RotW root armor.txt: all 15 grimoires spawnable", sum(n(ref.items[c]["spawnable"]) for c in grims), 15)
+    check("LoD base\\armor.txt: no grimoire spawnable", sum(n(base_armor[c]["spawnable"]) for c in grims), 0)
+    check("LoD: grimoire drop probability over all Hell sources", M["lod"]["grimMass"], 0, 1e-12)
+    check("LoD: grimoires missing from search index", M["lod"]["indexGrim"], 0)
+    check("LoD: grimoire automagic not attached", M["lod"]["autoGrim"], 0)
+    ROWS.append(("PASS" if M["rotw"]["grimMass"] > 0 else "FAIL", "RotW: grimoires do drop (mass over Hell sources)", M["rotw"]["grimMass"], ">0", ""))
+    if not M["rotw"]["grimMass"] > 0: FAIL.append("rotw grimoire")
+    ratio_mode = M["lod"]["midBaseMeph"] / M["rotw"]["midBaseMeph"]
+    ROWS.append(("PASS" if 1.0 < ratio_mode < 1.2 else "FAIL", "mid-level armor base %s at Hell Mephisto: LoD/RotW per-kill odds" % M["midBase"], ratio_mode, "slightly >1", ""))
+    if not 1.0 < ratio_mode < 1.2: FAIL.append("mode dilution")
+    # independent dilution check for that base: weights over the bracket
+    mb = ref.items[M["midBase"]]
+    br = max(3, -(-n(mb["level"]) // 3) * 3)
+    def wsum(include_grim):
+        w = 0
+        for code, r in ref.items.items():
+            if n(r.get("spawnable")) != 1 and code not in grims: continue
+            if code in grims and not include_grim: continue
+            if "armo" in ref.item_anc(code) and max(3, -(-n(r.get("level")) // 3) * 3) == br and n(r.get("level")) <= 87:
+                w += n(r.get("rarity"), 0)
+        return w
+    check("armor pool dilution matches independent bracket weights (LoD/RotW)", ratio_mode, wsum(True) / wsum(False), 1e-3,
+          "bracket %d, rarity sum RotW %d vs LoD %d (only exact if this bracket is reached through armoN entries only)" % (br, wsum(True), wsum(False)))
+
+    # ---- heralds ----------------------------------------------------------------------------------
+    Hh = js["herald"]
+    dz = json.load(open(os.path.join(SRC, "hd", "desecratedzones.json"), encoding="utf-8"))["desecrated_zones"][0]
+    tiers = dz["game_difficulties"]["rotw"]["hell"]["defaults"]["herald_tiers"]
+    boosts = [t.get("herald_treasure_class_level_boost", 0) for t in tiers]
+    check("herald tier boosts from desecratedzones.json (0,3,6,9,12)", sum(b * 10 ** i for i, b in enumerate(boosts)), sum(b * 10 ** i for i, b in enumerate([0, 3, 6, 9, 12])))
+    g37 = sorted([(n(r["level"]), name) for name, r in ref.tc.items() if n(r.get("group")) == 37])
+    def grp_pick(l):
+        best = None
+        for lv, nm in g37:
+            if lv <= l: best = nm
+        return best
+    zomb_tc = ref.monstats["zombie1"]["TreasureClassDesecratedUnique(H)"]
+    bm = n(ref.levels[2]["MonLvlEx(H)"])
+    for clvl in (60, 94):
+        base_ml = max(bm, min(96, max(70, clvl + 2))) + 3
+        for tier, b in ((1, boosts[0]), (5, boosts[4])):
+            h = Hh["tiers"]["c%dt%d" % (clvl, tier)]
+            check("herald mlvl, clvl %d" % clvl, h["mlvl"], base_ml)
+            ROWS.append(("PASS" if h["resolved"] == grp_pick(base_ml + b) else "FAIL", "herald tier %d clvl %d resolved TC (mlvl %d + boost %d)" % (tier, clvl, base_ml, b), h["resolved"], grp_pick(base_ml + b), "base TC " + zomb_tc))
+            if h["resolved"] != grp_pick(base_ml + b): FAIL.append("herald tc")
+    info("tier boost effect", "%s -> %s" % (Hh["tiers"]["c60t1"]["resolved"], Hh["tiers"]["c60t5"]["resolved"]), "differs at low clvl",
+         "at clvl 94 both tiers resolve to %s (mlvl already above the group top, level 85)" % Hh["tiers"]["c94t1"]["resolved"])
+    check("heralds absent in LoD", Hh["inLod"], 0)
+    check("heralds absent without terror zone", Hh["noTz"], 0)
+    ROWS.append(("PASS" if Hh["count"] > 0 else "FAIL", "heralds present in RotW + Hell + TZ", Hh["count"], ">0", ""))
+    sc = ref.tc["Sunder Charms"]
+    ssum = sum(n(sc["Prob%d" % i]) for i in range(1, 11))
+    for key, v in Hh["sunder"].items():
+        pl, pa = key.split("/")
+        nd = ref.adj_nodrop(n(sc["NoDrop"]), ssum, v["N"])
+        check("Sunder chance per herald kill, players %s / party %s (N=%d)" % (pl, pa, v["N"]), v["p"], ssum / (ssum + nd), 1e-9, "1 in %.0f" % (1 / v["p"]))
+    p1 = Hh["sunder"]["1/1"]["p"]
+    info("tier-1, 1-player Sunder chance per herald kill (tables)", "%.4f%% (1 in %.0f)" % (p1 * 100, 1 / p1), "0.3677% (1 in 272), diablo2.io datamine",
+         "tables give %.1f%% more; the community number may predate 3.3 (Latent Sunder min drop level 69 -> 75). Not forced to agree." % ((p1 / 0.003677 - 1) * 100))
     # ---- print
     w = max(len(r[1]) for r in ROWS)
     for st, name, got, want, note in ROWS:

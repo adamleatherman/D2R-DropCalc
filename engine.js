@@ -27,7 +27,16 @@
     // --- ladder: current ladder season used for first/lastLadderSeason gating ---
     currentSeason: 99,
     // --- terror zones ---
-    tzMode: 'expansion',           // 'expansion' or 'rotw' section of desecratedzones.json
+    // --- game mode: 'rotw' = Reign of the Warlock (root excel folder), 'lod' = Lord of Destruction (excel\base).
+    // The two folders differ only in the Warlock grimoire bases (spawnable in rotw) and their automagic mods.
+    // The mode also picks the desecratedzones.json section (expansion vs rotw) and enables heralds (rotw + Hell + TZ only).
+    gameMode: 'rotw',
+    // --- heralds (rotw Hell terror zones) ---
+    // ASSUMPTION: monstats TreasureClassHerald* are empty in 3.3, so a herald is assumed to use the monster's
+    // TreasureClassDesecratedUnique(H) TC, group-upgraded at (mlvl + herald_treasure_class_level_boost).
+    // Sunder tier multiplier: the data tables give no tier dependence (all 1). A Reddit datamine quoted on diablo2.io
+    // (https://diablo2.io/post4136083.html) claims tier 5 = 3x tier 1; another poster there says the rate does not change with tier.
+    heraldSunderTierMultiplier: [1, 1, 1, 1, 1],
     // --- per-run estimate (rough!) ---
     run: {
       areaFill: 0.4,               // fraction of the SizeX*SizeY bounding box that is actually walkable/populated
@@ -55,6 +64,8 @@
     const items = D.items;
     const types = D.types;
     const DIFFS = ['Normal', 'Nightmare', 'Hell'];
+    const spOf = (it) => (CONFIG.gameMode === 'lod' && it.spl !== undefined) ? it.spl : it.sp;
+    const tzModeName = () => (CONFIG.gameMode === 'rotw' ? 'rotw' : 'expansion');
 
     // ---------------- indices ----------------
     const uniqByCode = {}, setByCode = {}, uniqById = {}, setById = {};
@@ -78,7 +89,7 @@
         const list = [];
         for (const code in items) {
           const it = items[code];
-          if (!it.sp || it.anc.indexOf(pre) < 0) continue;
+          if (!spOf(it) || it.anc.indexOf(pre) < 0) continue;
           const b = Math.max(3, Math.ceil(it.q / 3) * 3);
           if (b === bracket) list.push({ code, q: it.q, w: it.r });
         }
@@ -126,6 +137,15 @@
       c.s = Object.assign({}, c.s, s);
       return c;
     }
+
+    /** Switch game mode ('lod' | 'rotw'); clears every cache that depends on item/affix spawnability. */
+    function setMode(m) {
+      if (m === CONFIG.gameMode) return;
+      CONFIG.gameMode = m;
+      for (const k in genericCache) delete genericCache[k];
+      ctxCache.clear(); eligCache.clear(); affCache.clear();
+    }
+    function heraldsAvailable(sel) { return CONFIG.gameMode === 'rotw' && !!sel.tz; }
 
     // ---------------- treasure class resolution ----------------
     // dist(name, ctx, mlvl, inheritedFactors) -> Map(leafKey -> probability that this roll yields the leaf at least once)
@@ -234,7 +254,7 @@
     function eligibleUniques(code, ilvl, ladder) {
       const out = [];
       for (const u of uniqByCode[code] || []) {
-        if (!u.sp || u.dis || u.lvl > ilvl || u.dc) continue;
+        if (!u.sp || u.dis || u.lvl > ilvl || u.dc || (items[code] && !spOf(items[code]))) continue;
         if (!ladderOK(u.fl, u.ll, ladder)) continue;
         out.push(u);
       }
@@ -243,7 +263,7 @@
     function eligibleSets(code, ilvl, ladder) {
       const out = [];
       for (const s of setByCode[code] || []) {
-        if (!s.sp || s.dis || s.lvl > ilvl || s.dc) continue;
+        if (!s.sp || s.dis || s.lvl > ilvl || s.dc || (items[code] && !spOf(items[code]))) continue;
         if (!ladderOK(s.fl, s.ll, ladder)) continue;
         out.push(s);
       }
@@ -287,7 +307,7 @@
     }
 
     // ---------------- monster levels / sources ----------------
-    function tzBounds(d) { const b = D.tz.bounds[CONFIG.tzMode] || D.tz.bounds.expansion; return b[d]; }
+    function tzBounds(d) { const b = D.tz.bounds[tzModeName()] || D.tz.bounds.expansion; return b[d]; }
     function tzLevel(base, clvl, d) {
       const b = tzBounds(d);
       const z = Math.min(b.max, Math.max(b.min, clvl + b.boost));
@@ -342,6 +362,14 @@
               ['unique', lv0 + CONFIG.uniqueOffset, U * (1 - R.champShare) * share],
               ['minion', lv0 + CONFIG.minionOffset, U * (1 - R.champShare) * share * minions],
             ];
+            if (d === 2 && inTz && heraldsAvailable(s) && !m.nh) {
+              // ASSUMED herald TC (see CONFIG): the monster's desecrated unique TC, group-upgraded at mlvl + tier boost.
+              const tier = Math.max(1, Math.min(5, s.tier || 1));
+              const hb = (D.tz.herald[tier - 1] || { boost: 0 }).boost;
+              const htc = pickTC(m, d, 'unique', true);
+              if (htc && TC[htc]) out.push({ key: id + '|herald|' + lid + '|' + d, mon: id, name: m.n, rank: 'herald', diff: d, area: +lid,
+                areaName: A.name, act: A.act, mlvl: lv0 + CONFIG.uniqueOffset, tc: htc, boss: false, perRun: 0, tz: true, herald: true, tier, tcBoost: hb });
+            }
             for (const [rank, mlvl, perRun] of recs) {
               const tcn = pickTC(m, d, rank, inTz);
               if (!tcn || !TC[tcn]) continue;
@@ -385,7 +413,7 @@
 
     function srcDist(ctx, src) {
       // bosses keep their own TC unless the zone is terrorized (data guide: group upgrade ignored for bosses unless desecrated)
-      const topTC = upgradeTC(src.tc, src.mlvl, src.boss && !src.tz);
+      const topTC = upgradeTC(src.tc, src.mlvl + (src.tcBoost || 0), src.boss && !src.tz);
       return dist(topTC, ctx, src.mlvl, ZERO);
     }
 
@@ -426,7 +454,23 @@
       return res;
     }
 
-    /** Expected number of items per kill by quality class (sum over all leaves; "P(at least once)" per leaf). */
+    const sunderIds = new Set();
+    for (const e of (TC['Sunder Charms'] || { e: [] }).e) sunderIds.add(e[0]);
+    /** Chance that one kill drops a Sunder charm (any of the six), incl. player-count NoDrop and the optional tier multiplier. */
+    function sunderChance(ctx, src) {
+      const dm = srcDist(ctx, src);
+      let p = 0;
+      for (const [k, v] of dm) { const meta = metaCache.get(k); if (meta.kind === 'u' && sunderIds.has(meta.id)) p += v; }
+      const mult = src.tier ? (CONFIG.heraldSunderTierMultiplier[src.tier - 1] || 1) : 1;
+      return Math.min(1, p * mult);
+    }
+    /** Herald spawn chance in % at a zone completion % (logistic from the data guide: a/(1+e^(-m(x-x0))) + k). */
+    function heraldSpawnPct(tier, x) {
+      const t = D.tz.herald[tier - 1]; if (!t) return 0;
+      return t.asym / (1 + Math.exp(-t.slope * (x - t.mid))) + t.shift;
+    }
+
+    /** Expected number of items per kill by quality class' (sum over all leaves; "P(at least once)" per leaf). */
     function qualityTotals(ctx, src, mf) {
       const dm = srcDist(ctx, src);
       const t = { items: 0, unique: 0, set: 0, rare: 0, magic: 0, hq: 0, normal: 0, low: 0, runes: 0, gold: 0, explicit: 0 };
@@ -503,7 +547,7 @@
       res.auto = [];
       if (it.ap) {
         for (const a of (autoByGroup[it.ap] || [])) {
-          if (!a.sp) continue;
+          if (!((CONFIG.gameMode === 'lod' && a.spl !== undefined) ? a.spl : a.sp)) continue;
           if (a.lvl > alvl) continue;
           if (a.max && a.max < alvl) continue;
           res.auto.push(a);
@@ -739,11 +783,13 @@
       const out = [];
       for (const code in items) {
         const it = items[code];
-        if (!it.sp || code === 'gld') continue;
+        if (!spOf(it) || code === 'gld') continue;
         if (it.q <= 0 && it.k !== 'm') continue;
         out.push({ kind: 'base', code, label: it.n + ' (' + code + ', qlvl ' + it.q + (it.tier === 1 ? ', exceptional' : it.tier === 2 ? ', elite' : '') + ')', name: it.n });
       }
-      for (const u of D.uniques) if (u.sp && !u.dis && !u.dc) out.push({ kind: 'unique', id: u.id, code: u.code, label: u.id + ' - unique ' + (items[u.code] ? items[u.code].n : u.code) + ' (lvl ' + u.lvl + ')', name: u.id });
+      const explicitU = new Set();
+      for (const n in TC) for (const e of TC[n].e) if (uniqById[e[0]]) explicitU.add(e[0]);   // e.g. Sunder charms (spawnable=0 but dropped explicitly)
+      for (const u of D.uniques) if ((u.sp || explicitU.has(u.id)) && !u.dis && !u.dc) out.push({ kind: 'unique', id: u.id, code: u.code, label: u.id + ' - unique ' + (items[u.code] ? items[u.code].n : u.code) + ' (lvl ' + u.lvl + ')', name: u.id });
       for (const s of D.sets) if (s.sp && !s.dis) out.push({ kind: 'set', id: s.id, code: s.code, label: s.id + ' - set ' + (items[s.code] ? items[s.code].n : s.code) + ' (' + s.set + ', lvl ' + s.lvl + ')', name: s.id });
       return out;
     }
@@ -753,7 +799,7 @@
       const m = new Map();
       for (const code in items) {
         const it = items[code];
-        if (!it.sp || it.an || it.q <= 0 && it.k !== 'm') continue;
+        if (!spOf(it) || it.an || it.q <= 0 && it.k !== 'm') continue;
         for (const a of it.anc) {
           if (!types[a]) continue;
           if (!m.has(a)) m.set(a, []);
@@ -765,7 +811,7 @@
 
     return {
       CONFIG, data: D, DIFFS, items, types, getCtx, playersN, adjNoDrop, dist, upgradeTC,
-      quality, qualityTotals, sources, srcDist, chanceFor, affixLevel, minIlvlForAlvl, eligible, affixProb, minLevels,
+      setMode, heraldsAvailable, sunderChance, heraldSpawnPct, spOf, quality, qualityTotals, sources, srcDist, chanceFor, affixLevel, minIlvlForAlvl, eligible, affixProb, minLevels,
       statList, affixSearch, searchIndex, baseTypes, metaCache, uniqById, setById, uniqByCode, setByCode, prettyId, tzLevel,
       eligibleUniques, eligibleSets, condProb,
     };

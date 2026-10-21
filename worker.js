@@ -14,6 +14,7 @@ self.onmessage = async (ev) => {
     if (!ready) ready = init();
     await ready;
     if (m.type === 'search') {
+      if (m.mode) E.setMode(m.mode);
       const ctx = E.getCtx(m.ctx);
       const res = E.affixSearch(ctx, m.opts, (done, total) => self.postMessage({ type: 'progress', done, total, id: m.id }));
       // strip heavy objects: keep serialisable row summaries

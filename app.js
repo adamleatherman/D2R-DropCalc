@@ -7,7 +7,7 @@
   let worker = null, reqId = 0;
 
   // ---------------- persistent selectors ----------------
-  const KEYS = ['s_diff', 's_players', 's_party', 's_mf', 's_tz', 's_clvl', 's_ladder', 's_act'];
+  const KEYS = ['s_mode', 's_tier', 's_diff', 's_players', 's_party', 's_mf', 's_tz', 's_clvl', 's_ladder', 's_act'];
   function loadSel() {
     try {
       const raw = localStorage.getItem('d2rdropcalc.sel');
@@ -24,13 +24,20 @@
     } catch (e) { /* ignore */ }
   }
   function clampInt(el, lo, hi) { let v = parseInt(el.value, 10); if (isNaN(v)) v = lo; v = Math.max(lo, Math.min(hi, v)); el.value = v; return v; }
+  function updTier() {
+    const d = parseInt($('s_diff').value, 10);
+    $('l_tier').hidden = !($('s_mode').value === 'rotw' && $('s_tz').checked && (d === 2 || d < 0));
+  }
   function readSel() {
+    if (E) E.setMode($('s_mode').value);
+    updTier();
     const players = clampInt($('s_players'), 1, 8);
     const party = Math.min(clampInt($('s_party'), 1, 8), players);
     $('s_party').value = party;
     return {
       diff: parseInt($('s_diff').value, 10), players, party,
       mf: clampInt($('s_mf'), 0, 1000), tz: $('s_tz').checked, clvl: clampInt($('s_clvl'), 1, 99),
+      mode: $('s_mode').value, tier: parseInt($('s_tier').value, 10) || 1,
       ladder: $('s_ladder').value === '1', act: parseInt($('s_act').value, 10),
     };
   }
@@ -78,7 +85,8 @@
     return st;
   }
 
-  const rankTag = (r) => r === 'regular' ? '' : ' <span class="tag ' + r + '">' + r + '</span>';
+  const HERALD_TIP = 'ASSUMED drop table: the game data does not name the herald TC (monstats TreasureClassHerald is empty), so this uses the monster\'s desecrated-unique TC, group-upgraded at mlvl + herald tier boost. The boost only matters while mlvl + boost is below the group top (level 85).';
+  const rankTag = (r) => r === 'regular' ? '' : r === 'herald' ? ' <span class="tag herald" title="' + esc(HERALD_TIP) + '">herald (assumed TC)</span>' : ' <span class="tag ' + r + '">' + r + '</span>';
   const srcCols = [
     { k: 'name', label: 'Monster', l: 1, get: (r) => r.src.name, html: (r) => esc(r.src.name) + rankTag(r.src.rank) },
     { k: 'area', label: 'Area', l: 1, get: (r) => r.src.areaName, html: (r) => esc(r.src.areaName) + (r.src.tz ? ' <span class="tz">TZ</span>' : '') },
@@ -125,15 +133,16 @@
     { k: 'puni', label: 'P(unique)', get: (r) => r.c.unique, fmt: (r) => pct(r.c.unique) },
     { k: 'ptar', label: 'P(target)', get: (r) => r.c.target, fmt: (r) => pct(r.c.target) },
     { k: 'oneN', label: '1 in N kills', get: (r) => r.c.target, fmt: (r) => oneIn(r.c.target) },
-    { k: 'runs', label: 'kills/run', get: (r) => r.src.perRun, fmt: (r) => r.src.perRun < 10 ? r.src.perRun.toFixed(2) : r.src.perRun.toFixed(0) },
+    { k: 'sunder', label: 'Sunder/kill (heralds)', get: (r) => r.sunder || 0, fmt: (r) => r.src.herald ? pct(r.sunder) : '' },
+    { k: 'runs', label: 'kills/run', get: (r) => r.src.perRun, fmt: (r) => r.src.herald ? 'n/a' : r.src.perRun < 10 ? r.src.perRun.toFixed(2) : r.src.perRun.toFixed(0) },
     { k: 'perrun', label: 'per run', get: (r) => r.c.target * r.src.perRun, fmt: (r) => pct(r.c.target * r.src.perRun) },
     { k: 'oneR', label: '1 in N runs', get: (r) => r.c.target * r.src.perRun, fmt: (r) => oneIn(r.c.target * r.src.perRun) },
   ]);
 
   let srcCache = { sig: '', list: null };
   function getSources(sel) {
-    const ctx = E.getCtx({ players: sel.players, party: sel.party, ladder: sel.ladder, tz: sel.tz, clvl: sel.clvl, mf: sel.mf });
-    const sig = JSON.stringify([sel.tz, sel.clvl]);
+    const ctx = E.getCtx({ players: sel.players, party: sel.party, ladder: sel.ladder, tz: sel.tz, clvl: sel.clvl, mf: sel.mf, tier: sel.tier });
+    const sig = JSON.stringify([sel.tz, sel.clvl, sel.mode, sel.tier, sel.players, sel.party]);
     if (srcCache.sig !== sig) srcCache = { sig, list: E.sources(ctx) };
     return { ctx, list: srcCache.list };
   }
@@ -152,7 +161,7 @@
       if (sel.tz && !src.tz) continue;
       if (f && (src.name + ' ' + src.areaName).toLowerCase().indexOf(f) < 0) continue;
       const c = E.chanceFor(ctx, src, target1, sel.mf);
-      if (c.target > 0) rows.push({ src, c });
+      if (c.target > 0) rows.push({ src, c, sunder: src.herald ? E.sunderChance(ctx, src) : 0 });
     }
     T1.rows = rows; T1.limit = parseInt($('n1').value, 10);
     const r = T1.render();
@@ -170,7 +179,7 @@
     { k: 'paff', label: 'P(affixes | quality)', get: (r) => r.pAff, fmt: (r) => pct(r.pAff) },
     { k: 'ptot', label: 'P per kill', get: (r) => r.pTotal, fmt: (r) => pct(r.pTotal) },
     { k: 'oneN', label: '1 in N kills', get: (r) => r.pTotal, fmt: (r) => oneIn(r.pTotal) },
-    { k: 'runs', label: 'kills/run', get: (r) => r.src.perRun, fmt: (r) => r.src.perRun < 10 ? r.src.perRun.toFixed(2) : r.src.perRun.toFixed(0) },
+    { k: 'runs', label: 'kills/run', get: (r) => r.src.perRun, fmt: (r) => r.src.herald ? 'n/a' : r.src.perRun < 10 ? r.src.perRun.toFixed(2) : r.src.perRun.toFixed(0) },
     { k: 'perrun', label: 'P per run', get: (r) => r.perRun, fmt: (r) => pct(r.perRun) },
     { k: 'oneR', label: '1 in N runs', get: (r) => r.perRun, fmt: (r) => oneIn(r.perRun) },
   ]);
@@ -179,7 +188,7 @@
   function baseCodes(b) {
     if (!b) return [];
     if (b.kind === 'base') return [b.code];
-    return b.codes;
+    return b.codes.filter((c) => E.spOf(E.items[c]));
   }
   function refreshStats() {
     const codes = baseCodes(base2);
@@ -216,7 +225,7 @@
     const sel = S = readSel(); saveSel();
     const opts = { codes: baseCodes(base2), quality: $('ql2').value, conds: cs, mf: sel.mf, diff: sel.diff, act: sel.act,
       area: parseInt($('ar2').value || '0', 10), rolls: parseInt($('mc2').value, 10) };
-    const ctxS = { players: sel.players, party: sel.party, ladder: sel.ladder, tz: sel.tz, clvl: sel.clvl, mf: sel.mf };
+    const ctxS = { players: sel.players, party: sel.party, ladder: sel.ladder, tz: sel.tz, clvl: sel.clvl, mf: sel.mf, tier: sel.tier };
     const id = ++reqId;
     $('prog2').hidden = false; $('prog2').value = 0; $('info2').textContent = 'Working...'; $('go2').disabled = true;
     const t0 = performance.now();
@@ -245,7 +254,7 @@
         else if (m.type === 'result') finish(m);
         else if (m.type === 'error') { $('go2').disabled = false; $('prog2').hidden = true; $('info2').textContent = 'Error: ' + m.message; }
       };
-      worker.postMessage({ type: 'search', id, ctx: ctxS, opts });
+      worker.postMessage({ type: 'search', id, ctx: ctxS, opts, mode: sel.mode });
     } else {
       // fallback (no Worker support): run on the main thread
       setTimeout(() => {
@@ -262,8 +271,10 @@
     if (!resp.ok) throw new Error('data.json missing - run: python build.py');
     const data = await resp.json();
     E = Engine.create(data);
+    E.setMode($('s_mode').value); updTier();
     $('dataInfo').textContent = 'data built ' + data.meta.built + ' from ' + data.meta.source;
     INDEX = E.searchIndex();
+    { const qs0 = new URLSearchParams(location.search); if (qs0.get('mode')) $('s_mode').value = qs0.get('mode'); if (qs0.get('tz')) { $('s_tz').checked = true; $('s_clvl').value = qs0.get('tz'); } if (qs0.get('tier')) $('s_tier').value = qs0.get('tier'); if (qs0.get('mf')) $('s_mf').value = qs0.get('mf'); E.setMode($('s_mode').value); updTier(); }
     const noWorker = new URLSearchParams(location.search).has('noworker');
     try { if (noWorker) throw new Error('worker disabled'); worker = new Worker('worker.js'); worker.onerror = () => { worker = null; }; } catch (e) { worker = null; }
 
@@ -272,13 +283,13 @@
     tabs.forEach((t, i) => $(t).onclick = () => {
       tabs.forEach((x, j) => { $(x).classList.toggle('on', i === j); $('tab' + (j + 1)).classList.toggle('on', i === j); });
     });
-    for (const k of KEYS) $(k).addEventListener('change', () => { saveSel(); if (target1) runTab1(); });
+    for (const k of KEYS) $(k).addEventListener('change', () => { saveSel(); E.setMode($('s_mode').value); updTier(); if (k === 's_mode' && base2) { if (base2.kind === 'base' && !E.spOf(E.items[base2.code])) base2 = null; refreshStats(); } if (target1) runTab1(); });
     $('s_act').addEventListener('change', () => { if (target1) runTab1(); });
 
     // tab 1
     T1 = makeTable($('tb1'), cols1, 'ptar', -1);
     T1.onSort = () => {};
-    autocomplete($('q1'), $('ac1'), () => INDEX, (x) => { target1 = x; runTab1(); });
+    autocomplete($('q1'), $('ac1'), () => INDEX.filter((x) => x.kind !== 'base' || E.spOf(E.items[x.code])), (x) => { target1 = x; runTab1(); });
     $('f1').addEventListener('input', () => { clearTimeout(runTab1.t); runTab1.t = setTimeout(runTab1, 250); });
     $('r1').addEventListener('change', runTab1);
     $('n1').addEventListener('change', runTab1);
@@ -293,7 +304,7 @@
       typeOpts.push({ kind: 'type', code, codes: list, label: 'Any ' + E.types[code].n.toLowerCase() + ' (' + list.length + ' bases, type ' + code + ')' });
     }
     BASEOPTS = typeOpts.concat(INDEX.filter((x) => x.kind === 'base' && !E.items[x.code].an));
-    autocomplete($('q2'), $('ac2'), () => BASEOPTS, (x) => {
+    autocomplete($('q2'), $('ac2'), () => BASEOPTS.filter((x) => x.kind === 'type' ? x.codes.some((c) => E.spOf(E.items[c])) : E.spOf(E.items[x.code])), (x) => {
       base2 = x;
       const q = $('ql2');
       refreshStats();

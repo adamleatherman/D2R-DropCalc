@@ -38,7 +38,7 @@
   tr:hover td { background:#20242c; }
   .tbl { max-height:68vh; overflow:auto; border:1px solid var(--line); border-radius:6px; }
   .tag { display:inline-block; padding:0 6px; border-radius:8px; font-size:11px; background:var(--panel2); color:var(--dim); }
-  .tag.champion { color:#8ab4ff; } .tag.unique { color:#e6c34d; } .tag.minion { color:#b79ad8; } .tag.super { color:#7fe0c0; } .tag.boss { color:#ff8f6a; }
+  .tag.champion { color:#8ab4ff; } .tag.unique { color:#e6c34d; } .tag.minion { color:#b79ad8; } .tag.super { color:#7fe0c0; } .tag.boss { color:#ff8f6a; } .tag.herald { color:#ff6ad5; cursor:help; }
   .cond { display:flex; gap:6px; align-items:center; margin:3px 0; }
   .cond input[list] { width:340px; max-width:60vw; }
   progress { width:240px; }
@@ -55,9 +55,11 @@
     <label>Players in game <input type="number" id="s_players" min="1" max="8" value="1"></label>
     <label>Partied nearby (incl. you) <input type="number" id="s_party" min="1" max="8" value="1"></label>
     <label>Magic Find % <input type="number" id="s_mf" min="0" max="1000" value="0"></label>
+    <label>Game mode <select id="s_mode"><option value="rotw" selected>RotW (Reign of the Warlock)</option><option value="lod">LoD (Lord of Destruction)</option></select></label>
     <label class="chk"><input type="checkbox" id="s_tz"> Terror zone</label>
     <label>Character level <input type="number" id="s_clvl" min="1" max="99" value="85"></label>
-    <label>Mode <select id="s_ladder"><option value="1" selected>Ladder</option><option value="0">Non-ladder</option></select></label>
+    <label id="l_tier" hidden title="Herald tier. ASSUMED herald drop table: the monster's desecrated-unique TC, group-upgraded at mlvl + tier boost (0/3/6/9/12). The game data does not name the real herald TC.">Herald tier <select id="s_tier"><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option></select></label>
+    <label>Ladder <select id="s_ladder"><option value="1" selected>Ladder</option><option value="0">Non-ladder</option></select></label>
     <label>Act <select id="s_act"><option value="0">All</option><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option></select></label>
   </div>
 </header>
@@ -73,7 +75,7 @@
         <div class="ac"><input id="q1" placeholder="type to search, e.g. Shako, Ber, Tyrael, Griffon" autocomplete="off"><ul id="ac1" hidden></ul></div>
       </label>
       <label>Source filter <input id="f1" placeholder="monster or area text" style="width:200px"></label>
-      <label>Rank <select id="r1"><option value="">All</option><option>regular</option><option>champion</option><option>unique</option><option>minion</option><option>super</option><option>boss</option></select></label>
+      <label>Rank <select id="r1"><option value="">All</option><option>regular</option><option>champion</option><option>unique</option><option>minion</option><option>super</option><option>boss</option><option>herald</option></select></label>
       <label>Rows <select id="n1"><option>100</option><option selected>300</option><option>1000</option><option>5000</option></select></label>
     </div>
     <div class="note" id="info1">Choose an item. Results use the global selectors above. Probabilities are per kill; the per-run columns multiply by the estimated number of such kills per area clear (rough).</div>

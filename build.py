@@ -14,9 +14,9 @@ SRC = sys.argv[1] if len(sys.argv) > 1 else r"C:\Users\thein\D2R-excel"
 OUT = sys.argv[2] if len(sys.argv) > 2 else os.path.join(os.path.dirname(os.path.abspath(__file__)), "data.json")
 
 
-def rd(name):
-    """Read a tab separated table -> list of dicts (header names as keys)."""
-    path = os.path.join(SRC, name + ".txt")
+def rd(name, sub=""):
+    """Read a tab separated table -> list of dicts (header names as keys). sub="base" reads the LoD-mode copy."""
+    path = os.path.join(SRC, sub, name + ".txt") if sub else os.path.join(SRC, name + ".txt")
     with open(path, encoding="utf-8", errors="replace") as f:
         lines = [l.rstrip("\r\n").split("\t") for l in f]
     head = lines[0]
@@ -117,6 +117,14 @@ for fname, kind in (("armor", "a"), ("weapons", "w"), ("misc", "m")):
         # jewels hold at most 4 affixes (CONFIG in engine), nothing needed here
         items[code] = it
 
+# Game modes: the root folder is Reign of the Warlock (rotw); base\ is Lord of Destruction (lod).
+# Only armor.txt (grimoire spawnable flags) and automagic.txt differ. Store lod overrides only.
+if os.path.isdir(os.path.join(SRC, "base")):
+    for r in rd("armor", "base"):
+        code = r.get("code")
+        if code in items and num(r.get("spawnable")) != items[code]["sp"]:
+            items[code]["spl"] = num(r.get("spawnable"))
+
 # ------------------------------------------------------------ treasure classes
 tcs = {}
 tc_order = []
@@ -209,6 +217,7 @@ for r in rd("monstats"):
         "g": [num(r.get("MinGrp"), 1), num(r.get("MaxGrp"), 1)],
         "pm": [num(r.get("PartyMin")), num(r.get("PartyMax"))],
         "npc": num(r.get("npc")),
+        "nh": num(r.get("CannotHerald")),
         "en": num(r.get("enabled")),
     }
     tc = [{}, {}, {}]
@@ -387,9 +396,27 @@ def affix_rows(fname, kind):
     return out
 
 
+def automagic_lod(rows):
+    """Mark automagic rows whose spawnable flag differs in the LoD folder (spl)."""
+    if not os.path.isdir(os.path.join(SRC, "base")):
+        return
+    base = {}
+    for r in rd("automagic", "base"):
+        base[(r.get("Name"), r.get("group"), r.get("level"))] = num(r.get("spawnable"))
+    raw = [r for r in rd("automagic") if r.get("Name")]
+    # affix_rows drops rows with frequency 0; rebuild the same key order
+    for a, r in zip([x for x in rows], [r for r in raw if num(r.get("version"), 0) >= 1 and num(r.get("frequency"), 0) > 0]):
+        k = (r.get("Name"), r.get("group"), r.get("level"))
+        if k in base and base[k] != a["sp"]:
+            a["spl"] = base[k]
+        elif k not in base:
+            a["spl"] = 0
+
+
 prefixes = affix_rows("magicprefix", "p")
 suffixes = affix_rows("magicsuffix", "s")
 automagic = affix_rows("automagic", "a")
+automagic_lod(automagic)
 
 # ----------------------------------------------------------- terror zones
 tz = {"bounds": {}, "levels": {}, "zones": {}}
@@ -404,6 +431,15 @@ for mode in ("expansion", "rotw"):
                                    "boost": d.get("boost_level", 2), "xp": d.get("boost_experience_percent", 0),
                                    "ladder": gd.get(diff, {}).get("ladder_enabled", True),
                                    "nonladder": gd.get(diff, {}).get("non_ladder_enabled", True)})
+tz["herald"] = []
+for t in (dz["game_difficulties"].get("rotw", {}).get("hell", {}).get("defaults", {}).get("herald_tiers", [])):
+    tz["herald"].append({
+        "boost": t.get("herald_treasure_class_level_boost", 0),
+        "minions": t.get("min_minions", 0), "mods": t.get("min_unique_mods", 0),
+        "slope": t.get("zone_chance_slope"), "mid": t.get("zone_chance_midpoint"),
+        "asym": t.get("zone_chance_asymptote"), "shift": t.get("zone_chance_vertical_shift"),
+        "hp": t.get("herald_health_boost_percent"), "dmg": t.get("herald_damage_boost_percent"),
+    })
 for z in dz.get("zones", []) + [zz for g in dz.get("manual_zones", []) for zz in g.get("zones", [])]:
     ids = []
     for lv in z.get("levels", []):

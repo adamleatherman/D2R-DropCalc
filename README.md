@@ -12,7 +12,7 @@ python test_engine.py                      # validation (starts its own server +
 
 Files: `build.py` (tables -> `data.json`), `engine.js` (all math, no DOM), `app.js` + `index.html` (UI), `worker.js` (Web Worker for the affix search), `test.html` + `tests.js` + `test_engine.py` (validation). The game folder is only read.
 
-Global selectors (saved in localStorage): difficulty, players in game, partied players nearby (including you), MF %, terror zone on/off + character level, ladder/non-ladder, act.
+Global selectors (saved in localStorage): game mode (LoD / RotW), difficulty, players in game, partied players nearby (including you), MF %, terror zone on/off + character level + herald tier (RotW, Hell, terror zone only), ladder/non-ladder, act.
 
 * **Tab 1, item search** - autocomplete over bases, runes, unique and set items. Every monster/rank/area/difficulty that can drop it, with mlvl, P(base), P(magic), P(rare), P(set), P(unique), P(target), "1 in N kills", kills per run, per-run chance and "1 in N runs". Click headers to sort; filter by text, rank, difficulty, act. For a unique/set item P(target) is the chance of that exact item.
 * **Tab 2, affix finder** - pick a base or "Any <base type>", magic or rare, add conditions (stat + minimum value; the stat list is built from the affixes that can actually roll on that base). Ranked list by P(base) x P(quality) x P(all conditions at that affix level). Magic is exact enumeration, rare is a seeded Monte Carlo (50k/200k/1M rolls per distinct affix pool, in a Web Worker). Shows the minimum affix level / monster level for each condition. Choosing a single area ranks by per-run chance.
@@ -44,7 +44,28 @@ Global selectors (saved in localStorage): difficulty, players in game, partied p
 | Generic TC brackets | `weapN`/`armoN` = items with qlvl in (N-3, N], weight = `rarity` (3 normal, 1 class items/wands/staves...) | PureDiablo Item Generation page |
 | Unique/set with nothing eligible | unique -> rare, set -> magic | PureDiablo Item Generation page |
 
-## Validation (`python test_engine.py`: 123 checks, 0 failures)
+## Game modes
+
+`D2R-excel\base\` is the **Lord of Destruction** mode (not classic) and the root folder is **Reign of the Warlock**. Of the 91 tables, 89 are byte-identical; only these differ, and `build.py` stores just the LoD overrides (`spl` flags) in `data.json`:
+
+* `armor.txt`: the 15 Warlock grimoires (`wa1`..`waf`, type `grim`) are spawnable only in RotW. In RotW they join the generated `armoN` pools and dilute the other armor bases (a mid-level base such as `xhl` has about 4% better per-kill odds in LoD, checked against an independent bracket-weight calculation).
+* `automagic.txt`: the 8 grimoire auto-mods (group 306) exist only in RotW.
+
+`CONFIG.gameMode` (`'lod'` | `'rotw'`, default `'rotw'`; UI selector "Game mode") picks armoN pool membership, the automagic set, the search index, the Tab 2 base list and the `desecratedzones.json` section (`expansion` for LoD, `rotw` for RotW; the Normal/Nightmare/Hell bounds are identical). Grimoires and their affixes never appear in LoD. `Engine.setMode()` clears the affected caches.
+
+## Heralds (RotW, Hell, terror zone on)
+
+Data-driven (`desecratedzones.json` -> `rotw.hell.defaults.herald_tiers`): five tiers with `herald_treasure_class_level_boost` 0/3/6/9/12 (data guide: "boost to the treasure class level of a Herald... not a boost to the item level dropped"), minion counts, unique mod counts, HP/damage boosts and the logistic spawn-chance constants.
+
+Assumed (labeled in the UI with an "assumed TC" badge and tooltip):
+
+* **Which TC a herald drops from.** `monstats.txt` has `TreasureClassHerald`, `(N)`, `(H)` columns but they are empty for every monster in 3.3 and no TC name contains "Herald", so the game must use a hard-coded fallback. The engine assumes the monster's `TreasureClassDesecratedUnique(H)` TC (group 37, `Act N (H) Unique A-C Desecrated`, Picks -2 = Sunder charms + items), group-upgraded at `mlvl + tier boost`. Herald mlvl follows the existing terror-zone unique rule (+3). One herald row is created per area monster type with `CannotHerald` not set.
+* **The tier boost only matters while `mlvl + boost` is below 85**, the top level of group 37. At low character levels it does (clvl 60: tier 1 resolves to `Act 2 (H) Unique C Desecrated`, tier 5 to `Act 5 (H) Unique C Desecrated`), but with a high character level the unique mlvl is already above 85 and every tier resolves to the same TC. Community reports that higher tiers drop more suggest a hard-coded extra we cannot see in the data.
+* **Sunder charms.** The community type split (Cold 29.70, Fire 29.70, Lightning 19.80, Poison 11.88, Physical 5.94, Magic 2.97 %) equals the `Sunder Charms` TC weights 30/30/20/12/6/3 (sum 101, NoDrop 23899), so herald Sunders roll through that TC, including the player-count NoDrop adjustment. Whether the rate rises with tier is disputed (a Reddit datamine quoted on diablo2.io says tier 5 is 3x tier 1; another poster says it does not change). `CONFIG.heraldSunderTierMultiplier` (default all 1, i.e. the data tables) applies only to the "Sunder/kill" column. With the tables, tier 1 and 1 player gives 0.4208% (1 in 238) per herald kill versus the community 0.3677% (1 in 272); the difference is not forced to agree (that number may predate 3.3, which changed Latent Sunder's minimum drop level 69 -> 75).
+* Not modelled: when a herald spawns (zone completion logistic), so there is no per-run herald odds.
+
+Sources: https://diablo2.io/post4136083.html (datamine thread), https://www.icy-veins.com/d2/reign-of-the-warlock-endgame-changes-for-diablo-ii-resurrected, https://news.blizzard.com/en-us/article/24266710/diablo-ii-resurrected-ptr-3-2-now-live, and the data guide pages `desecratedzones` and `monstats` (`TreasureClassHerald`).
+## Validation (`python test_engine.py`: 147 checks, 0 failures)
 
 1. Independent Python re-implementation reading the raw `.txt` tables: the engine's expected unique/set/rare/magic items per kill match to 1e-9 for Hell Andariel, Mephisto, Countess, Duriel and Baal at 0 and 300 MF with 1 and 3 players, and the chance of specific items matches.
 2. Published figures: effective MF for 200% MF = 111 (PureDiablo example), Hell Baal unique `p` for a qlvl-85 base at 200% MF = 938 (page says 939; one rounding step, base not stated); "Players X" NoDrop worked example 60/22/11/5 reproduced exactly; Hell Countess: 5 item rolls with NoDrop 19 and 3 rune rolls with NoDrop 5 vs Prob 15 give P(no rune) = 1/64 as the wiki states. Item roll NoDrop share is 19/68 not 19/67 because D2R 3.3 added a `pk1` entry.
