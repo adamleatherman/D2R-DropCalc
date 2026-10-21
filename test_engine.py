@@ -655,6 +655,20 @@ def main():
     check("trialsFor p<0 -> no value", 0 if tr["neg"] is None else 1, 0, 0)
     check("trialsFor p=1 -> 1", tr["one"], 1, 0)
     check("trialsFor tiny p=1e-12, 50% ~ ln2/p", tr["tiny"], math.ceil(math.log(2) * 1e12), 1e-9)
+    BQ = js["baseQuality"]
+    check("Hell Baal, Archon Plate: P(base) > 0", 1 if BQ["baal"]["base"] > 0 else 0, 1, 0)
+    check("Hell Baal, Archon Plate: low+normal+superior == 0 (boss TC Magic=1024)", BQ["baal"]["low"] + BQ["baal"]["normal"] + BQ["baal"]["hq"], 0)
+    for rk in ("regular", "champion"):
+        r = BQ[rk]
+        ROWS.append(("PASS" if r else "FAIL", "Hell %s source that drops Archon Plate exists" % rk, r["name"] if r else "none", "-", ""))
+        if not r:
+            FAIL.append("bq " + rk); continue
+        c = r["c"]; wq = c["low"] + c["normal"] + c["hq"]
+        if rk == "regular":
+            check("Hell regular (%s), Archon Plate: low+normal+superior > 0" % r["name"], 1 if wq > 0 else 0, 1, 0)
+            check("Hell regular (%s), Archon Plate: base == magic+rare+set+unique+hq+normal+low" % r["name"], c["base"], c["magic"] + c["rare"] + c["set"] + c["unique"] + wq, 1e-9)
+        else:
+            check("Hell champion (%s), Archon Plate: low+normal+superior == 0" % r["name"], wq, 0)
     # ---- print
     w = max(len(r[1]) for r in ROWS)
     for st, name, got, want, note in ROWS:

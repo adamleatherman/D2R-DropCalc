@@ -131,6 +131,8 @@
   let target1 = null, T1 = null;
   const QNOTE = 'Herald rows are NOT adjusted for known-but-unquantified patch changes: 3.2 slightly reduced Unique/Set/Rare for heralds, 3.3 increased Rare+ for tiers 3+. Sizes unknown (CONFIG.heraldQualityAdj, default no-op).';
   const isSun = () => target1 && target1.kind === 'unique' && E.isSunder(target1.id);
+  const isWhiteBase = () => target1 && target1.kind === 'base' && (E.items[target1.code].k === 'a' || E.items[target1.code].k === 'w') && !E.items[target1.code].an;
+  const BQN = { white: 'white (low+normal+superior)', normsup: 'normal+superior', sup: 'superior only' };
   const fmtPath = (v) => v === null ? 'unknown base' : pct(v);
   const cols1 = srcCols.concat([
     { k: 'sTable', show: isSun, label: 'Sunder: table path', note: 'Data-driven: the Sunder Charms TC inside desecrated champ/unique/boss/herald TCs, incl. player-count NoDrop.', get: (r) => r.sp ? r.sp.table : 0, fmt: (r) => pct(r.sp.table) },
@@ -138,6 +140,9 @@
     { k: 'sMf', show: isSun, label: 'Sunder: MF path', note: 'Hard-coded rule (3.2/3.3): unique grand charm roll, Hell only, mlvl >= 75. 3.3 reduced the MF rate by an unknown amount (CONFIG.sunderMfPenalty, default 1 = unreduced).', get: (r) => r.sp ? r.sp.mf : 0, fmt: (r) => pct(r.sp.mf) },
     { k: 'sTotal', show: isSun, label: 'Sunder: total', note: 'Combined chance of the three paths; shown only when every part is known.', get: (r) => r.sp && r.sp.total !== null ? r.sp.total : -1, fmt: (r) => r.sp.total === null ? '-' : pct(r.sp.total) },
     { k: 'pbase', label: 'P(base)', get: (r) => r.c.base, fmt: (r) => pct(r.c.base) },
+    { k: 'plow', show: isWhiteBase, label: 'P(low)', note: 'Low quality (crude/cracked/damaged/low quality) base. Boss, champion and unique TCs force Magic=1024, so this is 0 there.', get: (r) => r.c.low, fmt: (r) => pct(r.c.low) },
+    { k: 'pnorm', show: isWhiteBase, label: 'P(normal)', note: 'Normal quality base (what is left after unique/set/rare/magic/superior/low).', get: (r) => r.c.normal, fmt: (r) => pct(r.c.normal) },
+    { k: 'psup', show: isWhiteBase, label: 'P(superior)', note: 'Superior quality base.', get: (r) => r.c.hq, fmt: (r) => pct(r.c.hq) },
     { k: 'pmag', note: QNOTE, label: 'P(magic)', get: (r) => r.c.magic, fmt: (r) => pct(r.c.magic) },
     { k: 'prare', note: QNOTE, label: 'P(rare)', get: (r) => r.c.rare, fmt: (r) => pct(r.c.rare) },
     { k: 'pset', note: QNOTE, label: 'P(set)', get: (r) => r.c.set, fmt: (r) => pct(r.c.set) },
@@ -173,6 +178,8 @@
     const t0 = performance.now();
     const { ctx, list } = getSources(sel);
     const f = $('f1').value.trim().toLowerCase(), rk = $('r1').value;
+    $('l_bq1').hidden = !isWhiteBase();
+    const bq = isWhiteBase() ? $('bq1').value : '';
     const rows = [];
     for (const src of list) {
       if (sel.diff >= 0 && src.diff !== sel.diff) continue;
@@ -181,13 +188,14 @@
       if (sel.tz && !src.tz) continue;
       if (f && (src.name + ' ' + src.areaName).toLowerCase().indexOf(f) < 0) continue;
       const c = E.chanceFor(ctx, src, target1, sel.mf);
+      if (bq) c.target = E.baseQualityChance(c, bq);
       if (c.target > 0) rows.push({ src, c, sp: isSun() ? E.sunderPaths(ctx, src, target1.id, sel.mf) : null });
     }
     T1.rows = rows; T1.limit = parseInt($('n1').value, 10);
     const r = T1.render();
     const it = target1.kind === 'base' ? E.items[target1.code] : E.items[(target1.kind === 'unique' ? E.uniqById : E.setById)[target1.id].code];
     $('info1').textContent = target1.label + '  |  base qlvl ' + it.q + '  |  ' + r.total.toLocaleString() + ' sources can drop it (showing ' + r.shown + ')  |  N=' + ctx.N +
-      '  MF=' + sel.mf + '%  |  ' + Math.round(performance.now() - t0) + ' ms. Click a column header to sort.';
+      '  MF=' + sel.mf + '%' + (bq ? '  |  base quality: ' + BQN[bq] : '') + '  |  ' + Math.round(performance.now() - t0) + ' ms. Click a column header to sort.';
   }
 
   // ---------------- Tab 2 ----------------
@@ -312,6 +320,7 @@
     autocomplete($('q1'), $('ac1'), () => INDEX.filter((x) => x.kind !== 'base' || E.spOf(E.items[x.code])), (x) => { target1 = x; runTab1(); });
     $('f1').addEventListener('input', () => { clearTimeout(runTab1.t); runTab1.t = setTimeout(runTab1, 250); });
     $('r1').addEventListener('change', runTab1);
+    $('bq1').addEventListener('change', runTab1);
     $('n1').addEventListener('change', runTab1);
 
     // tab 2

@@ -658,6 +658,11 @@
       return res;
     }
 
+    /** per-kill chance of the base target restricted to a base quality: '' / 'any' | 'white' (low+normal+superior) | 'normsup' | 'sup' */
+    function baseQualityChance(c, mode) {
+      return mode === 'white' ? c.low + c.normal + c.hq : mode === 'normsup' ? c.normal + c.hq : mode === 'sup' ? c.hq : c.base;
+    }
+
     const sunderIds = new Set();
     for (const e of (TC['Sunder Charms'] || { e: [] }).e) sunderIds.add(e[0]);
     /** Path (a), TABLE: chance that one kill drops any Sunder charm through the 'Sunder Charms' TC (data only, includes player-count NoDrop). */
@@ -1044,7 +1049,7 @@
 
     return {
       CONFIG, data: D, DIFFS, items, types, getCtx, playersN, adjNoDrop, dist, upgradeTC,
-      setMode, heraldsAvailable, sunderChance, sunderPaths, isSunder, adjQuality, heraldSpawnPct, spOf, quality, qualityTotals, sources, srcDist, chanceFor, affixLevel, minIlvlForAlvl, eligible, affixProb, minLevels,
+      setMode, heraldsAvailable, sunderChance, sunderPaths, isSunder, adjQuality, heraldSpawnPct, spOf, quality, qualityTotals, sources, srcDist, chanceFor, baseQualityChance, affixLevel, minIlvlForAlvl, eligible, affixProb, minLevels,
       statList, affixSearch, searchIndex, baseTypes, metaCache, uniqById, setById, uniqByCode, setByCode, prettyId, tzLevel,
       eligibleUniques, eligibleSets, condProb, trialsFor,
     };
