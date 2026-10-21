@@ -439,6 +439,15 @@ def main():
     check("herald quality adj t12 unique x0.5 halves tier 1", ad["half1"], ad["default1"][0] * 0.5, 1e-9)
     check("herald quality adj t3plus rare+ x2 doubles tier 3 unique", ad["dbl3"], ad["default3"][0] * 2, 1e-9)
     check("herald adj never touches non-herald rows", ad["nonHerald"][1], ad["nonHerald"][0], 1e-12)
+    tr = js["trials"]
+    for q, want in zip((25, 50, 75, 99), (1, 1, 2, 7)):
+        check("trialsFor p=0.5, q=%d%% -> %d" % (q, want), tr["half"][(25, 50, 75, 99).index(q)], want, 0)
+    check("trialsFor p=1/449, 50% -> 311", tr["p449"], 311, 0)
+    check("trialsFor p=1/449, 99% = ceil(ln .01 / ln(1-p))", tr["p449_99"], math.ceil(math.log(0.01) / math.log1p(-1 / 449)), 0)
+    check("trialsFor p=0 -> no value", 0 if tr["zero"] is None else 1, 0, 0)
+    check("trialsFor p<0 -> no value", 0 if tr["neg"] is None else 1, 0, 0)
+    check("trialsFor p=1 -> 1", tr["one"], 1, 0)
+    check("trialsFor tiny p=1e-12, 50% ~ ln2/p", tr["tiny"], math.ceil(math.log(2) * 1e12), 1e-9)
     # ---- print
     w = max(len(r[1]) for r in ROWS)
     for st, name, got, want, note in ROWS:

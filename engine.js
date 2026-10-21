@@ -868,11 +868,18 @@
       return m;
     }
 
+    // trials needed to have found the target with cumulative probability q, given per-trial chance p (null = never)
+    function trialsFor(p, q) {
+      if (!(p > 0)) return null;
+      if (p >= 1) return 1;
+      return Math.max(1, Math.ceil(Math.log1p(-q) / Math.log1p(-p)));
+    }
+
     return {
       CONFIG, data: D, DIFFS, items, types, getCtx, playersN, adjNoDrop, dist, upgradeTC,
       setMode, heraldsAvailable, sunderChance, sunderPaths, isSunder, adjQuality, heraldSpawnPct, spOf, quality, qualityTotals, sources, srcDist, chanceFor, affixLevel, minIlvlForAlvl, eligible, affixProb, minLevels,
       statList, affixSearch, searchIndex, baseTypes, metaCache, uniqById, setById, uniqByCode, setByCode, prettyId, tzLevel,
-      eligibleUniques, eligibleSets, condProb,
+      eligibleUniques, eligibleSets, condProb, trialsFor,
     };
   }
 

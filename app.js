@@ -7,7 +7,7 @@
   let worker = null, reqId = 0;
 
   // ---------------- persistent selectors ----------------
-  const KEYS = ['s_mode', 's_tier', 's_bonus', 's_diff', 's_players', 's_party', 's_mf', 's_tz', 's_clvl', 's_ladder', 's_act'];
+  const KEYS = ['s_mode', 's_tier', 's_bonus', 's_diff', 's_players', 's_party', 's_mf', 's_tz', 's_clvl', 's_ladder', 's_act', 's_pct'];
   function loadSel() {
     try {
       const raw = localStorage.getItem('d2rdropcalc.sel');
@@ -59,6 +59,7 @@
     if (n < 10) return '1 in ' + n.toFixed(2);
     return '1 in ' + Math.round(n).toLocaleString('en-US');
   }
+  function countFmt(n) { return n === null ? '-' : n.toLocaleString('en-US'); }
   const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
   // ---------------- sortable table ----------------
@@ -147,6 +148,16 @@
     { k: 'perrun', label: 'per run', get: (r) => r.c.target * r.src.perRun, fmt: (r) => pct(r.c.target * r.src.perRun) },
     { k: 'oneR', label: '1 in N runs', get: (r) => r.c.target * r.src.perRun, fmt: (r) => oneIn(r.c.target * r.src.perRun) },
   ]);
+
+  // percentile columns: kills (or runs) needed to have found the target with probability q; selector s_pct = off / kills / runs
+  const PCTS = [25, 50, 75, 90, 95, 99];
+  const pctCols = PCTS.map((q) => {
+    const per = (r) => $('s_pct').value === 'runs' ? r.c.target * r.src.perRun : r.c.target;
+    const n = (r) => E.trialsFor(per(r), q / 100);
+    const unit = () => $('s_pct').value === 'runs' ? 'runs' : 'kills';
+    return { k: 'pc' + q, show: () => $('s_pct').value !== 'off', get label() { return q + '% ' + unit(); }, get note() { return 'Number of ' + unit() + ' needed to have found the target with ' + q + '% probability: ceil(ln(1-' + q / 100 + ') / ln(1-p)).'; }, get: per, fmt: (r) => countFmt(n(r)) };
+  });
+  cols1.push(...pctCols);
 
   let srcCache = { sig: '', list: null };
   function getSources(sel) {

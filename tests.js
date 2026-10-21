@@ -137,6 +137,7 @@
       const nonH = E.sources(ctx).find((s) => s.rank === 'unique' && s.mon === 'zombie1' && s.areaName === 'Blood Moor' && s.diff === 2);
       res.sunderPaths.adj.nonHerald = [manual(ctx, nonH), tot(ctx, nonH)];
       E.CONFIG.heraldQualityAdj = { t12: { unique: 1, set: 1, rare: 1 }, t3plus: { rarePlus: 1 } }; }
+    res.trials = { half: [0.25, 0.5, 0.75, 0.99].map((q) => E.trialsFor(0.5, q)), p449: E.trialsFor(1 / 449, 0.5), p449_99: E.trialsFor(1 / 449, 0.99), zero: E.trialsFor(0, 0.5), neg: E.trialsFor(-1, 0.5), one: E.trialsFor(1, 0.99), tiny: E.trialsFor(1e-12, 0.5) };
     res.sourcesCount = E.sources(ctxFor(1, 1)).length;
     res.config = E.CONFIG;
   } catch (e) { res.errors.push(String(e.stack || e)); }
