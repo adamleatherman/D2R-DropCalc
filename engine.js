@@ -13,7 +13,7 @@
   const CONFIG = {
     // --- item quality (data guide docs/itemratio-calc.html + PureDiablo Item Generation Tutorial) ---
     ratioLevel: 'base',            // 'base' = (mlvl - qlvl) uses the BASE item's qlvl (PureDiablo tutorial). 'unique' = the unique's own lvl.
-    mfThreshold: 110,              // diminishing returns only apply when MF > 110
+    mfThreshold: 10,               // diminishing returns only apply when MF > 10 (data guide's "exceeds 110%" counts item_magicbonus's baseline 100)
     mfDim: { u: 250, s: 500, r: 600 },
     itemRatioVersion: 1,           // itemratio.txt rows with Version=1 (expansion)
     // --- players (PureDiablo "Players X Overview", 1.11 formula) ---

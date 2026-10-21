@@ -166,7 +166,7 @@ class Ref:
     def succ(self, base, div, mn, qlvl, mlvl, mf, dim, tcf):
         p = base * 128 - ((mlvl - qlvl) * 128) // div
         if mf is not None:
-            eff = (mf * dim) // (mf + dim) if (dim and mf > 110) else mf
+            eff = (mf * dim) // (mf + dim) if (dim and mf > 10) else mf
             p = (p * 100) // (100 + eff)
         if mn is not None and p < mn:
             p = mn
@@ -638,6 +638,18 @@ def main():
     for q, want in zip((25, 50, 75, 99), (1, 1, 2, 7)):
         check("trialsFor p=0.5, q=%d%% -> %d" % (q, want), tr["half"][(25, 50, 75, 99).index(q)], want, 0)
     check("trialsFor p=1/449, 50% -> 311", tr["p449"], 311, 0)
+    # MF diminishing returns apply above 10% MF (data guide "exceeds 110%" includes the baseline 100); scepter unique, mlvl 31, TC unique factor 850
+    def uniq_ref(mf):
+        p = 400 * 128 - (31 - 3) * 128
+        eff = (mf * 250) // (mf + 250) if mf > 10 else mf
+        p = max((p * 100) // (100 + eff), 6400)
+        p -= (p * 850) // 1024
+        return 1.0 if p <= 128 else 128.0 / p
+    mt = js["mfThresh"]
+    for mf in (0, 10, 11, 100, 110, 111, 200):
+        check("MF %d%%: unique chance on scepter (mlvl 31, factor 850)" % mf, mt[str(mf)], uniq_ref(mf))
+    check("MF 100% counts as 71 for uniques (more than 0, less than 100)", 1 if mt["0"] < mt["100"] < mt["110"] else 0, 1, 0)
+    check("MF 111% is not worse than 110%", 1 if mt["111"] >= mt["110"] else 0, 1, 0)
     check("trialsFor p=1/449, 99% = ceil(ln .01 / ln(1-p))", tr["p449_99"], math.ceil(math.log(0.01) / math.log1p(-1 / 449)), 0)
     check("trialsFor p=0 -> no value", 0 if tr["zero"] is None else 1, 0, 0)
     check("trialsFor p<0 -> no value", 0 if tr["neg"] is None else 1, 0, 0)

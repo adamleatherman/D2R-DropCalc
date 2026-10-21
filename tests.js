@@ -196,6 +196,7 @@
     }
     E.CONFIG.dropCap = 6;
     res.trials = { half: [0.25, 0.5, 0.75, 0.99].map((q) => E.trialsFor(0.5, q)), p449: E.trialsFor(1 / 449, 0.5), p449_99: E.trialsFor(1 / 449, 0.99), zero: E.trialsFor(0, 0.5), neg: E.trialsFor(-1, 0.5), one: E.trialsFor(1, 0.99), tiny: E.trialsFor(1e-12, 0.5) };
+    res.mfThresh = Object.fromEntries([0, 10, 11, 100, 110, 111, 200].map((mf) => [mf, E.quality('scp', 31, mf, [850, 983, 983, 1024], true, 0).unique]));
     res.sourcesCount = E.sources(ctxFor(1, 1)).length;
     res.config = E.CONFIG;
   } catch (e) { res.errors.push(String(e.stack || e)); }
