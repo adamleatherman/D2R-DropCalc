@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>D2R Drop Calculator</title>
+<style>
+  :root { --bg:#14161a; --panel:#1d2026; --panel2:#262a32; --text:#e4e1d8; --dim:#9a968a; --accent:#c8a45a; --good:#7fcf7f; --bad:#e07a6a; --line:#343944; }
+  * { box-sizing: border-box; }
+  body { margin:0; font:14px/1.4 "Segoe UI", system-ui, sans-serif; background:var(--bg); color:var(--text); }
+  header { background:var(--panel); border-bottom:1px solid var(--line); padding:8px 14px; }
+  h1 { font-size:16px; margin:0 0 6px; color:var(--accent); font-weight:600; }
+  .sel { display:flex; flex-wrap:wrap; gap:10px 16px; align-items:flex-end; }
+  .sel label { display:flex; flex-direction:column; font-size:11px; color:var(--dim); gap:2px; }
+  .sel .chk { flex-direction:row; align-items:center; gap:5px; font-size:12px; color:var(--text); padding-bottom:4px; }
+  input, select, button { background:var(--panel2); color:var(--text); border:1px solid var(--line); border-radius:4px; padding:4px 6px; font:inherit; }
+  input[type=number] { width:70px; }
+  button { cursor:pointer; } button:hover { border-color:var(--accent); }
+  button.primary { background:#3a3220; border-color:var(--accent); }
+  nav { display:flex; gap:2px; padding:8px 14px 0; border-bottom:1px solid var(--line); }
+  nav button { border-radius:4px 4px 0 0; border-bottom:none; padding:6px 14px; }
+  nav button.on { background:var(--accent); color:#111; border-color:var(--accent); }
+  main { padding:12px 14px 40px; }
+  .tab { display:none; } .tab.on { display:block; }
+  .row { display:flex; flex-wrap:wrap; gap:8px 14px; align-items:flex-end; margin-bottom:10px; }
+  .row label { display:flex; flex-direction:column; font-size:11px; color:var(--dim); gap:2px; }
+  .ac { position:relative; } .ac input { width:420px; max-width:90vw; }
+  .ac ul { position:absolute; z-index:5; left:0; right:0; top:100%; margin:0; padding:0; list-style:none; background:var(--panel); border:1px solid var(--accent); max-height:320px; overflow:auto; }
+  .ac li { padding:4px 8px; cursor:pointer; } .ac li:hover, .ac li.hi { background:var(--panel2); }
+  .ac li small { color:var(--dim); }
+  .note { color:var(--dim); font-size:12px; margin:4px 0 8px; }
+  .box { background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:8px 10px; margin-bottom:10px; }
+  table { border-collapse:collapse; width:100%; font-size:13px; }
+  th, td { padding:3px 8px; border-bottom:1px solid var(--line); text-align:right; white-space:nowrap; }
+  th { position:sticky; top:0; background:var(--panel2); cursor:pointer; user-select:none; color:var(--accent); font-weight:600; }
+  th:hover { text-decoration:underline; }
+  td.l, th.l { text-align:left; }
+  tr:hover td { background:#20242c; }
+  .tbl { max-height:68vh; overflow:auto; border:1px solid var(--line); border-radius:6px; }
+  .tag { display:inline-block; padding:0 6px; border-radius:8px; font-size:11px; background:var(--panel2); color:var(--dim); }
+  .tag.champion { color:#8ab4ff; } .tag.unique { color:#e6c34d; } .tag.minion { color:#b79ad8; } .tag.super { color:#7fe0c0; } .tag.boss { color:#ff8f6a; }
+  .cond { display:flex; gap:6px; align-items:center; margin:3px 0; }
+  .cond input[list] { width:340px; max-width:60vw; }
+  progress { width:240px; }
+  .tz { color:#e07a6a; font-size:11px; }
+  a { color:var(--accent); }
+</style>
+</head>
+<body>
+<header>
+  <h1>D2R Drop Calculator <span class="note" id="dataInfo"></span></h1>
+  <div class="sel">
+    <label>Difficulty
+      <select id="s_diff"><option value="-1">All</option><option value="0">Normal</option><option value="1">Nightmare</option><option value="2" selected>Hell</option></select></label>
+    <label>Players in game <input type="number" id="s_players" min="1" max="8" value="1"></label>
+    <label>Partied nearby (incl. you) <input type="number" id="s_party" min="1" max="8" value="1"></label>
+    <label>Magic Find % <input type="number" id="s_mf" min="0" max="1000" value="0"></label>
+    <label class="chk"><input type="checkbox" id="s_tz"> Terror zone</label>
+    <label>Character level <input type="number" id="s_clvl" min="1" max="99" value="85"></label>
+    <label>Mode <select id="s_ladder"><option value="1" selected>Ladder</option><option value="0">Non-ladder</option></select></label>
+    <label>Act <select id="s_act"><option value="0">All</option><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option></select></label>
+  </div>
+</header>
+<nav>
+  <button id="t1" class="on">1. Item search</button>
+  <button id="t2">2. Affix finder</button>
+  <button id="t3">About / assumptions</button>
+</nav>
+<main>
+  <section id="tab1" class="tab on">
+    <div class="row">
+      <label>Item (base, unique, set item or rune)
+        <div class="ac"><input id="q1" placeholder="type to search, e.g. Shako, Ber, Tyrael, Griffon" autocomplete="off"><ul id="ac1" hidden></ul></div>
+      </label>
+      <label>Source filter <input id="f1" placeholder="monster or area text" style="width:200px"></label>
+      <label>Rank <select id="r1"><option value="">All</option><option>regular</option><option>champion</option><option>unique</option><option>minion</option><option>super</option><option>boss</option></select></label>
+      <label>Rows <select id="n1"><option>100</option><option selected>300</option><option>1000</option><option>5000</option></select></label>
+    </div>
+    <div class="note" id="info1">Choose an item. Results use the global selectors above. Probabilities are per kill; the per-run columns multiply by the estimated number of such kills per area clear (rough).</div>
+    <div class="tbl"><table id="tb1"></table></div>
+  </section>
+
+  <section id="tab2" class="tab">
+    <div class="row">
+      <label>Base or base type
+        <div class="ac"><input id="q2" placeholder="e.g. Circlet, Any amulet, Diadem, Sacred Armor" autocomplete="off"><ul id="ac2" hidden></ul></div>
+      </label>
+      <label>Quality <select id="ql2"><option value="magic">Magic</option><option value="rare">Rare</option></select></label>
+      <label>Monte Carlo rolls (rare) <select id="mc2"><option>50000</option><option selected>200000</option><option>1000000</option></select></label>
+      <label>Area <select id="ar2"><option value="">All areas</option></select></label>
+      <label>Rows <select id="n2"><option>50</option><option selected>200</option><option>1000</option></select></label>
+    </div>
+    <div class="box">
+      <div id="conds"></div>
+      <datalist id="statlist"></datalist>
+      <button id="addcond">+ add condition</button>
+      <button id="go2" class="primary">Search</button>
+      <progress id="prog2" value="0" max="1" hidden></progress>
+      <span class="note" id="info2"></span>
+    </div>
+    <div id="min2" class="note"></div>
+    <div class="tbl"><table id="tb2"></table></div>
+  </section>
+
+  <section id="tab3" class="tab">
+    <div class="box" id="about"></div>
+  </section>
+</main>
+<script src="engine.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
