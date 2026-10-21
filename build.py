@@ -245,24 +245,45 @@ for r in rd("superuniques"):
 
 # Where each boss / superunique lives (level Id from levels.txt). levels.txt has no such column,
 # so this table is hand-written from game knowledge: EDIT here if something is wrong.
+# Sources (cross-checked): AS = Arreat Summit super unique pages, classic.battle.net/diablo2exp/monsters/act{1..5}-superuniques.shtml;
+# PD = PureDiablo "Superunique Monsters Overview", https://www.purediablo.com/?p=4271 . Changes vs the earlier hand-written table are marked.
 SU_AREA = {
     "Bishibosh": 3, "Bonebreak": 18, "Coldcrow": 9, "Rakanishu": 4, "Treehead WoodFist": 5,
-    "Griswold": 38, "The Countess": 25, "Pitspawn Fouldog": 29, "Flamespike the Crawler": 15,
-    "Boneash": 33, "The Smith": 28, "Corpsefire": 8,
+    "Griswold": 38, "The Countess": 25, "Boneash": 33, "The Smith": 28, "Corpsefire": 8,
+    "Pitspawn Fouldog": 30,   # CHANGED 29 -> 30: Jail Level 2 (AS act1, PD)
     "Radament": 49, "Bloodwitch the Wild": 60, "Fangskin": 61, "Beetleburst": 43, "Leatherarm": 59,
     "Coldworm the Burrower": 64, "Fire Eye": 54, "Dark Elder": 44, "The Summoner": 74,
-    "Ancient Kaa the Soulless": 65,
-    "Web Mage the Burning": 85, "Witch Doctor Endugu": 91, "Stormtree": 89, "Sarina the Battlemaid": 81,
-    "Icehawk Riftwing": 93, "Ismail Vilehand": 83, "Geleb Flamefinger": 83, "Bremm Sparkfist": 83,
-    "Toorc Icefist": 83, "Wyand Voidfinger": 83, "Maffer Dragonhand": 83,
-    "Winged Death": 107, "The Tormentor": 107, "Taintbreeder": 106, "Riftwraith the Cannibal": 106,
+    "Ancient Kaa the Soulless": 66,   # CHANGED 65 -> 66: Tal Rasha's Tomb (random of 66-72, same levels), not Ancient Tunnels (AS act2, PD)
+    "Web Mage the Burning": 85, "Witch Doctor Endugu": 91,
+    "Stormtree": 79,          # CHANGED 89 -> 79: entering Lower Kurast / Flayer Jungle edge (AS "Entering Lower Kurast", PD); 78 and 79 share level
+    "Sarina the Battlemaid": 94,   # CHANGED 81 -> 94: Ruined Temple (AS act3, PD)
+    "Icehawk Riftwing": 92,   # CHANGED 93 -> 92: Sewers Level 1 (AS act3, PD)
+    "Ismail Vilehand": 83, "Geleb Flamefinger": 83, "Toorc Icefist": 83,   # Travincal (AS, PD)
+    "Bremm Sparkfist": 102, "Wyand Voidfinger": 102, "Maffer Dragonhand": 102,   # CHANGED 83 -> 102: Durance of Hate Level 3 (AS act3, PD)
     "Infector of Souls": 108, "Lord De Seis": 108, "Grand Vizier of Chaos": 108,
     "The Cow King": 39, "The Feature Creep": 107,
-    "Siege Boss": 128, "Axe Dweller": 118, "Bonesaw Breaker": 113, "Dac Farren": 111,
-    "Megaflow Rectifier": 113, "Eyeback Unleashed": 111, "Threash Socket": 129, "Pindleskin": 121,
-    "Snapchip Shatter": 119, "Anodized Elite": 115, "Vinvear Molech": 116, "Sharp Tooth Sayer": 112,
-    "Magma Torquer": 114, "Blaze Ripper": 117, "Frozenstein": 118, "Nihlathak Boss": 124,
+    "Siege Boss": 110,        # CHANGED 128 -> 110: Shenk the Overseer, Bloody Foothills (AS act5, PD)
+    "Dac Farren": 110,        # CHANGED 111 -> 110: Bloody Foothills (AS act5, PD)
+    "Megaflow Rectifier": 111,   # CHANGED 113 -> 111: Eldritch the Rectifier, Frigid Highlands (AS, PD)
+    "Eyeback Unleashed": 111,    # unchanged: Frigid Highlands (AS, PD)
+    "Sharp Tooth Sayer": 111,    # CHANGED 112 -> 111: Sharptooth Slayer, Frigid Highlands (AS, PD)
+    "Threash Socket": 112,    # CHANGED 129 -> 112: Arreat Plateau (AS, PD)
+    "Frozenstein": 114,       # CHANGED 118 -> 114: Frozen River (AS, PD)
+    "Bonesaw Breaker": 115,   # CHANGED 113 -> 115: Glacial Trail (AS, PD)
+    "Snapchip Shatter": 119,  # unchanged: Icy Cellar (AS, PD)
+    "Pindleskin": 121, "Nihlathak Boss": 124,
+    # ADDED: Baal's minion waves, all in the Throne of Destruction (AS act5 lists Colenzo/Achmel/Bartuc/Ventar/Lister there; PD agrees)
+    "Baal Subject 1": 131, "Baal Subject 2": 131, "Baal Subject 3": 131, "Baal Subject 4": 131, "Baal Subject 5": 131,
 }
+# Rows present in superuniques.txt that never spawn as super uniques: absent from every Arreat Summit act list and the PureDiablo
+# list (Act 4 has only Izual/Hephasto/Vizier/De Seis/Infector; Act 5 only the ones above). REMOVED from SU_AREA.
+# Flamespike the Crawler: removed from LoD (replaced by a dead rogue) per the Diablo wiki; also absent from AS/PD -> treated as unused (unresolved).
+SU_UNUSED = [
+    "Winged Death", "The Tormentor", "Taintbreeder", "Riftwraith the Cannibal",
+    "Axe Dweller", "Anodized Elite", "Vinvear Molech", "Magma Torquer", "Blaze Ripper",
+    "Flamespike the Crawler",
+]
+SU_AREA = {k: v for k, v in SU_AREA.items() if k not in SU_UNUSED}
 BOSS_AREA = {  # monstats Id -> level Id (these use their own monstats Level, not the area's)
     "andariel": 37, "duriel": 73, "mephisto": 102, "diablo": 108, "baalcrab": 132,
     "summoner": 74, "radament": 49, "izual": 105, "bloodraven": 17, "griswold": 38, "nihlathakboss": 124,
@@ -452,7 +473,7 @@ for z in dz.get("zones", []) + [zz for g in dz.get("manual_zones", []) for zz in
 data = {
     "meta": {"source": SRC, "built": __import__("time").strftime("%Y-%m-%d %H:%M:%S")},
     "types": types, "items": items, "tc": tcs, "groups": groups, "levels": levels,
-    "monsters": monsters, "su": su, "su_area": SU_AREA, "boss_area": BOSS_AREA,
+    "monsters": monsters, "su": su, "su_area": SU_AREA, "su_unused": SU_UNUSED, "boss_area": BOSS_AREA,
     "uniques": uniques, "sets": setitems, "ratio": ratio,
     "prefixes": prefixes, "suffixes": suffixes, "automagic": automagic,
     "tz": tz,

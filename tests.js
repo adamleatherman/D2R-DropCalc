@@ -180,6 +180,12 @@
       const rak = f1('Rakanishu', 0), rad = S.find((s) => s.name === 'Radament' && s.diff === 2);
       res.cap.su = { pind: f1('Pindleskin', 2).mlvl, countess: f1('The Countess', 2).mlvl, rak: rak.mlvl, cow: S.find((s) => s.name === 'The Cow King' && s.diff === 0).mlvl,
         bane: E.chanceFor(ctx, rak, { kind: 'unique', id: 'Bane Ash' }, 0).target, radament: rad.mlvl, radamentBase: data.monsters.radament.lv[2] }; }
+    // super unique area mapping (SU_AREA fixes)
+    { const ctx = ctxFor(1, 1); const S = E.sources(ctx).filter((s) => s.rank === 'super');
+      const row = (n, d) => { const s = S.find((x) => x.name === n && x.diff === d); return s ? { area: s.areaName, id: s.area, mlvl: s.mlvl, expect: data.levels[String(s.area)].lvl[d] + 3 } : null; };
+      res.cap.suMap = { shenk: row('Siege Boss', 2), eldritch: row('Megaflow Rectifier', 2), thresh: row('Threash Socket', 2), colenzo: row('Baal Subject 1', 2),
+        lister: row('Baal Subject 5', 1), bremm: row('Bremm Sparkfist', 2),
+        unused: ['Winged Death', 'The Tormentor', 'Taintbreeder', 'Riftwraith the Cannibal', 'Axe Dweller', 'Anodized Elite', 'Vinvear Molech', 'Magma Torquer', 'Blaze Ripper', 'Flamespike the Crawler'].filter((n) => S.some((x) => x.name === n || x.name === n)) }; }
     // performance: all Hell sources, cap on vs off (cold caches via a fresh context key)
     for (const cap of [null, 6]) {
       E.CONFIG.dropCap = cap;

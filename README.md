@@ -88,7 +88,7 @@ No authoritative per-kill unique/set tables for Hell Mephisto/Andariel were retr
 
 ## Assumptions and limitations
 
-* Super unique and boss locations are not in the tables; `SU_AREA`/`BOSS_AREA` in `build.py` are hand-written from memory (several superuniques may be placed in the wrong area; edit and re-run build.py). Their mlvl depends on that area.
+* Super unique and boss locations are not in the tables; `SU_AREA`/`BOSS_AREA` in `build.py` are hand-written, with `SU_AREA` cross-checked against the Arreat Summit act 1-5 super unique pages and PureDiablo's superunique overview (source noted per changed row). Their mlvl depends on that area. Rows that exist in `superuniques.txt` but never spawn (Winged Death, The Tormentor, Taintbreeder, Riftwraith the Cannibal, Axe Dweller, Anodized Elite, Vinvear Molech, Magma Torquer, Blaze Ripper, Flamespike the Crawler) are listed in `SU_UNUSED` and are not sources. Baal's five minion waves (`Baal Subject 1-5`) are mapped to the Throne of Destruction. Ancient Kaa is placed in Tal Rasha's Tomb (66); Stormtree in Lower Kurast (79). Talic/Madawc/Korlic have no drop TC in the tables and are skipped.
 * `quest` treasure classes (`TreasureClassQuest`, first-kill drops) are ignored: bosses use `TreasureClass`. Andariel/Mephisto use the `q` classes in this data (`Andarielq (H)`).
 * Unique minions use the normal TC at mlvl+3; heralds, Reign of the Warlock extras (`rotw` herald tiers, always-unique mods) and the +25% terror zone XP are ignored. `CONFIG.tzMode` can select the rotw bounds (identical numbers in this file).
 * `QuestFlag`, `ConditionCalc`, `DropConditionCalc` ignored; ladder season gating is generic but has no effect with the current rows.

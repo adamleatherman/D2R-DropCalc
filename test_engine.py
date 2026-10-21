@@ -474,6 +474,15 @@ def main():
     check("Rakanishu Normal mlvl 8 (Carver lvl 5 + 3)", SU["rak"], 8)
     check("Cow King Normal mlvl 31", SU["cow"], 31)
     check("Hell Radament boss row keeps base level (no unique bonus)", SU["radament"], SU["radamentBase"])
+    SM = CP["suMap"]
+    for key, nm, aid in (("shenk", "Shenk (Siege Boss)", 110), ("eldritch", "Eldritch (Megaflow Rectifier)", 111), ("thresh", "Thresh Socket", 112),
+                         ("colenzo", "Baal Subject 1 (Colenzo) Hell", 131), ("lister", "Baal Subject 5 (Lister) Nightmare", 131), ("bremm", "Bremm Sparkfist", 102)):
+        r = SM[key]
+        check(nm + " area id", r["id"] if r else None, aid)
+        check(nm + " mlvl = area level + 3", r["mlvl"] if r else None, r["expect"] if r else -1)
+    ROWS.append(("PASS" if SM["shenk"]["area"] == "Bloody Foothills" else "FAIL", "Shenk is in Bloody Foothills", SM["shenk"]["area"], "Bloody Foothills", ""))
+    if SM["shenk"]["area"] != "Bloody Foothills": FAIL.append("shenk area name")
+    check("Unused super unique rows are not sources", len(SM["unused"]), 0)
     ROWS.append(("PASS" if SU["bane"] > 0 else "FAIL", "Bane Ash from Normal Rakanishu, P(target) > 0", SU["bane"], ">0", ""))
     if not SU["bane"] > 0: FAIL.append("bane ash")
     check("Cow King P(base) identical with cap 6", kn["6"]["base"], kn["0"]["base"], 1e-12)
