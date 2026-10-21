@@ -104,6 +104,39 @@
     { E.setMode('lod'); const ctx = E.getCtx({ players: 1, party: 1, ladder: true, tz: true, clvl: 85, tier: 1, mf: 0 }); res.herald.inLod = E.sources(ctx).filter((s) => s.rank === 'herald').length;
       E.setMode('rotw'); const c2 = E.getCtx({ players: 1, party: 1, ladder: true, tz: false, clvl: 85, tier: 1, mf: 0 }); res.herald.noTz = E.sources(c2).filter((s) => s.rank === 'herald').length;
       const c3 = E.getCtx({ players: 1, party: 1, ladder: true, tz: true, clvl: 85, tier: 1, mf: 0 }); res.herald.count = E.sources(c3).filter((s) => s.rank === 'herald').length; }
+    // ---- Sunder paths (patch notes 3.2/3.3) -------------------------------------------------------
+    res.sunderPaths = { bonus: {}, table: {}, mf: {}, adj: {} };
+    const hsrc = (tier, pl, pa, clvl) => { const ctx = E.getCtx({ players: pl || 1, party: pa || 1, ladder: true, tz: true, clvl: clvl || 85, tier, mf: 0 });
+      return [ctx, E.sources(ctx).find((s) => s.rank === 'herald' && s.mon === 'zombie1' && s.areaName === 'Blood Moor' && s.diff === 2)]; };
+    E.CONFIG.heraldSunderBonusBase = null;
+    { const [ctx, hs] = hsrc(1); const sp = E.sunderPaths(ctx, hs, null, 0); res.sunderPaths.unknown = { bonus: sp.bonus, total: sp.total, table: sp.table, chance: E.sunderChance(ctx, hs) }; }
+    E.CONFIG.heraldSunderBonusBase = 0.01;
+    for (const tier of [1, 2, 3, 4, 5]) { const [ctx, hs] = hsrc(tier); res.sunderPaths.bonus[tier] = E.sunderPaths(ctx, hs, null, 0).bonus; }
+    for (const pl of [1, 3, 8]) { const [ctx, hs] = hsrc(5, pl, 1); const sp = E.sunderPaths(ctx, hs, null, 0); res.sunderPaths.table[pl] = { table: sp.table, bonus: sp.bonus }; }
+    { const [ctx, hs] = hsrc(1); const sp = E.sunderPaths(ctx, hs, 'Cold Rupture', 0); res.sunderPaths.coldShare = { table: sp.table, bonus: sp.bonus, any: E.sunderPaths(ctx, hs, null, 0).table }; }
+    E.CONFIG.heraldSunderBonusBase = null;
+    // MF path
+    const cm3f = [983, 983, 983, 1024];
+    const mfCount = (mlvl, diff) => { const q = E.quality('cm3', mlvl, 0, cm3f, true, diff); return { n: q.uniques.filter((x) => x.u.mf).length, p: q.uniques.filter((x) => x.u.mf).reduce((a, x) => a + x.p, 0), byId: Object.fromEntries(q.uniques.filter((x) => x.u.mf).map((x) => [x.u.id, x.p])) }; };
+    res.sunderPaths.mf = { m74h: mfCount(74, 2), m75h: mfCount(75, 2), m87h: mfCount(87, 2), m87n: mfCount(87, 1), m87nm0: mfCount(87, 0), m99h: mfCount(99, 2), nonSunderUniques87: E.quality('cm3', 87, 0, cm3f, true, 2).uniques.filter((x) => !x.u.mf).map((x) => x.u.id) };
+    { const ctx = ctxFor(1, 1); const hell = E.sources(ctx).filter((s) => s.diff === 2 && !s.tz);
+      const lowS = hell.find((s) => s.rank === 'regular' && s.mlvl < 75); const hiS = hell.find((s) => s.name === 'Mephisto' && s.rank === 'boss');
+      const tg = { kind: 'unique', id: 'Cold Rupture' };
+      res.sunderPaths.src = { lowMlvl: lowS.mlvl, low: E.chanceFor(ctx, lowS, tg, 0).mf, hiMlvl: hiS.mlvl, hi: E.chanceFor(ctx, hiS, tg, 0).mf, hiMf300: E.chanceFor(ctx, hiS, tg, 300).mf,
+        hiTable: E.chanceFor(ctx, hiS, tg, 0).explicit };
+      const nmS = E.sources(ctx).filter((s) => s.diff === 1 && s.mlvl >= 75); res.sunderPaths.src.nmHigh = nmS.length;
+      res.sunderPaths.src.nmMf = nmS.length ? E.chanceFor(ctx, nmS[0], tg, 0).mf : 0; }
+    // herald quality adj
+    { const [ctx, hs1] = hsrc(1), [ctx3, hs3] = hsrc(3);
+      const manual = (cx, s) => { let u = 0; for (const [k, p] of E.srcDist(cx, s)) { const m = E.metaCache.get(k); if (m.kind === 'i' && m.id !== 'gld') u += p * E.quality(m.id, s.mlvl, 0, m.f, true, s.diff).unique; } return u; };
+      const tot = (cx, s) => E.qualityTotals(cx, s, 0).unique;
+      res.sunderPaths.adj.default1 = [manual(ctx, hs1), tot(ctx, hs1)]; res.sunderPaths.adj.default3 = [manual(ctx3, hs3), tot(ctx3, hs3)];
+      E.CONFIG.heraldQualityAdj = { t12: { unique: 0.5, set: 1, rare: 1 }, t3plus: { rarePlus: 2 } };
+      res.sunderPaths.adj.half1 = tot(E.getCtx({ players: 1, party: 1, ladder: true, tz: true, clvl: 85, tier: 1, mf: 0 }), hs1);
+      res.sunderPaths.adj.dbl3 = tot(ctx3, hs3);
+      const nonH = E.sources(ctx).find((s) => s.rank === 'unique' && s.mon === 'zombie1' && s.areaName === 'Blood Moor' && s.diff === 2);
+      res.sunderPaths.adj.nonHerald = [manual(ctx, nonH), tot(ctx, nonH)];
+      E.CONFIG.heraldQualityAdj = { t12: { unique: 1, set: 1, rare: 1 }, t3plus: { rarePlus: 1 } }; }
     res.sourcesCount = E.sources(ctxFor(1, 1)).length;
     res.config = E.CONFIG;
   } catch (e) { res.errors.push(String(e.stack || e)); }

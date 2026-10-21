@@ -34,9 +34,22 @@
     // --- heralds (rotw Hell terror zones) ---
     // ASSUMPTION: monstats TreasureClassHerald* are empty in 3.3, so a herald is assumed to use the monster's
     // TreasureClassDesecratedUnique(H) TC, group-upgraded at (mlvl + herald_treasure_class_level_boost).
-    // Sunder tier multiplier: the data tables give no tier dependence (all 1). A Reddit datamine quoted on diablo2.io
-    // (https://diablo2.io/post4136083.html) claims tier 5 = 3x tier 1; another poster there says the rate does not change with tier.
-    heraldSunderTierMultiplier: [1, 1, 1, 1, 1],
+    // --- Latent Sunder Charms: three separate paths (official Blizzard patch notes 3.2 / 3.3) ---
+    // (a) TABLE path: the 'Sunder Charms' TC that every desecrated champ/unique/super/boss/herald TC includes (Picks -2). Pure data.
+    // (b) HERALD BONUS path (hard-coded in the game, nothing in the tables): 3.2 "starts at Tier 1", "no longer modified by
+    //     player count", "Tier 3 and 4 have twice the increased chance, Tier 5 three times". Multipliers by tier are known:
+    heraldSunderTierMult: [1, 1, 2, 2, 3],
+    //     ...but the base chance is UNKNOWN (null = shown as "unknown base"; the UI lets you type one in).
+    heraldSunderBonusBase: null,
+    // (c) MF path: 3.2 "can drop from any monster ... using Magic Find"; 3.3 "minimum drop level 69 -> 75", "reduced the drop rate
+    //     when using Magic Find", "now only drop in Hell". The Sunder uniques are spawnable=0 (lvl 69, lvl req 75) in the tables, so this is a
+    //     hard-coded rule: a unique grand charm (cm3) roll may pick one of the six Sunders (weight = rarity x penalty).
+    sunderMfMinLevel: 75,
+    sunderMfHellOnly: true,
+    sunderMfPenalty: 1,            // 3.3 reduced the MF drop rate, size unknown (1 = unreduced)
+    // --- herald quality adjustments (herald rows only). 3.2 "slightly reduced Unique, Set and Rare" for heralds; 3.3 "increased Rare and
+    //     higher from Herald Tiers 3+". Sizes unknown -> all 1 (no-op). Multipliers on the quality probability (difference goes to/from magic).
+    heraldQualityAdj: { t12: { unique: 1, set: 1, rare: 1 }, t3plus: { rarePlus: 1 } },
     // --- per-run estimate (rough!) ---
     run: {
       areaFill: 0.4,               // fraction of the SizeX*SizeY bounding box that is actually walkable/populated
@@ -251,8 +264,16 @@
       return 128 / p;
     }
 
-    function eligibleUniques(code, ilvl, ladder) {
+    function eligibleUniques(code, ilvl, ladder, mlvl, diff) {
       const out = [];
+      // path (c): Sunder charms join the unique grand charm pool (hard-coded rule, see CONFIG)
+      if (code === 'cm3' && mlvl >= CONFIG.sunderMfMinLevel && (!CONFIG.sunderMfHellOnly || diff === 2) && CONFIG.sunderMfPenalty > 0 && items[code] && spOf(items[code])) {
+        for (const id of sunderIds) {
+          const u = uniqById[id];
+          if (!u || u.dis || u.lvl > ilvl || !ladderOK(u.fl, u.ll, ladder)) continue;
+          const w = Object.create(u); w.r = u.r * CONFIG.sunderMfPenalty; w.mf = true; out.push(w);
+        }
+      }
       for (const u of uniqByCode[code] || []) {
         if (!u.sp || u.dis || u.lvl > ilvl || u.dc || (items[code] && !spOf(items[code]))) continue;
         if (!ladderOK(u.fl, u.ll, ladder)) continue;
@@ -272,13 +293,13 @@
 
     /** Quality probabilities for a base item. Returns
      *  {unique,set,rare,magic,hq,normal,low, uniques:[{u,p}], sets:[{s,p}]} (unique/set already include the pick among eligible items) */
-    function quality(code, mlvl, mf, tcf, ladder) {
+    function quality(code, mlvl, mf, tcf, ladder, diff) {
       const it = items[code];
       const out = { unique: 0, set: 0, rare: 0, magic: 0, hq: 0, normal: 0, low: 0, uniques: [], sets: [] };
       if (!it || it.an) { out.normal = 1; return out; }
       const row = ratioRow(it);
       const ilvl = Math.min(mlvl, 99);
-      const eu = eligibleUniques(code, ilvl, ladder), es = eligibleSets(code, ilvl, ladder);
+      const eu = eligibleUniques(code, ilvl, ladder, mlvl, diff === undefined ? 2 : diff), es = eligibleSets(code, ilvl, ladder);
       const q = it.q;
       const refQ = (u) => (CONFIG.ratioLevel === 'unique' && u ? u.lvl : q);
       let rem = 1;
@@ -417,18 +438,34 @@
       return dist(topTC, ctx, src.mlvl, ZERO);
     }
 
+    /** Apply CONFIG.heraldQualityAdj to a quality result (herald rows only; default no-op). */
+    function adjQuality(q, src) {
+      if (!src || !src.herald) return q;
+      const A = CONFIG.heraldQualityAdj;
+      let mu = 1, ms = 1, mr = 1;
+      if (src.tier >= 3) { mu = ms = mr = A.t3plus.rarePlus; } else { mu = A.t12.unique; ms = A.t12.set; mr = A.t12.rare; }
+      if (mu === 1 && ms === 1 && mr === 1) return q;
+      const o = Object.assign({}, q);
+      o.unique = q.unique * mu; o.set = q.set * ms; o.rare = q.rare * mr;
+      o.magic = q.magic + (q.unique - o.unique) + (q.set - o.set) + (q.rare - o.rare);
+      o.uniques = q.uniques.map((x) => ({ u: x.u, p: x.p * mu }));
+      o.sets = q.sets.map((x) => ({ s: x.s, p: x.p * ms }));
+      return o;
+    }
+
     // ---------------- item chance for a source ----------------
     /** target: {kind:'base', code} | {kind:'unique', id} | {kind:'set', id}
      *  returns {base, magic, rare, set, unique, hit} probabilities per kill */
     function chanceFor(ctx, src, target, mf) {
       const dm = srcDist(ctx, src);
-      const res = { base: 0, magic: 0, rare: 0, set: 0, unique: 0, hq: 0, normal: 0, low: 0, target: 0 };
+      const res = { base: 0, magic: 0, rare: 0, set: 0, unique: 0, hq: 0, normal: 0, low: 0, target: 0, explicit: 0, mf: 0 };
+      const cfgSig = JSON.stringify([CONFIG.sunderMfPenalty, CONFIG.sunderMfMinLevel, CONFIG.sunderMfHellOnly, CONFIG.heraldQualityAdj]);
       const ilvl = Math.min(src.mlvl, 99);
       const memo = ctx.qmemo || (ctx.qmemo = new Map());
       for (const [k, p] of dm) {
         const meta = metaCache.get(k);
         if (meta.kind === 'u') {
-          if (target.kind === 'unique' && target.id === meta.id) res.target += p;
+          if (target.kind === 'unique' && target.id === meta.id) { res.target += p; res.explicit += p; }
           continue;
         }
         if (meta.kind === 's') {
@@ -441,13 +478,13 @@
         else if (target.kind === 'unique') want = items[code] && uniqById[target.id].code === code;
         else if (target.kind === 'set') want = items[code] && setById[target.id].code === code;
         if (!want) continue;
-        const qk = code + '|' + src.mlvl + '|' + mf + '|' + meta.f.join(',') + '|' + (ctx.ladder ? 1 : 0);
+        const qk = code + '|' + src.mlvl + '|' + mf + '|' + meta.f.join(',') + '|' + (ctx.ladder ? 1 : 0) + '|' + src.diff + '|' + (src.herald ? src.tier : 0) + '|' + cfgSig;
         let q = memo.get(qk);
-        if (!q) { q = quality(code, src.mlvl, mf, meta.f, ctx.ladder); memo.set(qk, q); }
+        if (!q) { q = adjQuality(quality(code, src.mlvl, mf, meta.f, ctx.ladder, src.diff), src); memo.set(qk, q); }
         res.base += p;
         res.magic += p * q.magic; res.rare += p * q.rare; res.set += p * q.set; res.unique += p * q.unique;
         res.hq += p * q.hq; res.normal += p * q.normal; res.low += p * q.low;
-        if (target.kind === 'unique') { for (const x of q.uniques) if (x.u.id === target.id) res.target += p * x.p; }
+        if (target.kind === 'unique') { for (const x of q.uniques) if (x.u.id === target.id) { res.target += p * x.p; if (x.u.mf) res.mf += p * x.p; } }
         if (target.kind === 'set') { for (const x of q.sets) if (x.s.id === target.id) res.target += p * x.p; }
       }
       if (target.kind === 'base') res.target = res.base;
@@ -456,15 +493,37 @@
 
     const sunderIds = new Set();
     for (const e of (TC['Sunder Charms'] || { e: [] }).e) sunderIds.add(e[0]);
-    /** Chance that one kill drops a Sunder charm (any of the six), incl. player-count NoDrop and the optional tier multiplier. */
+    /** Path (a), TABLE: chance that one kill drops any Sunder charm through the 'Sunder Charms' TC (data only, includes player-count NoDrop). */
     function sunderChance(ctx, src) {
       const dm = srcDist(ctx, src);
       let p = 0;
       for (const [k, v] of dm) { const meta = metaCache.get(k); if (meta.kind === 'u' && sunderIds.has(meta.id)) p += v; }
-      const mult = src.tier ? (CONFIG.heraldSunderTierMultiplier[src.tier - 1] || 1) : 1;
-      return Math.min(1, p * mult);
+      return Math.min(1, p);
     }
-    /** Herald spawn chance in % at a zone completion % (logistic from the data guide: a/(1+e^(-m(x-x0))) + k). */
+    let sunderW = 0;
+    for (const e of (TC['Sunder Charms'] || { e: [] }).e) sunderW += e[1];
+    const isSunder = (id) => sunderIds.has(id);
+    /** All three Sunder paths for one source. targetId = one Sunder unique (share of the pool) or null for "any Sunder".
+     *  Returns {table, bonus (null = unknown base / n.a. = 0 for non-heralds), mf, total (null while a needed part is unknown)}. */
+    function sunderPaths(ctx, src, targetId, mf) {
+      const share = targetId ? ((TC['Sunder Charms'].e.find((e) => e[0] === targetId) || [0, 0])[1] / sunderW) : 1;
+      const table = sunderChance(ctx, src) * share;
+      let bonus = 0;
+      if (src.herald) {
+        const base = CONFIG.heraldSunderBonusBase;
+        bonus = base === null || base === undefined ? null : Math.min(1, base * (CONFIG.heraldSunderTierMult[src.tier - 1] || 1)) * share;   // no player-count scaling (3.2)
+      }
+      let mfp = 0;
+      const dm = srcDist(ctx, src);
+      for (const [k, p] of dm) {
+        const meta = metaCache.get(k);
+        if (meta.kind !== 'i' || meta.id !== 'cm3') continue;
+        const q = adjQuality(quality('cm3', src.mlvl, mf, meta.f, ctx.ladder, src.diff), src);
+        for (const x of q.uniques) if (x.u.mf && (!targetId || x.u.id === targetId)) mfp += p * x.p;
+      }
+      const total = bonus === null ? null : 1 - (1 - table) * (1 - bonus) * (1 - mfp);
+      return { table, bonus, mf: mfp, total };
+    }    /** Herald spawn chance in % at a zone completion % (logistic from the data guide: a/(1+e^(-m(x-x0))) + k). */
     function heraldSpawnPct(tier, x) {
       const t = D.tz.herald[tier - 1]; if (!t) return 0;
       return t.asym / (1 + Math.exp(-t.slope * (x - t.mid))) + t.shift;
@@ -479,7 +538,7 @@
         if (meta.kind !== 'i') { t.explicit += p; continue; }
         const code = meta.id;
         if (code === 'gld') { t.gold += p; continue; }
-        const q = quality(code, src.mlvl, mf, meta.f, ctx.ladder);
+        const q = adjQuality(quality(code, src.mlvl, mf, meta.f, ctx.ladder, src.diff), src);
         t.items += p;
         t.unique += p * q.unique; t.set += p * q.set; t.rare += p * q.rare; t.magic += p * q.magic;
         t.hq += p * q.hq; t.normal += p * q.normal; t.low += p * q.low;
@@ -746,7 +805,7 @@
           const meta = metaCache.get(k);
           if (meta.kind !== 'i' || !codes.has(meta.id)) continue;
           const code = meta.id;
-          const q = quality(code, src.mlvl, o.mf, meta.f, ctx.ladder);
+          const q = adjQuality(quality(code, src.mlvl, o.mf, meta.f, ctx.ladder, src.diff), src);
           const w = p * q[qn];
           pbase += p;
           if (w <= 0) continue;
@@ -811,7 +870,7 @@
 
     return {
       CONFIG, data: D, DIFFS, items, types, getCtx, playersN, adjNoDrop, dist, upgradeTC,
-      setMode, heraldsAvailable, sunderChance, heraldSpawnPct, spOf, quality, qualityTotals, sources, srcDist, chanceFor, affixLevel, minIlvlForAlvl, eligible, affixProb, minLevels,
+      setMode, heraldsAvailable, sunderChance, sunderPaths, isSunder, adjQuality, heraldSpawnPct, spOf, quality, qualityTotals, sources, srcDist, chanceFor, affixLevel, minIlvlForAlvl, eligible, affixProb, minLevels,
       statList, affixSearch, searchIndex, baseTypes, metaCache, uniqById, setById, uniqByCode, setByCode, prettyId, tzLevel,
       eligibleUniques, eligibleSets, condProb,
     };

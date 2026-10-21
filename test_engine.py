@@ -173,7 +173,11 @@ class Ref:
         p = p - (p * tcf) // 1024
         return 1.0 if p <= 128 else 128.0 / p
 
-    def quality(self, code, mlvl, mf, f):
+    def sunder_ids(self):
+        sc = self.tc["Sunder Charms"]
+        return [sc["Item%d" % i] for i in range(1, 11) if sc.get("Item%d" % i)]
+
+    def quality(self, code, mlvl, mf, f, hell=True, penalty=1.0):
         """returns dict unique,set,rare,magic and per-unique/set probabilities"""
         it = self.items[code]
         tt0 = self.types.get(it.get("type", ""), {})
@@ -184,6 +188,12 @@ class Ref:
         q = n(it.get("level"))
         eu = [u for u in self.uniq if u["code"] == code and n(u.get("spawnable")) == 1 and n(u.get("disabled")) == 0 and n(u["lvl"]) <= min(mlvl, 99) and not u.get("DropConditionCalc")]
         es = [s for s in self.sets if s["item"] == code and n(s.get("spawnable")) == 1 and n(s.get("disabled")) == 0 and n(s["lvl"]) <= min(mlvl, 99) and not s.get("DropConditionCalc")]
+        if code == "cm3" and hell and mlvl >= 75 and n(it.get("spawnable")) == 1:
+            # 3.2/3.3 hard-coded rule: the six Sunder uniques (spawnable=0 in the table) join the unique grand charm pool
+            for sid in self.sunder_ids():
+                u = [x for x in self.uniq if x["index"] == sid][0]
+                if n(u["lvl"]) <= min(mlvl, 99):
+                    u = dict(u); u["rarity"] = str(n(u["rarity"], 1) * penalty); eu.append(u)
         tt = self.types.get(it.get("type", ""), {})
         anc = self.item_anc(code)
         can_rare = n(tt.get("Rare")) == 1
@@ -204,9 +214,9 @@ class Ref:
             setp = 0; magic += S
         res = {"unique": unique, "set": setp, "rare": rare, "magic": magic, "u": {}, "s": {}}
         if eu:
-            W = sum(n(u["rarity"], 1) for u in eu)
+            W = sum(float(u["rarity"] or 1) for u in eu)
             for u in eu:
-                res["u"][u["index"]] = unique * n(u["rarity"], 1) / W
+                res["u"][u["index"]] = unique * float(u["rarity"] or 1) / W
         if es:
             W = sum(n(s["rarity"], 1) for s in es)
             for s in es:
@@ -396,6 +406,39 @@ def main():
     p1 = Hh["sunder"]["1/1"]["p"]
     info("tier-1, 1-player Sunder chance per herald kill (tables)", "%.4f%% (1 in %.0f)" % (p1 * 100, 1 / p1), "0.3677% (1 in 272), diablo2.io datamine",
          "tables give %.1f%% more; the community number may predate 3.3 (Latent Sunder min drop level 69 -> 75). Not forced to agree." % ((p1 / 0.003677 - 1) * 100))
+    # ---- Sunder paths (3.2 / 3.3 official patch notes) ---------------------------------------------
+    SP = js["sunderPaths"]
+    u = SP["unknown"]
+    ROWS.append(("PASS" if u["bonus"] is None and u["total"] is None else "FAIL", "herald bonus base unknown -> bonus and total are null (UI: 'unknown base')", str(u["bonus"]), "null", ""))
+    if not (u["bonus"] is None and u["total"] is None): FAIL.append("bonus null")
+    check("path (a) table path == previous any-Sunder chance (unchanged)", u["table"], u["chance"], 1e-12)
+    check("path (a) table path value unchanged from 3.3-table result (tier 1, 1 player)", u["table"], 0.00420833, 1e-4)
+    for tier, mult in zip((1, 2, 3, 4, 5), (1, 1, 2, 2, 3)):
+        check("herald bonus path tier %d = base x %d (base 1%%)" % (tier, mult), SP["bonus"][str(tier)], 0.01 * mult, 1e-12)
+    check("bonus path has no player-count scaling (1 vs 8 players)", SP["table"]["8"]["bonus"], SP["table"]["1"]["bonus"], 1e-12)
+    ROWS.append(("PASS" if SP["table"]["8"]["table"] > 1.5 * SP["table"]["1"]["table"] else "FAIL", "table path does scale with players (8 vs 1)", SP["table"]["8"]["table"] / SP["table"]["1"]["table"], ">1.5", ""))
+    if not SP["table"]["8"]["table"] > 1.5 * SP["table"]["1"]["table"]: FAIL.append("table scale")
+    cs = SP["coldShare"]
+    check("Cold Rupture share of Sunder pool = 30/101", cs["table"] / cs["any"], 30 / 101, 1e-9)
+    check("Cold Rupture bonus share = 30/101 of tier-1 bonus", cs["bonus"], 0.01 * 30 / 101, 1e-9)
+    mf = SP["mf"]
+    check("MF path: 0 sunders for mlvl 74 (Hell)", mf["m74h"]["n"], 0)
+    check("MF path: 6 sunders at mlvl 75 (Hell)", mf["m75h"]["n"], 6)
+    check("MF path: 0 outside Hell (Nightmare, mlvl 87)", mf["m87n"]["n"], 0)
+    check("MF path: 0 outside Hell (Normal, mlvl 87)", mf["m87nm0"]["n"], 0)
+    check("MF path: engine == independent Ref at mlvl 87", sum(mf["m87h"]["byId"].values()), sum(ref.quality("cm3", 87, 0, (983, 983, 983, 1024))["u"].get(i, 0) for i in ref.sunder_ids()), 1e-9)
+    ROWS.append(("INFO", "MF path unique-pool at mlvl 87", "%.4f of unique grand charms are Sunders" % (mf["m87h"]["p"] / (mf["m87h"]["p"] + sum(ref.quality("cm3", 87, 0, (983, 983, 983, 1024))["u"].get(i, 0) for i in [x for x in mf["nonSunderUniques87"]]))), "-", "other cm3 uniques: %s; penalty 1 (3.3 reduction size unknown)" % ", ".join(mf["nonSunderUniques87"])))
+    sr = SP["src"]
+    check("source-level MF path 0 for Hell mlvl %d < 75" % sr["lowMlvl"], sr["low"], 0)
+    ROWS.append(("PASS" if sr["hi"] > 0 else "FAIL", "source-level MF path > 0 for Hell Mephisto (mlvl %d), Cold Rupture" % sr["hiMlvl"], sr["hi"], ">0", "1 in %.0f; table path %s (only terrorized TCs contain it)" % (1 / sr["hi"], "1 in %.0f" % (1 / sr["hiTable"]) if sr["hiTable"] else "0") ))
+    if not sr["hi"] > 0: FAIL.append("mf src")
+    check("source-level MF path 0 in Nightmare (mlvl>=75 sources: %d)" % sr["nmHigh"], sr["nmMf"], 0)
+    ad = SP["adj"]
+    check("herald quality adj default is a no-op (tier 1 unique mass)", ad["default1"][1], ad["default1"][0], 1e-12)
+    check("herald quality adj default is a no-op (tier 3 unique mass)", ad["default3"][1], ad["default3"][0], 1e-12)
+    check("herald quality adj t12 unique x0.5 halves tier 1", ad["half1"], ad["default1"][0] * 0.5, 1e-9)
+    check("herald quality adj t3plus rare+ x2 doubles tier 3 unique", ad["dbl3"], ad["default3"][0] * 2, 1e-9)
+    check("herald adj never touches non-herald rows", ad["nonHerald"][1], ad["nonHerald"][0], 1e-12)
     # ---- print
     w = max(len(r[1]) for r in ROWS)
     for st, name, got, want, note in ROWS:

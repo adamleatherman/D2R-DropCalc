@@ -7,7 +7,7 @@
   let worker = null, reqId = 0;
 
   // ---------------- persistent selectors ----------------
-  const KEYS = ['s_mode', 's_tier', 's_diff', 's_players', 's_party', 's_mf', 's_tz', 's_clvl', 's_ladder', 's_act'];
+  const KEYS = ['s_mode', 's_tier', 's_bonus', 's_diff', 's_players', 's_party', 's_mf', 's_tz', 's_clvl', 's_ladder', 's_act'];
   function loadSel() {
     try {
       const raw = localStorage.getItem('d2rdropcalc.sel');
@@ -26,7 +26,7 @@
   function clampInt(el, lo, hi) { let v = parseInt(el.value, 10); if (isNaN(v)) v = lo; v = Math.max(lo, Math.min(hi, v)); el.value = v; return v; }
   function updTier() {
     const d = parseInt($('s_diff').value, 10);
-    $('l_tier').hidden = !($('s_mode').value === 'rotw' && $('s_tz').checked && (d === 2 || d < 0));
+    $('l_bonus').hidden = $('l_tier').hidden = !($('s_mode').value === 'rotw' && $('s_tz').checked && (d === 2 || d < 0));
   }
   function readSel() {
     if (E) E.setMode($('s_mode').value);
@@ -34,9 +34,11 @@
     const players = clampInt($('s_players'), 1, 8);
     const party = Math.min(clampInt($('s_party'), 1, 8), players);
     $('s_party').value = party;
+    { const v = parseFloat($('s_bonus').value); if (E) E.CONFIG.heraldSunderBonusBase = isNaN(v) || v < 0 ? null : Math.min(1, v / 100); }
     return {
       diff: parseInt($('s_diff').value, 10), players, party,
       mf: clampInt($('s_mf'), 0, 1000), tz: $('s_tz').checked, clvl: clampInt($('s_clvl'), 1, 99),
+      bonus: (() => { const v = parseFloat($('s_bonus').value); return isNaN(v) || v < 0 ? null : Math.min(1, v / 100); })(),
       mode: $('s_mode').value, tier: parseInt($('s_tier').value, 10) || 1,
       ladder: $('s_ladder').value === '1', act: parseInt($('s_act').value, 10),
     };
@@ -63,14 +65,15 @@
   function makeTable(el, cols, defKey, defDir) {
     const st = { key: defKey, dir: defDir || -1, rows: [], limit: 300 };
     function render() {
-      const col = cols.find((c) => c.k === st.key) || cols[0];
+      const vcols = cols.filter((c) => !c.show || c.show());
+      const col = vcols.find((c) => c.k === st.key) || vcols[0];
       const rows = st.rows.slice().sort((a, b) => {
         const x = col.sort ? col.sort(a) : col.get(a), y = col.sort ? col.sort(b) : col.get(b);
         if (x < y) return -st.dir; if (x > y) return st.dir; return 0;
       });
       const shown = rows.slice(0, st.limit);
-      let h = '<thead><tr>' + cols.map((c) => '<th class="' + (c.l ? 'l' : '') + '" data-k="' + c.k + '">' + esc(c.label) + (c.k === st.key ? (st.dir < 0 ? ' v' : ' ^') : '') + '</th>').join('') + '</tr></thead><tbody>';
-      for (const r of shown) h += '<tr>' + cols.map((c) => '<td class="' + (c.l ? 'l' : '') + '">' + (c.html ? c.html(r) : esc(c.fmt ? c.fmt(r) : c.get(r))) + '</td>').join('') + '</tr>';
+      let h = '<thead><tr>' + vcols.map((c) => '<th class="' + (c.l ? 'l' : '') + '" data-k="' + c.k + '"' + (c.note ? ' title="' + esc(c.note) + '"' : '') + '>' + esc(c.label) + (c.k === st.key ? (st.dir < 0 ? ' v' : ' ^') : '') + '</th>').join('') + '</tr></thead><tbody>';
+      for (const r of shown) h += '<tr>' + vcols.map((c) => '<td class="' + (c.l ? 'l' : '') + '">' + (c.html ? c.html(r) : esc(c.fmt ? c.fmt(r) : c.get(r))) + '</td>').join('') + '</tr>';
       h += '</tbody>';
       el.innerHTML = h;
       return { total: rows.length, shown: shown.length };
@@ -125,15 +128,21 @@
 
   // ---------------- Tab 1 ----------------
   let target1 = null, T1 = null;
+  const QNOTE = 'Herald rows are NOT adjusted for known-but-unquantified patch changes: 3.2 slightly reduced Unique/Set/Rare for heralds, 3.3 increased Rare+ for tiers 3+. Sizes unknown (CONFIG.heraldQualityAdj, default no-op).';
+  const isSun = () => target1 && target1.kind === 'unique' && E.isSunder(target1.id);
+  const fmtPath = (v) => v === null ? 'unknown base' : pct(v);
   const cols1 = srcCols.concat([
+    { k: 'sTable', show: isSun, label: 'Sunder: table path', note: 'Data-driven: the Sunder Charms TC inside desecrated champ/unique/boss/herald TCs, incl. player-count NoDrop.', get: (r) => r.sp ? r.sp.table : 0, fmt: (r) => pct(r.sp.table) },
+    { k: 'sBonus', show: isSun, label: 'Sunder: herald bonus', note: '3.2 notes: heralds only, tier multipliers 1/1/2/2/3, not modified by player count. The base chance is unknown: enter one in the herald settings.', get: (r) => r.sp && r.sp.bonus !== null ? r.sp.bonus : -1, fmt: (r) => r.src.herald ? fmtPath(r.sp.bonus) : '-' },
+    { k: 'sMf', show: isSun, label: 'Sunder: MF path', note: 'Hard-coded rule (3.2/3.3): unique grand charm roll, Hell only, mlvl >= 75. 3.3 reduced the MF rate by an unknown amount (CONFIG.sunderMfPenalty, default 1 = unreduced).', get: (r) => r.sp ? r.sp.mf : 0, fmt: (r) => pct(r.sp.mf) },
+    { k: 'sTotal', show: isSun, label: 'Sunder: total', note: 'Combined chance of the three paths; shown only when every part is known.', get: (r) => r.sp && r.sp.total !== null ? r.sp.total : -1, fmt: (r) => r.sp.total === null ? '-' : pct(r.sp.total) },
     { k: 'pbase', label: 'P(base)', get: (r) => r.c.base, fmt: (r) => pct(r.c.base) },
-    { k: 'pmag', label: 'P(magic)', get: (r) => r.c.magic, fmt: (r) => pct(r.c.magic) },
-    { k: 'prare', label: 'P(rare)', get: (r) => r.c.rare, fmt: (r) => pct(r.c.rare) },
-    { k: 'pset', label: 'P(set)', get: (r) => r.c.set, fmt: (r) => pct(r.c.set) },
-    { k: 'puni', label: 'P(unique)', get: (r) => r.c.unique, fmt: (r) => pct(r.c.unique) },
+    { k: 'pmag', note: QNOTE, label: 'P(magic)', get: (r) => r.c.magic, fmt: (r) => pct(r.c.magic) },
+    { k: 'prare', note: QNOTE, label: 'P(rare)', get: (r) => r.c.rare, fmt: (r) => pct(r.c.rare) },
+    { k: 'pset', note: QNOTE, label: 'P(set)', get: (r) => r.c.set, fmt: (r) => pct(r.c.set) },
+    { k: 'puni', note: QNOTE, label: 'P(unique)', get: (r) => r.c.unique, fmt: (r) => pct(r.c.unique) },
     { k: 'ptar', label: 'P(target)', get: (r) => r.c.target, fmt: (r) => pct(r.c.target) },
     { k: 'oneN', label: '1 in N kills', get: (r) => r.c.target, fmt: (r) => oneIn(r.c.target) },
-    { k: 'sunder', label: 'Sunder/kill (heralds)', get: (r) => r.sunder || 0, fmt: (r) => r.src.herald ? pct(r.sunder) : '' },
     { k: 'runs', label: 'kills/run', get: (r) => r.src.perRun, fmt: (r) => r.src.herald ? 'n/a' : r.src.perRun < 10 ? r.src.perRun.toFixed(2) : r.src.perRun.toFixed(0) },
     { k: 'perrun', label: 'per run', get: (r) => r.c.target * r.src.perRun, fmt: (r) => pct(r.c.target * r.src.perRun) },
     { k: 'oneR', label: '1 in N runs', get: (r) => r.c.target * r.src.perRun, fmt: (r) => oneIn(r.c.target * r.src.perRun) },
@@ -161,7 +170,7 @@
       if (sel.tz && !src.tz) continue;
       if (f && (src.name + ' ' + src.areaName).toLowerCase().indexOf(f) < 0) continue;
       const c = E.chanceFor(ctx, src, target1, sel.mf);
-      if (c.target > 0) rows.push({ src, c, sunder: src.herald ? E.sunderChance(ctx, src) : 0 });
+      if (c.target > 0) rows.push({ src, c, sp: isSun() ? E.sunderPaths(ctx, src, target1.id, sel.mf) : null });
     }
     T1.rows = rows; T1.limit = parseInt($('n1').value, 10);
     const r = T1.render();
@@ -274,7 +283,7 @@
     E.setMode($('s_mode').value); updTier();
     $('dataInfo').textContent = 'data built ' + data.meta.built + ' from ' + data.meta.source;
     INDEX = E.searchIndex();
-    { const qs0 = new URLSearchParams(location.search); if (qs0.get('mode')) $('s_mode').value = qs0.get('mode'); if (qs0.get('tz')) { $('s_tz').checked = true; $('s_clvl').value = qs0.get('tz'); } if (qs0.get('tier')) $('s_tier').value = qs0.get('tier'); if (qs0.get('mf')) $('s_mf').value = qs0.get('mf'); E.setMode($('s_mode').value); updTier(); }
+    { const qs0 = new URLSearchParams(location.search); if (qs0.get('mode')) $('s_mode').value = qs0.get('mode'); if (qs0.get('tz')) { $('s_tz').checked = true; $('s_clvl').value = qs0.get('tz'); } if (qs0.get('tier')) $('s_tier').value = qs0.get('tier'); if (qs0.get('bonus')) $('s_bonus').value = qs0.get('bonus'); if (qs0.get('mf')) $('s_mf').value = qs0.get('mf'); E.setMode($('s_mode').value); updTier(); }
     const noWorker = new URLSearchParams(location.search).has('noworker');
     try { if (noWorker) throw new Error('worker disabled'); worker = new Worker('worker.js'); worker.onerror = () => { worker = null; }; } catch (e) { worker = null; }
 
