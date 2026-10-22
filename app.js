@@ -4,6 +4,9 @@
   const $ = (id) => document.getElementById(id);
   const DIFF = ['Normal', 'Nightmare', 'Hell'];
   let E = null, S = null, INDEX = [], BASEOPTS = [];
+  // one data file and one engine per game mode, loaded on first use and kept
+  const DATAFILE = { rotw: 'data.json', lod: 'data-lod.json' };
+  const ENGINES = {};
   let worker = null, reqId = 0;
 
   // ---------------- persistent selectors ----------------
@@ -26,10 +29,9 @@
   function clampInt(el, lo, hi) { let v = parseInt(el.value, 10); if (isNaN(v)) v = lo; v = Math.max(lo, Math.min(hi, v)); el.value = v; return v; }
   function updTier() {
     const d = parseInt($('s_diff').value, 10);
-    $('l_tier').hidden = !($('s_mode').value === 'rotw' && $('s_tz').checked && (d === 2 || d < 0));
+    $('l_tier').hidden = !(E && E.data.tz.herald.length && $('s_tz').checked && (d === 2 || d < 0));
   }
   function readSel() {
-    if (E) E.setMode($('s_mode').value);
     updTier();
     const players = clampInt($('s_players'), 1, 8);
     const party = Math.min(clampInt($('s_party'), 1, 8), players);
@@ -37,7 +39,7 @@
     return {
       diff: parseInt($('s_diff').value, 10), players, party,
       mf: clampInt($('s_mf'), 0, 1000), tz: $('s_tz').checked, quest: $('s_quest').checked, clvl: clampInt($('s_clvl'), 1, 99),
-      mode: $('s_mode').value, tier: parseInt($('s_tier').value, 10) || 1,
+      mode: E.mode, tier: parseInt($('s_tier').value, 10) || 1,
       ladder: $('s_ladder').value === '1', act: parseInt($('s_act').value, 10),
     };
   }
@@ -202,7 +204,7 @@
   function baseCodes(b) {
     if (!b) return [];
     if (b.kind === 'base') return [b.code];
-    return b.codes.filter((c) => E.spOf(E.items[c]));
+    return b.codes.filter((c) => E.items[c].sp);
   }
   function refreshStats() {
     const codes = baseCodes(base2);
@@ -268,7 +270,7 @@
         else if (m.type === 'result') finish(m);
         else if (m.type === 'error') { $('go2').disabled = false; $('prog2').hidden = true; $('info2').textContent = 'Error: ' + m.message; }
       };
-      worker.postMessage({ type: 'search', id, ctx: ctxS, opts, mode: sel.mode });
+      worker.postMessage({ type: 'search', id, ctx: ctxS, opts, file: DATAFILE[sel.mode] });
     } else {
       // fallback (no Worker support): run on the main thread
       setTimeout(() => {
@@ -279,16 +281,56 @@
   }
 
   // ---------------- init ----------------
+  /** Load (once) and select the engine of a game mode; the page header shows that data's game version. */
+  async function useEngine(m) {
+    if (!DATAFILE[m]) m = 'rotw';
+    if (!ENGINES[m]) {
+      const resp = await fetch(DATAFILE[m]);
+      if (!resp.ok) throw new Error(DATAFILE[m] + ' missing - run: python build.py');
+      ENGINES[m] = Engine.create(await resp.json());
+    }
+    E = ENGINES[m];
+    E.CONFIG.gameMode = E.mode;
+    $('s_mode').value = E.mode;
+    $('dataInfo').textContent = 'data: D2R ' + E.data.meta.gameVersion + ' (' + (E.mode === 'lod' ? 'Lord of Destruction' : 'Reign of the Warlock') + '), built ' + E.data.meta.built;
+    INDEX = E.searchIndex();
+    const typeOpts = [];
+    for (const [code, list] of E.baseTypes()) {
+      if (!list.some((c) => E.items[c].sp)) continue;
+      if (!list.some((c) => E.items[c].cr || E.items[c].am)) continue;
+      typeOpts.push({ kind: 'type', code, codes: list, label: 'Any ' + E.types[code].n.toLowerCase() + ' (' + list.length + ' bases, type ' + code + ')' });
+    }
+    BASEOPTS = typeOpts.concat(INDEX.filter((x) => x.kind === 'base' && E.items[x.code].sp && !E.items[x.code].an));
+    const areas = Object.keys(E.data.levels).filter((id) => E.data.levels[id].mon.length || E.data.levels[id].nmon.length)
+      .map((id) => ({ id, a: E.data.levels[id] })).sort((x, y) => x.a.act - y.a.act || x.id - y.id);
+    const cur = $('ar2').value;
+    $('ar2').innerHTML = '<option value="">All areas</option>' + areas.map((x) => '<option value="' + x.id + '">Act ' + x.a.act + ' - ' + esc(x.a.name) + '</option>').join('');
+    if (areas.some((x) => x.id === cur)) $('ar2').value = cur;
+    $('info1').textContent = 'Ready. ' + INDEX.length + ' items indexed, ' + Object.keys(E.data.levels).length + ' areas, ' + Object.keys(E.data.monsters).length + ' monster types.';
+    updTier();
+  }
+  const sameTarget = (x, y) => x.kind === y.kind && (x.code || x.id) === (y.code || y.id);
+
+  /** Game mode selector: swap engine + data, re-index, drop the old results and re-run the current tab. */
+  async function switchMode(m) {
+    const had2 = T2 && T2.rows.length > 0;
+    await useEngine(m);
+    if (target1) { target1 = INDEX.find((x) => sameTarget(x, target1)) || null; if (!target1) { $('q1').value = ''; T1.rows = []; T1.render(); } }
+    if (base2) { base2 = BASEOPTS.find((x) => sameTarget(x, base2)) || null; if (!base2) { $('q2').value = ''; $('conds').innerHTML = ''; } }
+    if (base2) refreshStats();
+    T2.rows = []; T2.render();
+    if (target1) runTab1();
+    if (had2 && base2) runTab2();
+  }
+
   async function init() {
     loadSel();
-    const resp = await fetch('data.json');
-    if (!resp.ok) throw new Error('data.json missing - run: python build.py');
-    const data = await resp.json();
-    E = Engine.create(data);
-    E.setMode($('s_mode').value); updTier();
-    $('dataInfo').textContent = 'data: D2R ' + data.meta.gameVersion + ', built ' + data.meta.built;
-    INDEX = E.searchIndex();
-    { const qs0 = new URLSearchParams(location.search); if (qs0.get('mode')) $('s_mode').value = qs0.get('mode'); if (qs0.get('tz')) { $('s_tz').checked = true; $('s_clvl').value = qs0.get('tz'); } if (qs0.get('tier')) $('s_tier').value = qs0.get('tier'); if (qs0.get('mf')) $('s_mf').value = qs0.get('mf'); E.setMode($('s_mode').value); updTier(); }
+    const qs0 = new URLSearchParams(location.search);
+    if (qs0.get('mode')) $('s_mode').value = qs0.get('mode');
+    if (qs0.get('tz')) { $('s_tz').checked = true; $('s_clvl').value = qs0.get('tz'); }
+    if (qs0.get('tier')) $('s_tier').value = qs0.get('tier');
+    if (qs0.get('mf')) $('s_mf').value = qs0.get('mf');
+    await useEngine($('s_mode').value);
     const noWorker = new URLSearchParams(location.search).has('noworker');
     try { if (noWorker) throw new Error('worker disabled'); worker = new Worker('worker.js'); worker.onerror = () => { worker = null; }; } catch (e) { worker = null; }
 
@@ -297,13 +339,17 @@
     tabs.forEach((t, i) => $(t).onclick = () => {
       tabs.forEach((x, j) => { $(x).classList.toggle('on', i === j); $('tab' + (j + 1)).classList.toggle('on', i === j); });
     });
-    for (const k of KEYS) $(k).addEventListener('change', () => { saveSel(); E.setMode($('s_mode').value); updTier(); if (k === 's_mode' && base2) { if (base2.kind === 'base' && !E.spOf(E.items[base2.code])) base2 = null; refreshStats(); } if (target1) runTab1(); });
+    for (const k of KEYS) $(k).addEventListener('change', () => {
+      saveSel();
+      if (k === 's_mode') { switchMode($('s_mode').value).catch((e) => { $('info1').textContent = 'Could not load data: ' + e; }); return; }
+      updTier(); if (target1) runTab1();
+    });
     $('s_act').addEventListener('change', () => { if (target1) runTab1(); });
 
     // tab 1
     T1 = makeTable($('tb1'), cols1, 'ptar', -1);
     T1.onSort = () => {};
-    autocomplete($('q1'), $('ac1'), () => INDEX.filter((x) => x.kind !== 'base' || E.spOf(E.items[x.code])), (x) => { target1 = x; runTab1(); });
+    autocomplete($('q1'), $('ac1'), () => INDEX, (x) => { target1 = x; runTab1(); });
     $('f1').addEventListener('input', () => { clearTimeout(runTab1.t); runTab1.t = setTimeout(runTab1, 250); });
     $('r1').addEventListener('change', runTab1);
     $('bq1').addEventListener('change', runTab1);
@@ -311,15 +357,7 @@
 
     // tab 2
     T2 = makeTable($('tb2'), cols2, 'ptot', -1);
-    const types = E.baseTypes();
-    const typeOpts = [];
-    for (const [code, list] of types) {
-      const hasMR = list.some((c) => E.items[c].cr || E.items[c].am);
-      if (!hasMR) continue;
-      typeOpts.push({ kind: 'type', code, codes: list, label: 'Any ' + E.types[code].n.toLowerCase() + ' (' + list.length + ' bases, type ' + code + ')' });
-    }
-    BASEOPTS = typeOpts.concat(INDEX.filter((x) => x.kind === 'base' && !E.items[x.code].an));
-    autocomplete($('q2'), $('ac2'), () => BASEOPTS.filter((x) => x.kind === 'type' ? x.codes.some((c) => E.spOf(E.items[c])) : E.spOf(E.items[x.code])), (x) => {
+    autocomplete($('q2'), $('ac2'), () => BASEOPTS, (x) => {
       base2 = x;
       const q = $('ql2');
       refreshStats();
@@ -328,13 +366,8 @@
     $('ql2').addEventListener('change', () => { refreshStats(); });
     $('addcond').onclick = () => addCond();
     $('go2').onclick = runTab2;
-    // area list
-    const areas = Object.keys(E.data.levels).filter((id) => E.data.levels[id].mon.length || E.data.levels[id].nmon.length)
-      .map((id) => ({ id, a: E.data.levels[id] })).sort((x, y) => x.a.act - y.a.act || x.id - y.id);
-    $('ar2').innerHTML = '<option value="">All areas</option>' + areas.map((x) => '<option value="' + x.id + '">Act ' + x.a.act + ' - ' + esc(x.a.name) + '</option>').join('');
     // about
     $('about').innerHTML = aboutHtml();
-    $('info1').textContent = 'Ready. ' + INDEX.length + ' items indexed, ' + Object.keys(E.data.levels).length + ' areas, ' + Object.keys(E.data.monsters).length + ' monster types.';
     // optional deep links for smoke tests: ?q1=Griffon   or   ?q2=circlet&ql=magic&c=Faster%20Cast%20Rate:20
     const qs = new URLSearchParams(location.search);
     if (qs.get('q1')) {

@@ -27,9 +27,9 @@
     // --- ladder: current ladder season used for first/lastLadderSeason gating ---
     currentSeason: 99,
     // --- terror zones ---
-    // --- game mode: 'rotw' = Reign of the Warlock (root excel folder), 'lod' = Lord of Destruction (excel\base).
-    // The two folders differ only in the Warlock grimoire bases (spawnable in rotw) and their automagic mods.
-    // The mode also picks the desecratedzones.json section (expansion vs rotw) and enables heralds (rotw + Hell + TZ only).
+    // --- game mode: informational. Each data file is one mode ('rotw' = Reign of the Warlock = data.json, 'lod' = Lord of Destruction
+    // = data-lod.json, see build.py); Engine.create sets this to the mode of the data it was given (meta.mode). Heralds exist when the
+    // data has herald tiers (desecratedzones rotw section only).
     gameMode: 'rotw',
     // --- quest drop (setting `quest`): act bosses with a monstats TreasureClassQuest use it instead of their TC (D2MOO MonsterMode.cpp:
     //     first kill while the killer's quest is open; Andariel's normal TC already is Andarielq). ---
@@ -88,8 +88,8 @@
     const items = D.items;
     const types = D.types;
     const DIFFS = ['Normal', 'Nightmare', 'Hell'];
-    const spOf = (it) => (CONFIG.gameMode === 'lod' && it.spl !== undefined) ? it.spl : it.sp;
-    const tzModeName = () => (CONFIG.gameMode === 'rotw' ? 'rotw' : 'expansion');
+    const mode = (D.meta && D.meta.mode) || 'rotw';
+    CONFIG.gameMode = mode;
 
     // ---------------- indices ----------------
     const uniqByCode = {}, setByCode = {}, uniqById = {}, setById = {};
@@ -113,7 +113,7 @@
         const list = [];
         for (const code in items) {
           const it = items[code];
-          if (!spOf(it) || it.anc.indexOf(pre) < 0) continue;
+          if (!it.sp || it.anc.indexOf(pre) < 0) continue;
           const b = Math.max(3, Math.ceil(it.q / 3) * 3);
           if (b === bracket) list.push({ code, q: it.q, w: it.r });
         }
@@ -162,14 +162,7 @@
       return c;
     }
 
-    /** Switch game mode ('lod' | 'rotw'); clears every cache that depends on item/affix spawnability. */
-    function setMode(m) {
-      if (m === CONFIG.gameMode) return;
-      CONFIG.gameMode = m;
-      for (const k in genericCache) delete genericCache[k];
-      ctxCache.clear(); eligCache.clear(); affCache.clear();
-    }
-    function heraldsAvailable(sel) { return CONFIG.gameMode === 'rotw' && !!sel.tz; }
+    function heraldsAvailable(sel) { return D.tz.herald.length > 0 && !!sel.tz; }
 
     // ---------------- treasure class resolution ----------------
     // dist(name, ctx, mlvl, inheritedFactors) -> Map(leafKey -> probability that this roll yields the leaf at least once)
@@ -458,7 +451,7 @@
     function eligibleUniques(code, ilvl, ladder, mlvl, diff) {
       const out = [];
       for (const u of uniqByCode[code] || []) {
-        if (!u.sp || u.dis || u.lvl > ilvl || !dropConditionOK(u.dc, diff) || (items[code] && !spOf(items[code]))) continue;
+        if (!u.sp || u.dis || u.lvl > ilvl || !dropConditionOK(u.dc, diff) || (items[code] && !items[code].sp)) continue;
         if (!ladderOK(u.fl, u.ll, ladder)) continue;
         out.push(u);
       }
@@ -467,7 +460,7 @@
     function eligibleSets(code, ilvl, ladder, diff) {
       const out = [];
       for (const s of setByCode[code] || []) {
-        if (!s.sp || s.dis || s.lvl > ilvl || !dropConditionOK(s.dc, diff) || (items[code] && !spOf(items[code]))) continue;
+        if (!s.sp || s.dis || s.lvl > ilvl || !dropConditionOK(s.dc, diff) || (items[code] && !items[code].sp)) continue;
         if (!ladderOK(s.fl, s.ll, ladder)) continue;
         out.push(s);
       }
@@ -512,7 +505,7 @@
     }
 
     // ---------------- monster levels / sources ----------------
-    function tzBounds(d) { const b = D.tz.bounds[tzModeName()] || D.tz.bounds.expansion; return b[d]; }
+    function tzBounds(d) { return D.tz.bounds[d]; }
     function tzLevel(base, clvl, d) {
       const b = tzBounds(d);
       const z = Math.min(b.max, Math.max(b.min, clvl + b.boost));
@@ -793,7 +786,7 @@
       res.auto = [];
       if (it.ap) {
         for (const a of (autoByGroup[it.ap] || [])) {
-          if (!((CONFIG.gameMode === 'lod' && a.spl !== undefined) ? a.spl : a.sp)) continue;
+          if (!a.sp) continue;
           if (a.lvl > alvl) continue;
           if (a.max && a.max < alvl) continue;
           res.auto.push(a);
@@ -1031,7 +1024,7 @@
       for (const n in TC) for (const e of TC[n].e) if (items[e[0].split(',')[0]]) explicitI.add(e[0].split(',')[0]);   // e.g. ua1-ua5 statue pieces (spawnable=0 but named in TCs)
       for (const code in items) {
         const it = items[code];
-        if (!(spOf(it) || explicitI.has(code)) || code === 'gld') continue;
+        if (!(it.sp || explicitI.has(code)) || code === 'gld') continue;
         if (it.q <= 0 && it.k !== 'm') continue;
         out.push({ kind: 'base', code, label: it.n + ' (' + code + ', qlvl ' + it.q + (it.tier === 1 ? ', exceptional' : it.tier === 2 ? ', elite' : '') + ')', name: it.n });
       }
@@ -1047,7 +1040,7 @@
       const m = new Map();
       for (const code in items) {
         const it = items[code];
-        if (!spOf(it) || it.an || it.q <= 0 && it.k !== 'm') continue;
+        if (!it.sp || it.an || it.q <= 0 && it.k !== 'm') continue;
         for (const a of it.anc) {
           if (!types[a]) continue;
           if (!m.has(a)) m.set(a, []);
@@ -1066,7 +1059,7 @@
 
     return {
       CONFIG, data: D, DIFFS, items, types, getCtx, playersN, adjNoDrop, dist, upgradeTC,
-      setMode, heraldsAvailable, sunderChance, sunderPaths, isSunder, adjQuality, heraldSpawnPct, spOf, quality, qualityTotals, sources, srcDist, chanceFor, baseQualityChance, affixLevel, minIlvlForAlvl, eligible, affixProb, minLevels,
+      mode, heraldsAvailable, sunderChance, sunderPaths, isSunder, adjQuality, heraldSpawnPct, quality, qualityTotals, sources, srcDist, chanceFor, baseQualityChance, affixLevel, minIlvlForAlvl, eligible, affixProb, minLevels,
       statList, affixSearch, searchIndex, baseTypes, metaCache, uniqById, setById, uniqByCode, setByCode, prettyId, tzLevel,
       eligibleUniques, eligibleSets, condProb, trialsFor,
     };

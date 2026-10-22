@@ -37,8 +37,9 @@ def info(name, got, ref, note=""):
 
 
 # --------------------------------------------------------------- raw table reader
-def rd(name):
-    with open(os.path.join(SRC, name + ".txt"), encoding="utf-8", errors="replace") as f:
+def rd(name, sub=""):
+    """Raw table; sub="" = Reign of the Warlock (root folder), sub="base" = Lord of Destruction."""
+    with open(os.path.join(SRC, sub, name + ".txt"), encoding="utf-8", errors="replace") as f:
         lines = [l.rstrip("\r\n").split("\t") for l in f]
     head = lines[0]
     return [{h: (l[i] if i < len(l) else "") for i, h in enumerate(head)} for l in lines[1:] if l and l[0]]
@@ -64,21 +65,22 @@ def rd_sub(name, sub):
 
 # ------------------------------------------------ independent reference implementation
 class Ref:
-    def __init__(self):
-        self.tc = {r["Treasure Class"]: r for r in rd("treasureclassex")}
+    def __init__(self, sub=""):
+        self.sub = sub   # "" = RotW tables, "base" = LoD tables
+        self.tc = {r["Treasure Class"]: r for r in rd("treasureclassex", sub)}
         self.items = {}
         for f in ("armor", "weapons", "misc"):
-            for r in rd(f):
+            for r in rd(f, sub):
                 if r.get("code"):
                     r["_f"] = f
                     self.items[r["code"]] = r
-        self.types = {r["Code"]: r for r in rd("itemtypes") if r.get("Code")}
-        self.uniq = rd("uniqueitems")
+        self.types = {r["Code"]: r for r in rd("itemtypes", sub) if r.get("Code")}
+        self.uniq = rd("uniqueitems", sub)
         self.uidx = {u["index"] for u in self.uniq}
-        self.sets = rd("setitems")
-        self.ratio = rd("itemratio")
-        self.monstats = {r["Id"]: r for r in rd("monstats")}
-        self.levels = {n(r["Id"]): r for r in rd("levels") if r.get("Id")}
+        self.sets = rd("setitems", sub)
+        self.ratio = rd("itemratio", sub)
+        self.monstats = {r["Id"]: r for r in rd("monstats", sub)}
+        self.levels = {n(r["Id"]): r for r in rd("levels", sub) if r.get("Id")}
         self.cache = {}
 
     def anc(self, t, seen=None):
@@ -107,7 +109,7 @@ class Ref:
         out = {}
         for key, fname in (("p", "magicprefix"), ("s", "magicsuffix")):
             res = []
-            for a in rd(fname):
+            for a in rd(fname, self.sub):
                 if not a.get("Name") or n(a.get("version")) < 1 or n(a.get("frequency")) <= 0 or not n(a.get("spawnable")):
                     continue
                 if n(a["level"]) > alvl or (a.get("maxlevel") and n(a["maxlevel"]) < alvl):
@@ -647,22 +649,75 @@ def main():
     check("LoD: grimoire automagic not attached", M["lod"]["autoGrim"], 0)
     ROWS.append(("PASS" if M["rotw"]["grimMass"] > 0 else "FAIL", "RotW: grimoires do drop (mass over Hell sources)", M["rotw"]["grimMass"], ">0", ""))
     if not M["rotw"]["grimMass"] > 0: FAIL.append("rotw grimoire")
-    ratio_mode = M["lod"]["midBaseMeph"] / M["rotw"]["midBaseMeph"]
-    ROWS.append(("PASS" if 1.0 < ratio_mode < 1.2 else "FAIL", "mid-level armor base %s at Hell Mephisto: LoD/RotW per-kill odds" % M["midBase"], ratio_mode, "slightly >1", ""))
-    if not 1.0 < ratio_mode < 1.2: FAIL.append("mode dilution")
-    # independent dilution check for that base: weights over the bracket
+    # generic armoN pool: the share of one base in its bracket pool, per mode, vs independent bracket weights (the grimoires dilute it in RotW only)
     mb = ref.items[M["midBase"]]
     br = max(3, -(-n(mb["level"]) // 3) * 3)
-    def wsum(include_grim):
+    def wsum(rf, include_grim):
         w = 0
-        for code, r in ref.items.items():
-            if n(r.get("spawnable")) != 1 and code not in grims: continue
+        for code, r in rf.items.items():
+            if n(r.get("spawnable")) != 1: continue
             if code in grims and not include_grim: continue
-            if "armo" in ref.item_anc(code) and max(3, -(-n(r.get("level")) // 3) * 3) == br and n(r.get("level")) <= 87:
-                w += max(1, n(ref.types[r["type"]].get("Rarity")))
+            if "armo" in rf.item_anc(code) and max(3, -(-n(r.get("level")) // 3) * 3) == br:
+                w += max(1, n(rf.types[r["type"]].get("Rarity")))
         return w
-    check("armor pool dilution matches independent bracket weights (LoD/RotW)", ratio_mode, wsum(True) / wsum(False), 1e-3,
-          "bracket %d, type-rarity sum RotW %d vs LoD %d (only exact if this bracket is reached through armoN entries only)" % (br, wsum(True), wsum(False)))
+    wr = max(1, n(ref.types[mb["type"]].get("Rarity")))
+    check("RotW armo%d pool share of %s (grimoires in the pool)" % (br, M["midBase"]), M["rotw"]["poolShare"], wr / wsum(ref, True), 1e-9)
+    check("LoD armo%d pool share of %s (no grimoires)" % (br, M["midBase"]), M["lod"]["poolShare"], wr / wsum(Ref("base"), False), 1e-9)
+    ROWS.append(("PASS" if M["lod"]["poolShare"] > M["rotw"]["poolShare"] else "FAIL", "base %s pool share is larger in LoD (no grimoire dilution)" % M["midBase"], M["lod"]["poolShare"], M["rotw"]["poolShare"], ""))
+    if not M["lod"]["poolShare"] > M["rotw"]["poolShare"]: FAIL.append("pool dilution")
+
+    # Tab 1 autocomplete source (= searchIndex(), unfiltered by spawnable): quest keys, essences are searchable in both modes
+    for mode in ("rotw", "lod"):
+        check("%s: Tab 1 autocomplete source has Key of Terror/Hate/Destruction (pk1-pk3)" % mode, sum(1 for x in M[mode]["acKeys"] if x), 3)
+        check("%s: 'key of' matches pk1, pk2, pk3" % mode, 1 if {"pk1", "pk2", "pk3"} <= set(M[mode]["acQuery"]) else 0, 1)
+        ROWS.append(("PASS" if M[mode]["acEssence"] >= 3 else "FAIL", "%s: essences in the autocomplete source" % mode, M[mode]["acEssence"], ">=3", ""))
+        if M[mode]["acEssence"] < 3: FAIL.append("essence ac")
+    # ---- LoD mode: data-lod.json (excel/base tables) vs an independent reference on the base tables
+    L = M
+    ref_l = Ref("base")
+    check("data.json meta.mode is rotw", 1 if L["meta"]["rotw"]["mode"] == "rotw" and L["meta"]["rotwMode"] == "rotw" else 0, 1)
+    check("data-lod.json meta.mode is lod", 1 if L["meta"]["lod"]["mode"] == "lod" and L["meta"]["lodMode"] == "lod" else 0, 1)
+    check("both data files share gameVersion/buildKey/built", 1 if all(L["meta"]["rotw"][k] == L["meta"]["lod"][k] for k in ("gameVersion", "buildKey", "built")) else 0, 1)
+    check("no spl override fields left in the data", L["meta"]["lodDirty"], 0)
+    check("LoD: grimoires spawnable=0 in data-lod.json", L["lod"]["grimSp"], 0)
+    check("RotW: grimoires spawnable in data.json", L["rotw"]["grimSp"], 15)
+    check("LoD: no statue pieces ua1-ua5 in the search index", L["lod"]["statueInIndex"], 0)
+    check("LoD: no worldstone shards xa1-xa5 in the search index", L["lod"]["shardInIndex"], 0)
+    check("RotW: statue pieces ua1-ua5 in the search index", L["rotw"]["statueInIndex"], 5)
+    check("RotW: worldstone shards xa1-xa5 in the search index", L["rotw"]["shardInIndex"], 5)
+    check("LoD: no Warlock affixes (cls war) in data-lod.json", L["lod"]["warAffixesInData"], 0)
+    check("LoD: no Warlock affix eligible on an amulet", L["lod"]["warAmulet"], 0)
+    check("RotW: Warlock affixes eligible on an amulet", 1 if L["rotw"]["warAmulet"] > 0 else 0, 1)
+    check("LoD: Sorceress affixes still eligible on an amulet", 1 if L["lod"]["sorAmulet"] > 0 else 0, 1)
+    check("heralds follow the data: RotW has 5 tiers and herald sources, LoD none", 1 if L["rotw"]["heraldSources"] > 0 and L["lod"]["heraldSources"] == 0 and L["meta"]["rotwHeraldTiers"] == 5 and L["meta"]["lodHeraldTiers"] == 0 else 0, 1)
+    for mode, ref_m in (("rotw", ref), ("lod", ref_l)):
+        a_ = ref_m.tc["Andarielq (H)"]
+        got = L[mode]["andariel"]
+        check("%s Andarielq (H) Unique/Set/Rare/Magic factors equal the raw table" % mode, got["u"] * 10 ** 9 + got["s"] * 10 ** 6 + got["r"] * 10 ** 3 + got["m"], n(a_["Unique"]) * 10 ** 9 + n(a_["Set"]) * 10 ** 6 + n(a_["Rare"]) * 10 ** 3 + n(a_["Magic"]))
+    check("Andarielq (H) unique factor: 995 in LoD", L["lod"]["andariel"]["u"], 995)
+    check("Andarielq (H) unique factor: 983 in RotW", L["rotw"]["andariel"]["u"], 983)
+    ROWS.append(("PASS" if L["lod"]["andariel"]["u"] != L["rotw"]["andariel"]["u"] else "FAIL", "Andarielq (H) differs between modes", L["lod"]["andariel"]["u"], L["rotw"]["andariel"]["u"], ""))
+    if L["lod"]["andariel"]["u"] == L["rotw"]["andariel"]["u"]: FAIL.append("andariel modes")
+    for key, c in js["lod"]["cases"].items():
+        name, _, mfs, ps = key.split("|")
+        mf = int(mfs[2:])
+        mon = ref_l.monstats["andariel"] if name == "Andariel" else ref_l.monstats["mephisto"] if name == "Mephisto" else None
+        if mon:
+            check("LoD Hell %s mlvl" % name, c["mlvl"], n(mon["Level(H)"]))
+        t_ = ref_l.totals(c["tc"], c["mlvl"], c["N"], mf)
+        for q in ("unique", "set", "rare", "magic"):
+            check("LoD %s Hell MF%d: expected %s items/kill vs base-table reference" % (name, mf, q), c["totals"][q], t_[q], 1e-9)
+    check("LoD Hell Andariel P(Harlequin Crest) vs base-table reference",
+          js["lod"]["hcAndariel"], ref_l.target(js["lod"]["cases"]["Andariel|H|mf0|p1"]["tc"], js["lod"]["cases"]["Andariel|H|mf0|p1"]["mlvl"], 1, 0, "unique", "Harlequin Crest"), 1e-9)
+    ok = abs(js["lod"]["hcAndariel"] - js["lod"]["hcAndarielRotw"]) > 1e-9
+    ROWS.append(("PASS" if ok else "FAIL", "Hell Andariel P(Harlequin Crest) differs between modes", js["lod"]["hcAndariel"], js["lod"]["hcAndarielRotw"], ""))
+    if not ok: FAIL.append("andariel hc modes")
+    # expansion bounds of desecratedzones for LoD, rotw section for RotW
+    dzs = json.load(open(os.path.join(SRC, "hd", "desecratedzones.json"), encoding="utf-8"))["desecrated_zones"][0]["game_difficulties"]
+    for mode, sec in (("lod", "expansion"), ("rotw", "rotw")):
+        want = [(dzs[sec][d]["defaults"]["bound_incl_min"], dzs[sec][d]["defaults"]["bound_incl_max"]) for d in ("normal", "nightmare", "hell")]
+        got = [(b["min"], b["max"]) for b in L[mode]["tzBounds"]]
+        check("%s terror zone bounds come from desecratedzones section %s" % (mode, sec), 1 if got == want else 0, 1)
 
     # ---- heralds ----------------------------------------------------------------------------------
     Hh = js["herald"]

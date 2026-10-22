@@ -56,7 +56,7 @@
         res.quest[nm] = r;
       }
       { const ctx = cq(true), sr = find(ctx, 'Mephisto', 2, ['boss']);   // a base the quest TC can drop: weapon/armor -> rare-or-better only
-        let code = null; for (const [k, p] of E.srcDist(ctx, sr)) { const m = E.metaCache.get(k); if (m.kind === 'i' && p > 0 && E.items[m.id] && E.items[m.id].k && E.items[m.id].t !== 'grim' && !/^r\d\d$|^gld$/.test(m.id) && E.spOf(E.items[m.id])) { code = m.id; break; } }
+        let code = null; for (const [k, p] of E.srcDist(ctx, sr)) { const m = E.metaCache.get(k); if (m.kind === 'i' && p > 0 && E.items[m.id] && E.items[m.id].k && E.items[m.id].t !== 'grim' && !/^r\d\d$|^gld$/.test(m.id) && E.items[m.id].sp) { code = m.id; break; } }
         const c = code && E.chanceFor(ctx, sr, { kind: 'base', code }, 0), o = code && E.chanceFor(cq(false), find(cq(false), 'Mephisto', 2, ['boss']), { kind: 'base', code }, 0);
         res.quest.mephBase = { code, on: c, off: o }; }
       { const f = (q) => E.sources(E.getCtx({ players: 1, party: 1, ladder: true, tz: true, clvl: 85, mf: 0, quest: q })).find((x) => x.rank === 'boss' && x.mon === 'diablo' && x.diff === 2 && x.tz);   // getCtx returns a shared object: use each result at once
@@ -86,32 +86,64 @@
       const el = E.eligible(code, 99, false);
       res.affix[code] = { p: el.p.map((a) => a.n + '|' + a.cls).sort(), s: el.s.map((a) => a.n + '|' + a.cls).sort() };
     }
-    // ---- game modes -----------------------------------------------------------------------------
+    // ---- game modes: one data file (and engine) per mode ------------------------------------------
+    // RotW = data.json (E), LoD = data-lod.json (EL). The engines share CONFIG (dropCap is off here).
     res.modes = {};
+    const dataL = await (await fetch('data-lod.json')).json();
+    const EL = Engine.create(dataL);
+    E.CONFIG.gameMode = 'rotw';
     const grim = Object.keys(data.items).filter((c) => data.items[c].t === 'grim');
     const grimSet = new Set(grim);
     const bracket = (q) => Math.max(3, Math.ceil(q / 3) * 3);
     const grimBr = new Set(grim.map((c) => bracket(data.items[c].q)));
     const midBase = Object.keys(data.items).find((c) => { const it = data.items[c]; return it.k === 'a' && it.sp && it.t !== 'grim' && !it.cs && it.q >= 40 && it.q <= 70 && grimBr.has(bracket(it.q)); });
     res.modes.midBase = midBase;
-    for (const mode of ['lod', 'rotw']) {
-      E.setMode(mode);
-      const ctx = ctxFor(1, 1);
-      const srcs = E.sources(ctx).filter((s) => s.diff === 2);
+    res.modes.meta = { rotw: data.meta, lod: dataL.meta, rotwMode: E.mode, lodMode: EL.mode, lodDirty: Object.keys(dataL.items).filter((c) => dataL.items[c].spl !== undefined).length + dataL.automagic.filter((a) => a.spl !== undefined).length,
+      rotwHeraldTiers: data.tz.herald.length, lodHeraldTiers: dataL.tz.herald.length };
+    for (const [mode, Em, Dm] of [['rotw', E, data], ['lod', EL, dataL]]) {
+      const ctx = Em.getCtx({ players: 1, party: 1, ladder: true, tz: false, mf: 0 });
+      const srcs = Em.sources(ctx).filter((s) => s.diff === 2);
       let grimMass = 0, maxGrim = 0;
       for (const s of srcs) {
         let m = 0;
-        for (const [k, p] of E.srcDist(ctx, s)) { const meta = E.metaCache.get(k); if (meta.kind === 'i' && grimSet.has(meta.id)) m += p; }
+        for (const [k, p] of Em.srcDist(ctx, s)) { const meta = Em.metaCache.get(k); if (meta.kind === 'i' && grimSet.has(meta.id)) m += p; }
         grimMass += m; if (m > maxGrim) maxGrim = m;
       }
       const meph = srcs.find((s) => s.name === 'Mephisto' && s.rank === 'boss');
-      const c = E.chanceFor(ctx, meph, { kind: 'base', code: midBase }, 0);
-      const idx = E.searchIndex().filter((x) => x.kind === 'base' && grimSet.has(x.code)).length;
-      const opts = E.baseTypes();
-      res.modes[mode] = { grimMass, maxGrim, midBaseMeph: c.base, indexGrim: idx, autoGrim: E.eligible('wa5', 99, false).auto.length,
-        grimSpOf: grim.map((g) => E.spOf(data.items[g])).reduce((a, b) => a + b, 0) };
+      const c = Em.chanceFor(ctx, meph, { kind: 'base', code: midBase }, 0);
+      const index = Em.searchIndex();
+      const idx = index.filter((x) => x.kind === 'base' && grimSet.has(x.code)).length;
+      const inIdx = (codes) => codes.filter((cd) => index.some((x) => x.kind === 'base' && x.code === cd)).length;
+      res.modes[mode] = { grimMass, maxGrim, midBaseMeph: c.base, indexGrim: idx, autoGrim: Em.eligible('wa5', 99, false).auto.length,
+        statueInIndex: inIdx(['ua1', 'ua2', 'ua3', 'ua4', 'ua5']), shardInIndex: inIdx(['xa1', 'xa2', 'xa3', 'xa4', 'xa5']),
+        poolShare: (function () { const d = Em.dist('armo' + bracket(Dm.items[midBase].q), ctx, 99, [0, 0, 0, 0]); let p = 0; for (const [k, v] of d) { const mt = Em.metaCache.get(k); if (mt.kind === 'i' && mt.id === midBase) p += v; } return p; })(),
+        // the Tab 1 autocomplete source is exactly searchIndex() (app.js: autocomplete($('q1'), $('ac1'), () => INDEX, ...)): spawnable=0 items named in TCs must be there
+        acKeys: ['pk1', 'pk2', 'pk3'].map((cd) => { const x = index.find((y) => y.kind === 'base' && y.code === cd); return x ? x.label : null; }),
+        acQuery: (function () { const words = 'key of'.split(' '); return index.filter((x) => words.every((w) => x.label.toLowerCase().indexOf(w) >= 0)).map((x) => x.code); })(),
+        acEssence: index.filter((x) => x.kind === 'base' && x.label.toLowerCase().indexOf('essence') >= 0).length,
+        grimSp: grim.map((g) => Dm.items[g] ? Dm.items[g].sp : 0).reduce((a, b) => a + b, 0),
+        warAmulet: ['p', 's'].map((k) => Em.eligible('amu', 99, false)[k].filter((a) => a.cls === 'war').length).reduce((a, b) => a + b, 0),
+        sorAmulet: ['p', 's'].map((k) => Em.eligible('amu', 99, false)[k].filter((a) => a.cls === 'sor').length).reduce((a, b) => a + b, 0),
+        warAffixesInData: Dm.prefixes.concat(Dm.suffixes).filter((a) => a.cls === 'war').length,
+        andariel: Dm.tc['Andarielq (H)'] && { u: Dm.tc['Andarielq (H)'].u, s: Dm.tc['Andarielq (H)'].s, r: Dm.tc['Andarielq (H)'].r, m: Dm.tc['Andarielq (H)'].m },
+        heraldSources: Em.sources(Em.getCtx({ players: 1, party: 1, ladder: true, tz: true, clvl: 85, tier: 1, mf: 0 })).filter((s) => s.rank === 'herald').length,
+        tzBounds: Dm.tz.bounds };
     }
-    E.setMode('rotw');
+    // LoD Hell act bosses vs the independent reference on the base tables
+    res.lod = { cases: {} };
+    { const ctxL = (pl) => EL.getCtx({ players: pl, party: 1, ladder: true, tz: false, mf: 0 });
+      for (const [name, ranks] of [['Andariel', ['boss']], ['Mephisto', ['boss']], ['The Countess', ['super']], ['Baal', ['boss']]]) {
+        for (const mf of [0, 300]) {
+          const ctx = ctxL(1);
+          const s = EL.sources(ctx).find((x) => x.name === name && x.diff === 2 && ranks.indexOf(x.rank) >= 0);
+          if (!s) throw new Error('LoD source missing: ' + name + ' ' + EL.sources(ctx).filter((x) => x.diff === 2 && /Andariel|Mephisto|Countess|Baal/.test(x.name)).map((x) => x.name + '/' + x.rank).join()); 
+          res.lod.cases[[name, 'H', 'mf' + mf, 'p1'].join('|')] = { mlvl: s.mlvl, tc: s.tc, N: ctx.N, totals: EL.qualityTotals(ctx, s, mf) };
+        }
+      }
+      const ctx = ctxL(1), s = EL.sources(ctx).find((x) => x.name === 'Andariel' && x.diff === 2 && x.rank === 'boss');
+      res.lod.hcAndariel = EL.chanceFor(ctx, s, { kind: 'unique', id: 'Harlequin Crest' }, 0).target;
+      const ctxR = E.getCtx({ players: 1, party: 1, ladder: true, tz: false, mf: 0 }), sR = E.sources(ctxR).find((x) => x.name === 'Andariel' && x.diff === 2 && x.rank === 'boss');
+      res.lod.hcAndarielRotw = E.chanceFor(ctxR, sR, { kind: 'unique', id: 'Harlequin Crest' }, 0).target; }
 
     // ---- heralds ---------------------------------------------------------------------------------
     res.herald = { tiers: {}, sunder: {}, flame: {}, statue: {} };
@@ -153,8 +185,8 @@
     }
     E.CONFIG.dropCap = null;
     // herald only exists in rotw + TZ
-    { E.setMode('lod'); const ctx = E.getCtx({ players: 1, party: 1, ladder: true, tz: true, clvl: 85, tier: 1, mf: 0 }); res.herald.inLod = E.sources(ctx).filter((s) => s.rank === 'herald').length;
-      E.setMode('rotw'); const c2 = E.getCtx({ players: 1, party: 1, ladder: true, tz: false, clvl: 85, tier: 1, mf: 0 }); res.herald.noTz = E.sources(c2).filter((s) => s.rank === 'herald').length;
+    { res.herald.inLod = res.modes.lod.heraldSources;
+      const c2 = E.getCtx({ players: 1, party: 1, ladder: true, tz: false, clvl: 85, tier: 1, mf: 0 }); res.herald.noTz = E.sources(c2).filter((s) => s.rank === 'herald').length;
       const c3 = E.getCtx({ players: 1, party: 1, ladder: true, tz: true, clvl: 85, tier: 1, mf: 0 }); const hsAll = E.sources(c3).filter((s) => s.rank === 'herald'); res.herald.count = hsAll.length;
       res.herald.badTC = hsAll.filter((s) => !/^Act \d \(H\) Herald [ABC]$/.test(s.tc)).length;
       res.herald.zombieMon = E.data.monsters.zombie1.tc[2].hr; }

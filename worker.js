@@ -1,20 +1,18 @@
 /* Web Worker: runs the affix search (exact for magic, Monte Carlo for rare) off the UI thread. */
 importScripts('engine.js');
-let E = null;
-let ready = null;
+const engines = {};   // one engine per data file (data.json = RotW, data-lod.json = LoD), loaded on first use
 
-async function init() {
-  const data = await (await fetch('data.json')).json();
-  E = Engine.create(data);
+async function engineFor(file) {
+  file = file || 'data.json';
+  if (!engines[file]) engines[file] = fetch(file).then((r) => r.json()).then((d) => Engine.create(d));
+  return engines[file];
 }
 
 self.onmessage = async (ev) => {
   const m = ev.data;
   try {
-    if (!ready) ready = init();
-    await ready;
+    const E = await engineFor(m.file);
     if (m.type === 'search') {
-      if (m.mode) E.setMode(m.mode);
       const ctx = E.getCtx(m.ctx);
       const res = E.affixSearch(ctx, m.opts, (done, total) => self.postMessage({ type: 'progress', done, total, id: m.id }));
       // strip heavy objects: keep serialisable row summaries
