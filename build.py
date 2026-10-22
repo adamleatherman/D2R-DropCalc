@@ -202,7 +202,7 @@ for r in rd("levels"):
 monsters = {}
 TCCOLS = [("TreasureClass", "tc"), ("TreasureClassChamp", "ch"), ("TreasureClassUnique", "un"),
           ("TreasureClassDesecrated", "dtc"), ("TreasureClassDesecratedChamp", "dch"),
-          ("TreasureClassDesecratedUnique", "dun")]
+          ("TreasureClassDesecratedUnique", "dun"), ("TreasureClassHerald", "hr")]
 for r in rd("monstats"):
     mid = r.get("Id")
     if not mid:
@@ -291,6 +291,7 @@ SU_AREA = {k: v for k, v in SU_AREA.items() if k not in SU_UNUSED}
 BOSS_AREA = {  # monstats Id -> level Id (these use their own monstats Level, not the area's)
     "andariel": 37, "duriel": 73, "mephisto": 102, "diablo": 108, "baalcrab": 132,
     "summoner": 74, "radament": 49, "izual": 105, "bloodraven": 17, "griswold": 38, "nihlathakboss": 124,
+    "colossal1": 137, "colossal2": 137, "colossal3": 137,   # Uber Talic / Madawc / Korlic (Colossal Summit, Hell TC only; ancientbarb1-3 have no TC and stay skipped)
 }
 # the three "Fighting Act 5 mini bosses" etc are intentionally skipped.
 

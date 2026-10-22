@@ -37,21 +37,19 @@
     // columns are 'Andarielq ... Desecrated', which hints at that). true = the quest TC overrides the desecrated TC too (D2MOO order).
     questOverridesTz: true,
     // --- heralds (rotw Hell terror zones) ---
-    // ASSUMPTION: monstats TreasureClassHerald* are empty in 3.3, so a herald is assumed to use the monster's
-    // TreasureClassDesecratedUnique(H) TC, group-upgraded at (mlvl + herald_treasure_class_level_boost).
-    // --- Latent Sunder Charms: three separate paths (official Blizzard patch notes 3.2 / 3.3) ---
-    // (a) TABLE path: the 'Sunder Charms' TC that every desecrated champ/unique/super/boss/herald TC includes (Picks -2). Pure data.
-    // (b) HERALD BONUS path (hard-coded in the game, nothing in the tables): 3.2 "starts at Tier 1", "no longer modified by
-    //     player count", "Tier 3 and 4 have twice the increased chance, Tier 5 three times". Multipliers by tier are known:
-    heraldSunderTierMult: [1, 1, 2, 2, 3],
-    //     ...but the base chance is UNKNOWN (null = shown as "unknown base"; the UI lets you type one in).
-    heraldSunderBonusBase: null,
-    // (c) MF path: 3.2 "can drop from any monster ... using Magic Find"; 3.3 "minimum drop level 69 -> 75", "reduced the drop rate
-    //     when using Magic Find", "now only drop in Hell". The Sunder uniques are spawnable=0 (lvl 69, lvl req 75) in the tables, so this is a
-    //     hard-coded rule: a unique grand charm (cm3) roll may pick one of the six Sunders (weight = rarity x penalty).
-    sunderMfMinLevel: 75,
-    sunderMfHellOnly: true,
-    sunderMfPenalty: 1,            // 3.3 reduced the MF drop rate, size unknown (1 = unreduced)
+    // A herald drops from the monster's monstats TreasureClassHerald(H) TC (group 41: 'Act N (H) Herald A-C'), group-upgraded at
+    // (mlvl + herald_treasure_class_level_boost). Group 41 also holds the 'Ancient Statue 1-5' TCs (level 92); heralds are restricted to the
+    // Herald TCs (observed: heralds do not drop statue pieces), see upgradeTC.
+    // Every herald TC lists 'Herald Item X' x2, '... - 1 Extra' x1 (one more item pick), '... - 2 Extra' x1 (two more) and Cpot x2. The tables
+    // drop all of them, but the published odds of PreCrafted Flame Rift from heralds (1:342 tier 1-2, 1:228 tier 3-4, 1:171 tier 5) equal exactly
+    // 1-(1-p)^n with n = 2, 3, 4 item picks and p = (2/407)(30/101). So the game gates the extras by tier (hard-coded, verified against those
+    // published odds): tiers 1-2 only the base entries, tiers 3-4 add '1 Extra', tier 5 adds '2 Extra' (not both). null = no extra.
+    heraldExtraByTier: [null, null, '1 Extra', '1 Extra', '2 Extra'],
+    // --- Latent Sunder Charms: two paths ---
+    // (a) TABLE path: the 'Sunder Charms' TC (PreCrafted <Sunder> uniques) included by every desecrated champ/unique/super/boss TC and by the
+    //     'Herald Item' TCs. Pure data, scales with players through NoDrop. For heralds the tier gating above is the 3.2 "herald bonus".
+    // (b) MF path: the PreCrafted Sunder uniques are also spawnable cm3 uniques with DropConditionCalc cond('Difficulty', hell), lvl 75,
+    //     rarity 1, so a unique grand charm roll can pick one in Hell at ilvl >= 75 (dropConditionOK). Pure data.
     // --- herald quality adjustments (herald rows only). 3.2 "slightly reduced Unique, Set and Rare" for heralds; 3.3 "increased Rare and
     //     higher from Herald Tiers 3+". Sizes unknown -> all 1 (no-op). Multipliers on the quality probability (difference goes to/from magic).
     heraldQualityAdj: { t12: { unique: 1, set: 1, rare: 1 }, t3plus: { rarePlus: 1 } },
@@ -226,9 +224,10 @@
       } else if (items[name]) {
         out.set(leafKey('i', name, inh), 1);
       } else if (uniqById[name]) {
-        out.set(leafKey('u', name, inh), 1);
+        out.set(leafKey('u', name, ZERO), 1);   // explicit unique/set: the TC quality factors do not matter, so one leaf per id
+
       } else if (setById[name]) {
-        out.set(leafKey('s', name, inh), 1);
+        out.set(leafKey('s', name, ZERO), 1);
       } else {
         const g = genericInfo(name);
         if (g) {
@@ -367,8 +366,8 @@
           }
         }
       } else if (items[name]) res = { T: kit.TL, D: new Map([[leafKey('i', name, inh), kit.S]]) };
-      else if (uniqById[name]) res = { T: kit.TL, D: new Map([[leafKey('u', name, inh), kit.S]]) };
-      else if (setById[name]) res = { T: kit.TL, D: new Map([[leafKey('s', name, inh), kit.S]]) };
+      else if (uniqById[name]) res = { T: kit.TL, D: new Map([[leafKey('u', name, ZERO), kit.S]]) };
+      else if (setById[name]) res = { T: kit.TL, D: new Map([[leafKey('s', name, ZERO), kit.S]]) };
       else {
         const g = genericInfo(name);
         if (g) {
@@ -400,14 +399,29 @@
     }
 
     // monster-level TC upgrade ("group"/"level" columns)
-    function upgradeTC(name, mlvl, isBoss) {
+    function upgradeTC(name, mlvl, isBoss, only) {
       const tc = TC[name];
       if (!tc || !tc.g || isBoss) return name;
       const list = D.groups[String(tc.g)];
       if (!list) return name;
       let best = name, bl = -1;
-      for (const [lv, nm] of list) if (lv <= mlvl && lv >= bl) { best = nm; bl = lv; }
+      for (const [lv, nm] of list) if (lv <= mlvl && lv >= bl && (!only || only.test(nm))) { best = nm; bl = lv; }
       return best;
+    }
+    // Herald TCs (group 41 also holds the Ancient Statue TCs, which heralds must not upgrade into)
+    const HERALD_TC = / Herald [ABC]$/;
+    /** `Act N (H) Herald X` limited to the entries a herald of this tier drops (CONFIG.heraldExtraByTier); cached as a derived TC. */
+    function heraldTierTC(name, tier) {
+      const tc = TC[name];
+      if (!tc) return name;
+      const ex = CONFIG.heraldExtraByTier[Math.max(1, Math.min(5, tier)) - 1] || null;
+      const key = name + '|tier ' + (ex || 'base');
+      if (!TC[key]) {
+        const e = tc.e.filter((x) => { const m = / - (\d Extra)$/.exec(x[0]); return !m || m[1] === ex; });
+        let n = 0; for (const x of e) n += x[1];
+        TC[key] = Object.assign({}, tc, { e, p: -n, g: 0 });
+      }
+      return key;
     }
 
     // ---------------- item quality ----------------
@@ -435,27 +449,25 @@
       return 128 / p;
     }
 
+    /** DropConditionCalc: only cond('Difficulty', normal|nightmare|hell) is evaluated (the only form in the tables); anything else excludes the row. */
+    function dropConditionOK(dc, diff) {
+      if (!dc) return true;
+      const m = /^cond\('Difficulty',\s*(normal|nightmare|hell)\)$/i.exec(dc.trim().replace(/^"|"$/g, ''));
+      return !!m && ['normal', 'nightmare', 'hell'].indexOf(m[1].toLowerCase()) === diff;
+    }
     function eligibleUniques(code, ilvl, ladder, mlvl, diff) {
       const out = [];
-      // path (c): Sunder charms join the unique grand charm pool (hard-coded rule, see CONFIG)
-      if (code === 'cm3' && mlvl >= CONFIG.sunderMfMinLevel && (!CONFIG.sunderMfHellOnly || diff === 2) && CONFIG.sunderMfPenalty > 0 && items[code] && spOf(items[code])) {
-        for (const id of sunderIds) {
-          const u = uniqById[id];
-          if (!u || u.dis || u.lvl > ilvl || !ladderOK(u.fl, u.ll, ladder)) continue;
-          const w = Object.create(u); w.r = u.r * CONFIG.sunderMfPenalty; w.mf = true; out.push(w);
-        }
-      }
       for (const u of uniqByCode[code] || []) {
-        if (!u.sp || u.dis || u.lvl > ilvl || u.dc || (items[code] && !spOf(items[code]))) continue;
+        if (!u.sp || u.dis || u.lvl > ilvl || !dropConditionOK(u.dc, diff) || (items[code] && !spOf(items[code]))) continue;
         if (!ladderOK(u.fl, u.ll, ladder)) continue;
         out.push(u);
       }
       return out;
     }
-    function eligibleSets(code, ilvl, ladder) {
+    function eligibleSets(code, ilvl, ladder, diff) {
       const out = [];
       for (const s of setByCode[code] || []) {
-        if (!s.sp || s.dis || s.lvl > ilvl || s.dc || (items[code] && !spOf(items[code]))) continue;
+        if (!s.sp || s.dis || s.lvl > ilvl || !dropConditionOK(s.dc, diff) || (items[code] && !spOf(items[code]))) continue;
         if (!ladderOK(s.fl, s.ll, ladder)) continue;
         out.push(s);
       }
@@ -470,7 +482,7 @@
       if (!it || it.an) { out.normal = 1; return out; }
       const row = ratioRow(it);
       const ilvl = Math.min(mlvl, 99);
-      const eu = eligibleUniques(code, ilvl, ladder, mlvl, diff === undefined ? 2 : diff), es = eligibleSets(code, ilvl, ladder);
+      const eu = eligibleUniques(code, ilvl, ladder, mlvl, diff === undefined ? 2 : diff), es = eligibleSets(code, ilvl, ladder, diff === undefined ? 2 : diff);
       const q = it.q;
       const refQ = (u) => (CONFIG.ratioLevel === 'unique' && u ? u.lvl : q);
       let rem = 1;
@@ -515,7 +527,7 @@
       return name || t.tc || null;
     }
 
-    const BOSS_NAMES = { baalcrab: 'Baal', nihlathakboss: 'Nihlathak', bloodraven: 'Blood Raven', summoner: 'The Summoner', griswold: 'Griswold', izual: 'Izual', radament: 'Radament', andariel: 'Andariel', duriel: 'Duriel', mephisto: 'Mephisto', diablo: 'Diablo' };
+    const BOSS_NAMES = { baalcrab: 'Baal', nihlathakboss: 'Nihlathak', bloodraven: 'Blood Raven', summoner: 'The Summoner', griswold: 'Griswold', colossal1: 'Uber Talic', colossal2: 'Uber Madawc', colossal3: 'Uber Korlic', izual: 'Izual', radament: 'Radament', andariel: 'Andariel', duriel: 'Duriel', mephisto: 'Mephisto', diablo: 'Diablo' };
     const prettyId = (s) => s.replace(/([a-z])(\d+)$/i, '$1 $2');
 
     /** All kill sources (monster x rank x area x difficulty) for a context.
@@ -556,10 +568,10 @@
               ['minion', lv0 + CONFIG.minionOffset, U * (1 - R.champShare) * share * minions],
             ];
             if (d === 2 && inTz && heraldsAvailable(s) && !m.nh) {
-              // ASSUMED herald TC (see CONFIG): the monster's desecrated unique TC, group-upgraded at mlvl + tier boost.
+              // herald TC from monstats TreasureClassHerald(H), group-upgraded at mlvl + tier boost
               const tier = Math.max(1, Math.min(5, s.tier || 1));
               const hb = (D.tz.herald[tier - 1] || { boost: 0 }).boost;
-              const htc = pickTC(m, d, 'unique', true);
+              const htc = (m.tc[d] || {}).hr;
               if (htc && TC[htc]) out.push({ key: id + '|herald|' + lid + '|' + d, mon: id, name: m.n, rank: 'herald', diff: d, area: +lid,
                 areaName: A.name, act: A.act, mlvl: lv0 + CONFIG.uniqueOffset, tc: htc, boss: false, perRun: 0, tz: true, herald: true, tier, tcBoost: hb });
             }
@@ -609,7 +621,8 @@
 
     function srcDist(ctx, src) {
       // bosses keep their own TC unless the zone is terrorized (data guide: group upgrade ignored for bosses unless desecrated)
-      const topTC = upgradeTC(src.tc, src.mlvl + (src.tcBoost || 0), src.boss && !src.tz);
+      let topTC = upgradeTC(src.tc, src.mlvl + (src.tcBoost || 0), src.boss && !src.tz, src.herald ? HERALD_TC : null);
+      if (src.herald) topTC = heraldTierTC(topTC, src.tier);
       return dist(topTC, ctx, src.mlvl, ZERO);
     }
 
@@ -634,7 +647,7 @@
     function chanceFor(ctx, src, target, mf) {
       const dm = srcDist(ctx, src);
       const res = { base: 0, magic: 0, rare: 0, set: 0, unique: 0, hq: 0, normal: 0, low: 0, target: 0, explicit: 0, mf: 0 };
-      const cfgSig = JSON.stringify([CONFIG.sunderMfPenalty, CONFIG.sunderMfMinLevel, CONFIG.sunderMfHellOnly, CONFIG.heraldQualityAdj]);
+      const cfgSig = JSON.stringify([CONFIG.heraldQualityAdj]);
       const ilvl = Math.min(src.mlvl, 99);
       const memo = ctx.qmemo || (ctx.qmemo = new Map());
       for (const [k, p] of dm) {
@@ -659,7 +672,7 @@
         res.base += p;
         res.magic += p * q.magic; res.rare += p * q.rare; res.set += p * q.set; res.unique += p * q.unique;
         res.hq += p * q.hq; res.normal += p * q.normal; res.low += p * q.low;
-        if (target.kind === 'unique') { for (const x of q.uniques) if (x.u.id === target.id) { res.target += p * x.p; if (x.u.mf) res.mf += p * x.p; } }
+        if (target.kind === 'unique') { for (const x of q.uniques) if (x.u.id === target.id) { res.target += p * x.p; if (sunderIds.has(x.u.id)) res.mf += p * x.p; } }
         if (target.kind === 'set') { for (const x of q.sets) if (x.s.id === target.id) res.target += p * x.p; }
       }
       if (target.kind === 'base') res.target = res.base;
@@ -674,35 +687,26 @@
     const sunderIds = new Set();
     for (const e of (TC['Sunder Charms'] || { e: [] }).e) sunderIds.add(e[0]);
     /** Path (a), TABLE: chance that one kill drops any Sunder charm through the 'Sunder Charms' TC (data only, includes player-count NoDrop). */
-    function sunderChance(ctx, src) {
+    function sunderChance(ctx, src, id) {
       const dm = srcDist(ctx, src);
       let p = 0;
-      for (const [k, v] of dm) { const meta = metaCache.get(k); if (meta.kind === 'u' && sunderIds.has(meta.id)) p += v; }
+      for (const [k, v] of dm) { const meta = metaCache.get(k); if (meta.kind === 'u' && (id ? meta.id === id : sunderIds.has(meta.id))) p += v; }
       return Math.min(1, p);
     }
-    let sunderW = 0;
-    for (const e of (TC['Sunder Charms'] || { e: [] }).e) sunderW += e[1];
     const isSunder = (id) => sunderIds.has(id);
-    /** All three Sunder paths for one source. targetId = one Sunder unique (share of the pool) or null for "any Sunder".
-     *  Returns {table, bonus (null = unknown base / n.a. = 0 for non-heralds), mf, total (null while a needed part is unknown)}. */
+    /** Both Sunder paths for one source. targetId = one Sunder unique (share of the pool) or null for "any Sunder".
+     *  Returns {table, mf, total}. */
     function sunderPaths(ctx, src, targetId, mf) {
-      const share = targetId ? ((TC['Sunder Charms'].e.find((e) => e[0] === targetId) || [0, 0])[1] / sunderW) : 1;
-      const table = sunderChance(ctx, src) * share;
-      let bonus = 0;
-      if (src.herald) {
-        const base = CONFIG.heraldSunderBonusBase;
-        bonus = base === null || base === undefined ? null : Math.min(1, base * (CONFIG.heraldSunderTierMult[src.tier - 1] || 1)) * share;   // no player-count scaling (3.2)
-      }
+      const table = sunderChance(ctx, src, targetId);
       let mfp = 0;
       const dm = srcDist(ctx, src);
       for (const [k, p] of dm) {
         const meta = metaCache.get(k);
         if (meta.kind !== 'i' || meta.id !== 'cm3') continue;
         const q = adjQuality(quality('cm3', src.mlvl, mf, meta.f, ctx.ladder, src.diff), src);
-        for (const x of q.uniques) if (x.u.mf && (!targetId || x.u.id === targetId)) mfp += p * x.p;
+        for (const x of q.uniques) if (sunderIds.has(x.u.id) && (!targetId || x.u.id === targetId)) mfp += p * x.p;
       }
-      const total = bonus === null ? null : 1 - (1 - table) * (1 - bonus) * (1 - mfp);
-      return { table, bonus, mf: mfp, total };
+      return { table, mf: mfp, total: 1 - (1 - table) * (1 - mfp) };
     }    /** Herald spawn chance in % at a zone completion % (logistic from the data guide: a/(1+e^(-m(x-x0))) + k). */
     function heraldSpawnPct(tier, x) {
       const t = D.tz.herald[tier - 1]; if (!t) return 0;
@@ -1020,15 +1024,17 @@
     // ---------------- search index ----------------
     function searchIndex() {
       const out = [];
+      const explicitI = new Set();
+      for (const n in TC) for (const e of TC[n].e) if (items[e[0].split(',')[0]]) explicitI.add(e[0].split(',')[0]);   // e.g. ua1-ua5 statue pieces (spawnable=0 but named in TCs)
       for (const code in items) {
         const it = items[code];
-        if (!spOf(it) || code === 'gld') continue;
+        if (!(spOf(it) || explicitI.has(code)) || code === 'gld') continue;
         if (it.q <= 0 && it.k !== 'm') continue;
         out.push({ kind: 'base', code, label: it.n + ' (' + code + ', qlvl ' + it.q + (it.tier === 1 ? ', exceptional' : it.tier === 2 ? ', elite' : '') + ')', name: it.n });
       }
       const explicitU = new Set();
       for (const n in TC) for (const e of TC[n].e) if (uniqById[e[0]]) explicitU.add(e[0]);   // e.g. Sunder charms (spawnable=0 but dropped explicitly)
-      for (const u of D.uniques) if ((u.sp || explicitU.has(u.id)) && !u.dis && !u.dc) out.push({ kind: 'unique', id: u.id, code: u.code, label: u.id + ' - unique ' + (items[u.code] ? items[u.code].n : u.code) + ' (lvl ' + u.lvl + ')', name: u.id });
+      for (const u of D.uniques) if ((u.sp || explicitU.has(u.id)) && !u.dis && dropConditionOK(u.dc, 2)) out.push({ kind: 'unique', id: u.id, code: u.code, label: u.id + ' - unique ' + (items[u.code] ? items[u.code].n : u.code) + ' (lvl ' + u.lvl + ')', name: u.id });
       for (const s of D.sets) if (s.sp && !s.dis) out.push({ kind: 'set', id: s.id, code: s.code, label: s.id + ' - set ' + (items[s.code] ? items[s.code].n : s.code) + ' (' + s.set + ', lvl ' + s.lvl + ')', name: s.id });
       return out;
     }

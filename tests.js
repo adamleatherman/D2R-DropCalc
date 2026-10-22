@@ -108,45 +108,115 @@
     E.setMode('rotw');
 
     // ---- heralds ---------------------------------------------------------------------------------
-    res.herald = { tiers: {}, sunder: {} };
+    res.herald = { tiers: {}, sunder: {}, flame: {}, statue: {} };
+    const HERALD_RE = / Herald [ABC]$/;
+    const heraldSrc = (ctx) => E.sources(ctx).find((s) => s.rank === 'herald' && s.mon === 'zombie1' && s.areaName === 'Blood Moor' && s.diff === 2);
     for (const clvl of [60, 94]) {
       for (const tier of [1, 5]) {
         const ctx = E.getCtx({ players: 1, party: 1, ladder: true, tz: true, clvl, tier, mf: 0 });
-        const hs = E.sources(ctx).find((s) => s.rank === 'herald' && s.mon === 'zombie1' && s.areaName === 'Blood Moor' && s.diff === 2);
-        res.herald.tiers['c' + clvl + 't' + tier] = { mlvl: hs.mlvl, tc: hs.tc, boost: hs.tcBoost, resolved: E.upgradeTC(hs.tc, hs.mlvl + hs.tcBoost, false), src: hs.tc };
+        const hs = heraldSrc(ctx);
+        res.herald.tiers['c' + clvl + 't' + tier] = { mlvl: hs.mlvl, tc: hs.tc, boost: hs.tcBoost, resolved: E.upgradeTC(hs.tc, hs.mlvl + hs.tcBoost, false, HERALD_RE), ungated: E.upgradeTC(hs.tc, hs.mlvl + hs.tcBoost, false) };
+      }
+    }
+    // a herald whose mlvl + tier boost lands on 92 (the Ancient Statue TCs share group 41 at that level) must stay in the Herald TCs
+    for (let clvl = 40; clvl <= 99 && !res.herald.statue.found; clvl++) for (let tier = 1; tier <= 5; tier++) {
+      const ctx = E.getCtx({ players: 1, party: 1, ladder: true, tz: true, clvl, tier, mf: 0 });
+      const hs = heraldSrc(ctx);
+      if (hs && hs.mlvl + hs.tcBoost === 92) {
+        const codes = []; for (const [k] of E.srcDist(ctx, hs)) { const m = E.metaCache.get(k); if (m.kind === 'i' && /^ua\d$/.test(m.id)) codes.push(m.id); }
+        res.herald.statue = { found: true, clvl, tier, ungated: E.upgradeTC(hs.tc, 92, false), uaLeaves: codes.length, leaves: E.srcDist(ctx, hs).size };
+        break;
       }
     }
     for (const [pl, pa] of [[1, 1], [3, 1], [8, 8], [5, 2]]) {
-      const ctx = E.getCtx({ players: pl, party: pa, ladder: true, tz: true, clvl: 85, tier: 1, mf: 0 });
-      const hs = E.sources(ctx).find((s) => s.rank === 'herald' && s.mon === 'zombie1' && s.areaName === 'Blood Moor' && s.diff === 2);
-      res.herald.sunder[pl + '/' + pa] = { N: ctx.N, p: E.sunderChance(ctx, hs) };
+      const ctx = E.getCtx({ players: pl, party: pa, ladder: true, tz: true, clvl: 85, tier: 3, mf: 0 });
+      const hs = heraldSrc(ctx);
+      res.herald.sunder[pl + '/' + pa] = { N: ctx.N, p: E.sunderChance(ctx, hs), tc: hs.tc };
     }
+    // PreCrafted Flame Rift per herald kill by tier (published: 1:342.8 tier 1-2, 1:228.7 tier 3-4, 1:171.7 tier 5), with and without the 6-item cap
+    for (const cap of [null, 6]) {
+      E.CONFIG.dropCap = cap;
+      const row = {};
+      for (const tier of [1, 2, 3, 4, 5]) {
+        const ctx = E.getCtx({ players: 1, party: 1, ladder: true, tz: true, clvl: 85, tier, mf: 0 });
+        const hs = heraldSrc(ctx);
+        const sp = E.sunderPaths(ctx, hs, 'PreCrafted Flame Rift', 0);
+        row[tier] = { table: sp.table, mf: sp.mf, total: sp.total, explicit: E.chanceFor(ctx, hs, { kind: 'unique', id: 'PreCrafted Flame Rift' }, 0).explicit };
+      }
+      res.herald.flame[cap === null ? 'off' : 'cap'] = row;
+    }
+    E.CONFIG.dropCap = null;
     // herald only exists in rotw + TZ
     { E.setMode('lod'); const ctx = E.getCtx({ players: 1, party: 1, ladder: true, tz: true, clvl: 85, tier: 1, mf: 0 }); res.herald.inLod = E.sources(ctx).filter((s) => s.rank === 'herald').length;
       E.setMode('rotw'); const c2 = E.getCtx({ players: 1, party: 1, ladder: true, tz: false, clvl: 85, tier: 1, mf: 0 }); res.herald.noTz = E.sources(c2).filter((s) => s.rank === 'herald').length;
-      const c3 = E.getCtx({ players: 1, party: 1, ladder: true, tz: true, clvl: 85, tier: 1, mf: 0 }); res.herald.count = E.sources(c3).filter((s) => s.rank === 'herald').length; }
-    // ---- Sunder paths (patch notes 3.2/3.3) -------------------------------------------------------
-    res.sunderPaths = { bonus: {}, table: {}, mf: {}, adj: {} };
+      const c3 = E.getCtx({ players: 1, party: 1, ladder: true, tz: true, clvl: 85, tier: 1, mf: 0 }); const hsAll = E.sources(c3).filter((s) => s.rank === 'herald'); res.herald.count = hsAll.length;
+      res.herald.badTC = hsAll.filter((s) => !/^Act \d \(H\) Herald [ABC]$/.test(s.tc)).length;
+      res.herald.zombieMon = E.data.monsters.zombie1.tc[2].hr; }
+    // ---- Sunder paths ------------------------------------------------------------------------------
+    res.sunderPaths = { table: {}, mf: {}, adj: {} };
     const hsrc = (tier, pl, pa, clvl) => { const ctx = E.getCtx({ players: pl || 1, party: pa || 1, ladder: true, tz: true, clvl: clvl || 85, tier, mf: 0 });
-      return [ctx, E.sources(ctx).find((s) => s.rank === 'herald' && s.mon === 'zombie1' && s.areaName === 'Blood Moor' && s.diff === 2)]; };
-    E.CONFIG.heraldSunderBonusBase = null;
-    { const [ctx, hs] = hsrc(1); const sp = E.sunderPaths(ctx, hs, null, 0); res.sunderPaths.unknown = { bonus: sp.bonus, total: sp.total, table: sp.table, chance: E.sunderChance(ctx, hs) }; }
-    E.CONFIG.heraldSunderBonusBase = 0.01;
-    for (const tier of [1, 2, 3, 4, 5]) { const [ctx, hs] = hsrc(tier); res.sunderPaths.bonus[tier] = E.sunderPaths(ctx, hs, null, 0).bonus; }
-    for (const pl of [1, 3, 8]) { const [ctx, hs] = hsrc(5, pl, 1); const sp = E.sunderPaths(ctx, hs, null, 0); res.sunderPaths.table[pl] = { table: sp.table, bonus: sp.bonus }; }
-    { const [ctx, hs] = hsrc(1); const sp = E.sunderPaths(ctx, hs, 'Cold Rupture', 0); res.sunderPaths.coldShare = { table: sp.table, bonus: sp.bonus, any: E.sunderPaths(ctx, hs, null, 0).table }; }
-    E.CONFIG.heraldSunderBonusBase = null;
-    // MF path
+      return [ctx, heraldSrc(ctx)]; };
+    for (const pl of [1, 3, 8]) { const [ctx, hs] = hsrc(5, pl, 1); const sp = E.sunderPaths(ctx, hs, null, 0); res.sunderPaths.table[pl] = { table: sp.table }; }
+    { const [ctx, hs] = hsrc(1); const sp = E.sunderPaths(ctx, hs, 'PreCrafted Cold Rupture', 0); res.sunderPaths.coldShare = { table: sp.table, any: E.sunderPaths(ctx, hs, null, 0).table }; }
+    // MF path (PreCrafted Sunders are spawnable cm3 uniques with DropConditionCalc Hell)
     const cm3f = [983, 983, 983, 1024];
-    const mfCount = (mlvl, diff) => { const q = E.quality('cm3', mlvl, 0, cm3f, true, diff); return { n: q.uniques.filter((x) => x.u.mf).length, p: q.uniques.filter((x) => x.u.mf).reduce((a, x) => a + x.p, 0), byId: Object.fromEntries(q.uniques.filter((x) => x.u.mf).map((x) => [x.u.id, x.p])) }; };
-    res.sunderPaths.mf = { m74h: mfCount(74, 2), m75h: mfCount(75, 2), m87h: mfCount(87, 2), m87n: mfCount(87, 1), m87nm0: mfCount(87, 0), m99h: mfCount(99, 2), nonSunderUniques87: E.quality('cm3', 87, 0, cm3f, true, 2).uniques.filter((x) => !x.u.mf).map((x) => x.u.id) };
+    const mfCount = (mlvl, diff) => { const q = E.quality('cm3', mlvl, 0, cm3f, true, diff); const sun = q.uniques.filter((x) => E.isSunder(x.u.id)); return { n: sun.length, p: sun.reduce((a, x) => a + x.p, 0), byId: Object.fromEntries(sun.map((x) => [x.u.id, x.p])) }; };
+    res.sunderPaths.mf = { m74h: mfCount(74, 2), m75h: mfCount(75, 2), m87h: mfCount(87, 2), m87n: mfCount(87, 1), m87nm0: mfCount(87, 0), m99h: mfCount(99, 2), nonSunderUniques87: E.quality('cm3', 87, 0, cm3f, true, 2).uniques.filter((x) => !E.isSunder(x.u.id)).map((x) => x.u.id) };
     { const ctx = ctxFor(1, 1); const hell = E.sources(ctx).filter((s) => s.diff === 2 && !s.tz);
       const lowS = hell.find((s) => s.rank === 'regular' && s.mlvl < 75); const hiS = hell.find((s) => s.name === 'Mephisto' && s.rank === 'boss');
-      const tg = { kind: 'unique', id: 'Cold Rupture' };
+      const tg = { kind: 'unique', id: 'PreCrafted Cold Rupture' };
       res.sunderPaths.src = { lowMlvl: lowS.mlvl, low: E.chanceFor(ctx, lowS, tg, 0).mf, hiMlvl: hiS.mlvl, hi: E.chanceFor(ctx, hiS, tg, 0).mf, hiMf300: E.chanceFor(ctx, hiS, tg, 300).mf,
         hiTable: E.chanceFor(ctx, hiS, tg, 0).explicit };
       const nmS = E.sources(ctx).filter((s) => s.diff === 1 && s.mlvl >= 75); res.sunderPaths.src.nmHigh = nmS.length;
       res.sunderPaths.src.nmMf = nmS.length ? E.chanceFor(ctx, nmS[0], tg, 0).mf : 0; }
+    // ---- table-driven explicit drops: statue pieces, shards, keys, Uber Ancients, Ars grimoires ----------------------------------------
+    res.drops = { idx: {}, src: {}, ars: {}, ubers: {} };
+    { const idx = E.searchIndex();
+      for (const c of ['pk1', 'pk2', 'pk3', 'ua1', 'ua2', 'ua3', 'ua4', 'ua5', 'xa1', 'xa5']) res.drops.idx[c] = idx.some((x) => x.kind === 'base' && x.code === c);
+      const ctx = ctxFor(1, 1);
+      const top = (s) => E.upgradeTC(s.tc, s.mlvl + (s.tcBoost || 0), s.boss && !s.tz);
+      const one = (name, rank, code, act) => {
+        const s = E.sources(ctx).find((x) => x.name === name && x.diff === 2 && x.rank === rank && !x.tz && (!act || x.act === act));
+        if (!s) return null;
+        const r = { tc: top(s), mlvl: s.mlvl, area: s.areaName };
+        for (const cap of [null, 6]) { E.CONFIG.dropCap = cap; r[cap === null ? 'off' : 'cap'] = E.chanceFor(ctx, s, { kind: 'base', code }, 0).target; }
+        E.CONFIG.dropCap = null;
+        return r;
+      };
+      for (const [nm, codes] of [['Andariel', ['ua1', 'ua2', 'ua3']], ['Duriel', ['ua1', 'ua2', 'ua3', 'ua4', 'ua5']], ['Mephisto', ['ua1', 'ua2', 'ua3', 'ua4', 'ua5']], ['Diablo', ['ua1', 'ua2', 'ua3', 'ua4', 'ua5']], ['Baal', ['ua1', 'ua2', 'ua3', 'ua4', 'ua5']]])
+        for (const c of codes) res.drops.src[nm + '|' + c] = one(nm, 'boss', c);
+      res.drops.src['The Countess|pk1'] = one('The Countess', 'super', 'pk1');
+      res.drops.src['The Summoner|pk2'] = one('The Summoner', 'boss', 'pk2');
+      res.drops.src['Nihlathak|pk3'] = one('Nihlathak', 'boss', 'pk3');
+      // Hell champion in act 1 -> Western Worldstone Shard (first champion row whose TC can drop it)
+      { const cs = E.sources(ctx).filter((x) => x.diff === 2 && x.rank === 'champion' && x.act === 1 && !x.tz);
+        let hit = null; for (const s of cs) { const p = E.chanceFor(ctx, s, { kind: 'base', code: 'xa1' }, 0).target; if (p > 0) { hit = [s, p]; break; } }
+        res.drops.src['champion|xa1'] = hit ? { tc: top(hit[0]), mlvl: hit[0].mlvl, area: hit[0].areaName, mon: hit[0].name, off: hit[1], n: cs.length } : null;
+        // how many distinct source kinds drop xa1 at all
+        const kinds = {}; for (const s of E.sources(ctx).concat(E.sources(E.getCtx({ players: 1, party: 1, ladder: true, tz: true, clvl: 85, tier: 5, mf: 0 })))) if (s.diff === 2 && E.chanceFor(ctx, s, { kind: 'base', code: 'xa1' }, 0).target > 0) kinds[s.rank + (s.tz ? '/tz' : '')] = 1;
+        res.drops.xa1Ranks = Object.keys(kinds).sort(); }
+      res.drops.herald = {};
+      for (const tier of [1, 5]) { const cx = E.getCtx({ players: 1, party: 1, ladder: true, tz: true, clvl: 85, tier, mf: 0 }); const hs = E.sources(cx).find((x) => x.rank === 'herald' && x.mon === 'zombie1' && x.areaName === 'Blood Moor' && x.diff === 2);
+        res.drops.herald[tier] = { tc: hs.tc, tcName: E.upgradeTC(hs.tc, hs.mlvl + hs.tcBoost, false, / Herald [ABC]$/), p: ['xa1', 'xa2', 'xa3', 'xa4', 'xa5'].map((c) => E.chanceFor(cx, hs, { kind: 'base', code: c }, 0).target) }; }
+      // Ars grimoires (unique waf/wae/wac): all sources at 0 MF, 1 player
+      for (const id of ["Ars Al'Diablolos", "Ars Tor'Baalos", "Ars Dul'Mephistos"]) {
+        const rows = [];
+        for (const tzOn of [false, true]) {
+          const cx = E.getCtx({ players: 1, party: 1, ladder: true, tz: tzOn, clvl: 85, tier: 5, mf: 0 });
+          for (const s of E.sources(cx)) { const p = E.chanceFor(cx, s, { kind: 'unique', id }, 0).target; if (p > 0) rows.push([s.name, s.areaName, s.rank, s.diff, !!s.tz, p, s.tier || 0]); }
+        }
+        rows.sort((a, b) => b[5] - a[5]);
+        res.drops.ars[id] = { n: rows.length, top: rows.slice(0, 5), topNoTz: rows.filter((x) => !x[4]).slice(0, 5), inIndex: idx.some((x) => x.kind === 'unique' && x.id === id) };
+      }
+      // Uber Ancients: six explicit uniques, expect 50% each per kill (before the cap)
+      for (const [nm, ids] of [['Uber Talic', ["Defender's Bile", "Defender's Fire"]], ['Uber Madawc', ["Guardian's Light", "Guardian's Thunder"]], ['Uber Korlic', ["Protector's Stone", "Protector's Frost"]]]) {
+        const rowsN = E.sources(ctx).filter((x) => x.name === nm);
+        const s = rowsN.find((x) => x.diff === 2);
+        const r = { rows: rowsN.length, diffs: rowsN.map((x) => x.diff), mlvl: s ? s.mlvl : null, area: s ? s.areaName : null, act: s ? s.act : null, ps: {}, idx: {} };
+        for (const id of ids) { r.ps[id] = s ? E.chanceFor(ctx, s, { kind: 'unique', id }, 0).target : 0; r.idx[id] = idx.some((x) => x.kind === 'unique' && x.id === id); }
+        res.drops.ubers[nm] = r;
+      }
+    }
     // herald quality adj
     { const [ctx, hs1] = hsrc(1), [ctx3, hs3] = hsrc(3);
       const manual = (cx, s) => { let u = 0; for (const [k, p] of E.srcDist(cx, s)) { const m = E.metaCache.get(k); if (m.kind === 'i' && m.id !== 'gld') u += p * E.quality(m.id, s.mlvl, 0, m.f, true, s.diff).unique; } return u; };

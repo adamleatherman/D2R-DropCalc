@@ -74,6 +74,7 @@ class Ref:
                     self.items[r["code"]] = r
         self.types = {r["Code"]: r for r in rd("itemtypes") if r.get("Code")}
         self.uniq = rd("uniqueitems")
+        self.uidx = {u["index"] for u in self.uniq}
         self.sets = rd("setitems")
         self.ratio = rd("itemratio")
         self.monstats = {r["Id"]: r for r in rd("monstats")}
@@ -153,6 +154,8 @@ class Ref:
                 out = {k: 1 - m for k, m in miss.items()}
         elif name in self.items:
             out = {("i", name, inh): 1.0}
+        elif name in self.uidx:
+            out = {("u", name, (0, 0, 0, 0)): 1.0}   # explicit unique: TC quality factors irrelevant, one leaf per id
         else:
             g = self.generic(name)
             if g:
@@ -200,14 +203,8 @@ class Ref:
             return {"unique": 0, "set": 0, "rare": 0, "magic": 0, "u": {}, "s": {}}
         row = self.ratio_row(code)
         q = n(it.get("level"))
-        eu = [u for u in self.uniq if u["code"] == code and n(u.get("spawnable")) == 1 and n(u.get("disabled")) == 0 and n(u["lvl"]) <= min(mlvl, 99) and not u.get("DropConditionCalc")]
+        eu = [u for u in self.uniq if u["code"] == code and n(u.get("spawnable")) == 1 and n(u.get("disabled")) == 0 and n(u["lvl"]) <= min(mlvl, 99) and (not u.get("DropConditionCalc") or (hell and u["DropConditionCalc"].strip('"') == "cond('Difficulty', hell)"))]
         es = [s for s in self.sets if s["item"] == code and n(s.get("spawnable")) == 1 and n(s.get("disabled")) == 0 and n(s["lvl"]) <= min(mlvl, 99) and not s.get("DropConditionCalc")]
-        if code == "cm3" and hell and mlvl >= 75 and n(it.get("spawnable")) == 1:
-            # 3.2/3.3 hard-coded rule: the six Sunder uniques (spawnable=0 in the table) join the unique grand charm pool
-            for sid in self.sunder_ids():
-                u = [x for x in self.uniq if x["index"] == sid][0]
-                if n(u["lvl"]) <= min(mlvl, 99):
-                    u = dict(u); u["rarity"] = str(n(u["rarity"], 1) * penalty); eu.append(u)
         tt = self.types.get(it.get("type", ""), {})
         anc = self.item_anc(code)
         can_rare = n(tt.get("Rare")) == 1
@@ -506,12 +503,13 @@ def main():
                          worst, "<5", "leaves missing from engine: %d" % miss))
             if bad or miss:
                 FAIL.append("cap MC " + tcn)
-    # expected Equip-branch items per kill (reference simulation from the task: 6.41 -> 2.02, Mephisto 4.50 -> 4.31, Andariel 3.16 -> 3.15)
-    for tcn, br, unc, cap_ in (("Duriel (H) Desecrated D", "Equip", 6.41, 2.02), ("Mephisto (H) Desecrated D", "Equip", 4.50, 4.31), ("Andarielq (H) Desecrated H", "Equip", 3.16, 3.15)):
+    # expected Equip-branch items per kill: Duriel 6.27 -> 1.97, Mephisto 4.37 -> 4.20, Andariel 3.16 -> 3.15 (the first two were 6.41 -> 2.02 and
+    # 4.50 -> 4.31 on the wrong LoD-copy tables; the real RotW Desecrated D tables give the new figures)
+    for tcn, br, unc, cap_ in (("Duriel (H) Desecrated D", "Equip", 6.27, 1.97), ("Mephisto (H) Desecrated D", "Equip", 4.37, 4.20), ("Andarielq (H) Desecrated H", "Equip", 3.16, 3.15)):
         a = mc.branch_mean(tcn, 85, 1, 30000, 7, None, br)
         b = mc.branch_mean(tcn, 85, 1, 30000, 8, 6, br)
         ok = abs(a - unc) < 0.1 and abs(b - cap_) < 0.08
-        ROWS.append(("PASS" if ok else "FAIL", "MC expected '%s' items/kill, %s: uncapped / capped" % (br, tcn), "%.2f / %.2f" % (a, b), "%.2f / %.2f" % (unc, cap_), "reference simulation from the task"))
+        ROWS.append(("PASS" if ok else "FAIL", "MC expected '%s' items/kill, %s: uncapped / capped" % (br, tcn), "%.2f / %.2f" % (a, b), "%.2f / %.2f" % (unc, cap_), "MC of the raw tables; Andariel figure from the task"))
         if not ok:
             FAIL.append("equip mean " + tcn)
     # cap = null / 0 reproduces the old numbers; Cow King (never reaches 6 items) is unchanged with the cap on
@@ -623,13 +621,15 @@ def main():
     tiers = dz["game_difficulties"]["rotw"]["hell"]["defaults"]["herald_tiers"]
     boosts = [t.get("herald_treasure_class_level_boost", 0) for t in tiers]
     check("herald tier boosts from desecratedzones.json (0,3,6,9,12)", sum(b * 10 ** i for i, b in enumerate(boosts)), sum(b * 10 ** i for i, b in enumerate([0, 3, 6, 9, 12])))
-    g37 = sorted([(n(r["level"]), name) for name, r in ref.tc.items() if n(r.get("group")) == 37])
+    gh = sorted([(n(r["level"]), name) for name, r in ref.tc.items() if n(r.get("group")) == 41 and re.search(r" Herald [ABC]$", name)])
     def grp_pick(l):
         best = None
-        for lv, nm in g37:
+        for lv, nm in gh:
             if lv <= l: best = nm
         return best
-    zomb_tc = ref.monstats["zombie1"]["TreasureClassDesecratedUnique(H)"]
+    zomb_tc = ref.monstats["zombie1"]["TreasureClassHerald(H)"]
+    check("herald TC is monstats TreasureClassHerald(H) (zombie1: %s)" % zomb_tc, 1 if Hh["zombieMon"] == zomb_tc == Hh["tiers"]["c60t1"]["tc"] else 0, 1)
+    check("every herald row uses an 'Act N (H) Herald A-C' TC", Hh["badTC"], 0)
     bm = n(ref.levels[2]["MonLvlEx(H)"])
     for clvl in (60, 94):
         base_ml = max(bm, min(96, max(70, clvl + 2))) + 3
@@ -639,44 +639,103 @@ def main():
             ROWS.append(("PASS" if h["resolved"] == grp_pick(base_ml + b) else "FAIL", "herald tier %d clvl %d resolved TC (mlvl %d + boost %d)" % (tier, clvl, base_ml, b), h["resolved"], grp_pick(base_ml + b), "base TC " + zomb_tc))
             if h["resolved"] != grp_pick(base_ml + b): FAIL.append("herald tc")
     info("tier boost effect", "%s -> %s" % (Hh["tiers"]["c60t1"]["resolved"], Hh["tiers"]["c60t5"]["resolved"]), "differs at low clvl",
-         "at clvl 94 both tiers resolve to %s (mlvl already above the group top, level 85)" % Hh["tiers"]["c94t1"]["resolved"])
+         "at clvl 94 both tiers resolve to %s" % Hh["tiers"]["c94t1"]["resolved"])
+    st = Hh["statue"]
+    ROWS.append(("PASS" if st.get("found") else "FAIL", "found a herald with mlvl + tier boost = 92 (where group 41 holds the Ancient Statue TCs)", "clvl %s tier %s" % (st.get("clvl"), st.get("tier")), "found", ""))
+    if not st.get("found"): FAIL.append("statue level")
+    else:
+        check("herald at level 92 does not group-upgrade into an Ancient Statue TC (no ua1-ua5 leaf)", st["uaLeaves"], 0)
+        info("group-upgrade at 92 without the herald restriction", st["ungated"], "an Ancient Statue TC", "data quirk: heralds are restricted to the Herald TCs (heralds are observed not to drop statue pieces)")
     check("heralds absent in LoD", Hh["inLod"], 0)
     check("heralds absent without terror zone", Hh["noTz"], 0)
     ROWS.append(("PASS" if Hh["count"] > 0 else "FAIL", "heralds present in RotW + Hell + TZ", Hh["count"], ">0", ""))
-    sc = ref.tc["Sunder Charms"]
-    ssum = sum(n(sc["Prob%d" % i]) for i in range(1, 11))
+    EXTRA = (None, None, "1 Extra", "1 Extra", "2 Extra")   # published-odds tier gating (see CONFIG.heraldExtraByTier)
+    def gated(top, tier):
+        row = dict(ref.tc[top])
+        keep = []
+        for k in range(1, 11):
+            it = row.get("Item%d" % k, "")
+            if not it: continue
+            m = re.search(r" - (\d Extra)$", it)
+            if m and m.group(1) != EXTRA[tier - 1]: continue
+            keep.append((it, row["Prob%d" % k]))
+        for k in range(1, 11):
+            row["Item%d" % k] = keep[k - 1][0] if k <= len(keep) else ""
+            row["Prob%d" % k] = keep[k - 1][1] if k <= len(keep) else ""
+        row["Picks"] = str(-sum(n(p) for _, p in keep))
+        nm = "%s|tier%d" % (top, tier)
+        ref.tc[nm] = row
+        return nm
+    sun_ids = ref.sunder_ids()
     for key, v in Hh["sunder"].items():
         pl, pa = key.split("/")
-        nd = ref.adj_nodrop(n(sc["NoDrop"]), ssum, v["N"])
-        check("Sunder chance per herald kill, players %s / party %s (N=%d)" % (pl, pa, v["N"]), v["p"], ssum / (ssum + nd), 1e-9, "1 in %.0f" % (1 / v["p"]))
+        d = ref.dist(gated(v["tc"], 3), 91, v["N"])
+        want = sum(p for (kind, code, f), p in d.items() if kind == "u" and code in sun_ids)
+        check("Sunder chance per tier-3 herald kill, players %s / party %s (N=%d)" % (pl, pa, v["N"]), v["p"], want, 1e-9, "1 in %.0f" % (1 / v["p"]))
     p1 = Hh["sunder"]["1/1"]["p"]
-    info("tier-1, 1-player Sunder chance per herald kill (tables)", "%.4f%% (1 in %.0f)" % (p1 * 100, 1 / p1), "0.3677% (1 in 272), diablo2.io datamine",
-         "tables give %.1f%% more; the community number may predate 3.3 (Latent Sunder min drop level 69 -> 75). Not forced to agree." % ((p1 / 0.003677 - 1) * 100))
-    # ---- Sunder paths (3.2 / 3.3 official patch notes) ---------------------------------------------
+    # PreCrafted Flame Rift from heralds: published 1:342.8 (tier 1/2), 1:228.7 (tier 3/4), 1:171.7 (tier 5) = 1-(1-p)^n, p = (2/407)(30/101), n = 2/3/4 item picks
+    pf = (2 / 407) * (30 / 101)
+    FL = Hh["flame"]
+    for tier, npk, pub in ((1, 2, 342.8), (2, 2, 342.8), (3, 3, 228.7), (4, 3, 228.7), (5, 4, 171.7)):
+        want = 1 - (1 - pf) ** npk
+        e = FL["off"][str(tier)]
+        check("herald tier %d PreCrafted Flame Rift (table path, uncapped) = 1-(1-p)^%d" % (tier, npk), e["table"], want, 1e-9, "1 in %.1f" % (1 / e["table"]))
+        check("herald tier %d Flame Rift: explicit-leaf chance == table path" % tier, e["explicit"], e["table"], 1e-9)
+        check("herald tier %d Flame Rift 1 in N matches the published figure %.1f" % (tier, pub), 1 / e["table"], pub, 3e-4, "published figures are rounded to 4 significant digits")
+        d = ref.dist(gated("Act 1 (H) Herald A", tier), 91, 1)
+        check("herald tier %d Flame Rift: independent reference (uncapped)" % tier, e["explicit"], sum(p for (kind, code, f), p in d.items() if kind == "u" and code == "PreCrafted Flame Rift"), 1e-9)
+        c = FL["cap"][str(tier)]
+        info("herald tier %d Flame Rift with the 6-item drop cap" % tier, "1 in %.1f" % (1 / c["table"]), "1 in %.1f uncapped" % (1 / e["table"]),
+             "MF path (cm3 uniques) adds %.3g per kill at 0%% MF, total %.3g" % (e["mf"], e["total"]))
+    # ---- Sunder paths ------------------------------------------------------------------------------
     SP = js["sunderPaths"]
-    u = SP["unknown"]
-    ROWS.append(("PASS" if u["bonus"] is None and u["total"] is None else "FAIL", "herald bonus base unknown -> bonus and total are null (UI: 'unknown base')", str(u["bonus"]), "null", ""))
-    if not (u["bonus"] is None and u["total"] is None): FAIL.append("bonus null")
-    check("path (a) table path == previous any-Sunder chance (unchanged)", u["table"], u["chance"], 1e-12)
-    check("path (a) table path value unchanged from 3.3-table result (tier 1, 1 player)", u["table"], 0.00420833, 1e-4)
-    for tier, mult in zip((1, 2, 3, 4, 5), (1, 1, 2, 2, 3)):
-        check("herald bonus path tier %d = base x %d (base 1%%)" % (tier, mult), SP["bonus"][str(tier)], 0.01 * mult, 1e-12)
-    check("bonus path has no player-count scaling (1 vs 8 players)", SP["table"]["8"]["bonus"], SP["table"]["1"]["bonus"], 1e-12)
-    ROWS.append(("PASS" if SP["table"]["8"]["table"] > 1.5 * SP["table"]["1"]["table"] else "FAIL", "table path does scale with players (8 vs 1)", SP["table"]["8"]["table"] / SP["table"]["1"]["table"], ">1.5", ""))
-    if not SP["table"]["8"]["table"] > 1.5 * SP["table"]["1"]["table"]: FAIL.append("table scale")
+    check("herald Sunder table path does not scale with players (Herald Item TCs have NoDrop 0; 8 vs 1)", SP["table"]["8"]["table"], SP["table"]["1"]["table"], 1e-12)
     cs = SP["coldShare"]
-    check("Cold Rupture share of Sunder pool = 30/101", cs["table"] / cs["any"], 30 / 101, 1e-9)
-    check("Cold Rupture bonus share = 30/101 of tier-1 bonus", cs["bonus"], 0.01 * 30 / 101, 1e-9)
+    check("Cold Rupture share of Sunder pool = 30/101", cs["table"] / cs["any"], 30 / 101, 1e-3, "'any Sunder' sums the six per-leaf chances (not a union), so the ratio is 30/101 only to ~1e-4")
+    # ---- table-driven explicit drops ----------------------------------------------------------------
+    DR = js["drops"]
+    for c, ok in DR["idx"].items():
+        ROWS.append(("PASS" if ok else "FAIL", "search index lists explicitly dropped item %s (spawnable=%s)" % (c, ref.items[c].get("spawnable") or "0"), ok, True, "")); 
+        if not ok: FAIL.append("index " + c)
+    def ref_base(tc, mlvl, code):
+        return sum(p for (kind, cd, f), p in ref.dist(tc, mlvl, 1).items() if kind == "i" and cd == code)
+    for key, r in DR["src"].items():
+        if r is None:
+            ROWS.append(("FAIL", "explicit drop source " + key, "missing", "present", "")); FAIL.append("src " + key); continue
+        nm, code = key.split("|")
+        want = ref_base(r["tc"], r["mlvl"], code)
+        must = key in ("Andariel|ua1", "champion|xa1", "The Countess|pk1", "The Summoner|pk2", "Nihlathak|pk3")
+        ok = (r["off"] > 0) == (want > 0) and (r["off"] > 0 or not must)
+        ROWS.append(("PASS" if ok else "FAIL", "Hell %s -> %s per-kill chance %s (%s)" % (nm, code, ">0" if must else "> 0 iff the TC names it", r["tc"]), r["off"], want, "1 in %.0f uncapped%s" % (1 / r["off"] if r["off"] else 0, "" if "cap" not in r else ", 1 in %.0f with the 6-item cap" % (1 / r["cap"] if r["cap"] else 0))))
+        if not ok: FAIL.append("explicit drop > 0 " + key)
+        check("Hell %s -> %s: engine == independent reference (uncapped)" % (nm, code), r["off"], want, 1e-9)
+    info("sources that drop xa1 at 0 MF (Hell, incl. terror zone)", ", ".join(DR["xa1Ranks"]), "-", "from TC walk only (no hard-coded route)")
+    for tier, h in DR["herald"].items():
+        info("Hell herald (zombie1, tier %s, %s) -> xa1..xa5 per kill" % (tier, h["tcName"]), ", ".join("1 in %.0f" % (1 / p) if p else "-" for p in h["p"]), "-", "any shard: 1 in %.0f" % (1 / sum(h["p"])))
+        ROWS.append(("PASS" if sum(h["p"]) > 0 else "FAIL", "Hell herald tier %s drops a shard" % tier, sum(h["p"]), ">0", ""))
+        if not sum(h["p"]) > 0: FAIL.append("herald shard")
+    for idn, a in DR["ars"].items():
+        ROWS.append(("PASS" if a["inIndex"] and a["n"] > 0 else "FAIL", "%s in search index with >=1 source" % idn, a["n"], ">0", "; ".join("%s (%s) %s %s%s 1 in %.0f" % (x[0], x[1], x[2], "NmH"[x[3]], " TZ" if x[4] else "", 1 / x[5]) for x in a["top"]) + " | no TZ: " + "; ".join("%s (%s) %s 1 in %.0f" % (x[0], x[1], x[2], 1 / x[5]) for x in a["topNoTz"])))
+        if not (a["inIndex"] and a["n"] > 0): FAIL.append("ars " + idn)
+    for nm, r in DR["ubers"].items():
+        check("%s: rows only in Hell (%s)" % (nm, r["diffs"]), 1 if r["diffs"] == [2] else 0, 1)
+        check("%s mlvl = monstats Level(H) 110" % nm, r["mlvl"], 110)
+        ROWS.append(("PASS" if r["area"] == "ColossalSummit" and r["act"] == 5 else "FAIL", "%s area/act" % nm, "%s / act %s" % (r["area"], r["act"]), "ColossalSummit / act 5", ""))
+        if not (r["area"] == "ColossalSummit" and r["act"] == 5): FAIL.append("uber area")
+        for uid, p in r["ps"].items():
+            check("%s -> %s: 1/2 per kill" % (nm, uid), p, 0.5, 1e-9)
+            ROWS.append(("PASS" if r["idx"][uid] else "FAIL", "%s in search index" % uid, r["idx"][uid], True, ""))
+            if not r["idx"][uid]: FAIL.append("index " + uid)
     mf = SP["mf"]
     check("MF path: 0 sunders for mlvl 74 (Hell)", mf["m74h"]["n"], 0)
     check("MF path: 6 sunders at mlvl 75 (Hell)", mf["m75h"]["n"], 6)
     check("MF path: 0 outside Hell (Nightmare, mlvl 87)", mf["m87n"]["n"], 0)
     check("MF path: 0 outside Hell (Normal, mlvl 87)", mf["m87nm0"]["n"], 0)
     check("MF path: engine == independent Ref at mlvl 87", sum(mf["m87h"]["byId"].values()), sum(ref.quality("cm3", 87, 0, (983, 983, 983, 1024))["u"].get(i, 0) for i in ref.sunder_ids()), 1e-9)
-    ROWS.append(("INFO", "MF path unique-pool at mlvl 87", "%.4f of unique grand charms are Sunders" % (mf["m87h"]["p"] / (mf["m87h"]["p"] + sum(ref.quality("cm3", 87, 0, (983, 983, 983, 1024))["u"].get(i, 0) for i in [x for x in mf["nonSunderUniques87"]]))), "-", "other cm3 uniques: %s; penalty 1 (3.3 reduction size unknown)" % ", ".join(mf["nonSunderUniques87"])))
+    ROWS.append(("INFO", "MF path unique-pool at mlvl 87", "%.4f of unique grand charms are Sunders" % (mf["m87h"]["p"] / (mf["m87h"]["p"] + sum(ref.quality("cm3", 87, 0, (983, 983, 983, 1024))["u"].get(i, 0) for i in [x for x in mf["nonSunderUniques87"]]))), "-", "other cm3 uniques: %s" % ", ".join(mf["nonSunderUniques87"])))
     sr = SP["src"]
     check("source-level MF path 0 for Hell mlvl %d < 75" % sr["lowMlvl"], sr["low"], 0)
-    ROWS.append(("PASS" if sr["hi"] > 0 else "FAIL", "source-level MF path > 0 for Hell Mephisto (mlvl %d), Cold Rupture" % sr["hiMlvl"], sr["hi"], ">0", "1 in %.0f; table path %s (only terrorized TCs contain it)" % (1 / sr["hi"], "1 in %.0f" % (1 / sr["hiTable"]) if sr["hiTable"] else "0") ))
+    ROWS.append(("PASS" if sr["hi"] > 0 else "FAIL", "source-level MF path > 0 for Hell Mephisto (mlvl %d), Cold Rupture" % sr["hiMlvl"], sr["hi"], ">0", "1 in %.0f; table path %s (only terrorized TCs contain it)" % (1 / sr["hi"] if sr["hi"] else 0, "1 in %.0f" % (1 / sr["hiTable"]) if sr["hiTable"] else "0") ))
     if not sr["hi"] > 0: FAIL.append("mf src")
     check("source-level MF path 0 in Nightmare (mlvl>=75 sources: %d)" % sr["nmHigh"], sr["nmMf"], 0)
     ad = SP["adj"]

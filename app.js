@@ -7,7 +7,7 @@
   let worker = null, reqId = 0;
 
   // ---------------- persistent selectors ----------------
-  const KEYS = ['s_mode', 's_tier', 's_bonus', 's_diff', 's_players', 's_party', 's_mf', 's_quest', 's_tz', 's_clvl', 's_ladder', 's_act', 's_pct'];
+  const KEYS = ['s_mode', 's_tier', 's_diff', 's_players', 's_party', 's_mf', 's_quest', 's_tz', 's_clvl', 's_ladder', 's_act', 's_pct'];
   function loadSel() {
     try {
       const raw = localStorage.getItem('d2rdropcalc.sel');
@@ -26,7 +26,7 @@
   function clampInt(el, lo, hi) { let v = parseInt(el.value, 10); if (isNaN(v)) v = lo; v = Math.max(lo, Math.min(hi, v)); el.value = v; return v; }
   function updTier() {
     const d = parseInt($('s_diff').value, 10);
-    $('l_bonus').hidden = $('l_tier').hidden = !($('s_mode').value === 'rotw' && $('s_tz').checked && (d === 2 || d < 0));
+    $('l_tier').hidden = !($('s_mode').value === 'rotw' && $('s_tz').checked && (d === 2 || d < 0));
   }
   function readSel() {
     if (E) E.setMode($('s_mode').value);
@@ -34,11 +34,9 @@
     const players = clampInt($('s_players'), 1, 8);
     const party = Math.min(clampInt($('s_party'), 1, 8), players);
     $('s_party').value = party;
-    { const v = parseFloat($('s_bonus').value); if (E) E.CONFIG.heraldSunderBonusBase = isNaN(v) || v < 0 ? null : Math.min(1, v / 100); }
     return {
       diff: parseInt($('s_diff').value, 10), players, party,
       mf: clampInt($('s_mf'), 0, 1000), tz: $('s_tz').checked, quest: $('s_quest').checked, clvl: clampInt($('s_clvl'), 1, 99),
-      bonus: (() => { const v = parseFloat($('s_bonus').value); return isNaN(v) || v < 0 ? null : Math.min(1, v / 100); })(),
       mode: $('s_mode').value, tier: parseInt($('s_tier').value, 10) || 1,
       ladder: $('s_ladder').value === '1', act: parseInt($('s_act').value, 10),
     };
@@ -89,8 +87,8 @@
     return st;
   }
 
-  const HERALD_TIP = 'ASSUMED drop table: the game data does not name the herald TC (monstats TreasureClassHerald is empty), so this uses the monster\'s desecrated-unique TC, group-upgraded at mlvl + herald tier boost. The boost only matters while mlvl + boost is below the group top (level 85).';
-  const rankTag = (r) => r === 'regular' ? '' : r === 'herald' ? ' <span class="tag herald" title="' + esc(HERALD_TIP) + '">herald (assumed TC)</span>' : ' <span class="tag ' + r + '">' + r + '</span>';
+  const HERALD_TIP = 'Drop table: monstats TreasureClassHerald(H), group-upgraded at mlvl + herald tier boost (group 41: Act N (H) Herald A-C).';
+  const rankTag = (r) => r === 'regular' ? '' : r === 'herald' ? ' <span class="tag herald" title="' + esc(HERALD_TIP) + '">herald</span>' : ' <span class="tag ' + r + '">' + r + '</span>';
   const srcCols = [
     { k: 'name', label: 'Monster', l: 1, get: (r) => r.src.name, html: (r) => esc(r.src.name) + rankTag(r.src.rank) },
     { k: 'area', label: 'Area', l: 1, get: (r) => r.src.areaName, html: (r) => esc(r.src.areaName) + (r.src.tz ? ' <span class="tz">TZ</span>' : '') },
@@ -133,12 +131,10 @@
   const isSun = () => target1 && target1.kind === 'unique' && E.isSunder(target1.id);
   const isWhiteBase = () => target1 && target1.kind === 'base' && (E.items[target1.code].k === 'a' || E.items[target1.code].k === 'w') && !E.items[target1.code].an;
   const BQN = { white: 'white (low+normal+superior)', normsup: 'normal+superior', sup: 'superior only' };
-  const fmtPath = (v) => v === null ? 'unknown base' : pct(v);
   const cols1 = srcCols.concat([
-    { k: 'sTable', show: isSun, label: 'Sunder: table path', note: 'Data-driven: the Sunder Charms TC inside desecrated champ/unique/boss/herald TCs, incl. player-count NoDrop.', get: (r) => r.sp ? r.sp.table : 0, fmt: (r) => pct(r.sp.table) },
-    { k: 'sBonus', show: isSun, label: 'Sunder: herald bonus', note: '3.2 notes: heralds only, tier multipliers 1/1/2/2/3, not modified by player count. The base chance is unknown: enter one in the herald settings.', get: (r) => r.sp && r.sp.bonus !== null ? r.sp.bonus : -1, fmt: (r) => r.src.herald ? fmtPath(r.sp.bonus) : '-' },
-    { k: 'sMf', show: isSun, label: 'Sunder: MF path', note: 'Hard-coded rule (3.2/3.3): unique grand charm roll, Hell only, mlvl >= 75. 3.3 reduced the MF rate by an unknown amount (CONFIG.sunderMfPenalty, default 1 = unreduced).', get: (r) => r.sp ? r.sp.mf : 0, fmt: (r) => pct(r.sp.mf) },
-    { k: 'sTotal', show: isSun, label: 'Sunder: total', note: 'Combined chance of the three paths; shown only when every part is known.', get: (r) => r.sp && r.sp.total !== null ? r.sp.total : -1, fmt: (r) => r.sp.total === null ? '-' : pct(r.sp.total) },
+    { k: 'sTable', show: isSun, label: 'Sunder: table path', note: 'Data-driven: the Sunder Charms TC inside desecrated champ/unique/boss TCs and the Herald Item TCs (herald tier gates the extra item picks), incl. player-count NoDrop.', get: (r) => r.sp ? r.sp.table : 0, fmt: (r) => pct(r.sp.table) },
+    { k: 'sMf', show: isSun, label: 'Sunder: MF path', note: 'Data-driven: the PreCrafted Sunders are spawnable unique grand charms (rarity 1, lvl 75, DropConditionCalc Hell only), so a unique cm3 roll can pick one.', get: (r) => r.sp ? r.sp.mf : 0, fmt: (r) => pct(r.sp.mf) },
+    { k: 'sTotal', show: isSun, label: 'Sunder: total', note: 'Combined chance of both paths.', get: (r) => r.sp ? r.sp.total : 0, fmt: (r) => pct(r.sp.total) },
     { k: 'pbase', label: 'P(base)', get: (r) => r.c.base, fmt: (r) => pct(r.c.base) },
     { k: 'plow', show: isWhiteBase, label: 'P(low)', note: 'Low quality (crude/cracked/damaged/low quality) base. Boss, champion and unique TCs force Magic=1024, so this is 0 there.', get: (r) => r.c.low, fmt: (r) => pct(r.c.low) },
     { k: 'pnorm', show: isWhiteBase, label: 'P(normal)', note: 'Normal quality base (what is left after unique/set/rare/magic/superior/low).', get: (r) => r.c.normal, fmt: (r) => pct(r.c.normal) },
@@ -302,7 +298,7 @@
     E.setMode($('s_mode').value); updTier();
     $('dataInfo').textContent = 'data built ' + data.meta.built + ' from ' + data.meta.source;
     INDEX = E.searchIndex();
-    { const qs0 = new URLSearchParams(location.search); if (qs0.get('mode')) $('s_mode').value = qs0.get('mode'); if (qs0.get('tz')) { $('s_tz').checked = true; $('s_clvl').value = qs0.get('tz'); } if (qs0.get('tier')) $('s_tier').value = qs0.get('tier'); if (qs0.get('bonus')) $('s_bonus').value = qs0.get('bonus'); if (qs0.get('mf')) $('s_mf').value = qs0.get('mf'); E.setMode($('s_mode').value); updTier(); }
+    { const qs0 = new URLSearchParams(location.search); if (qs0.get('mode')) $('s_mode').value = qs0.get('mode'); if (qs0.get('tz')) { $('s_tz').checked = true; $('s_clvl').value = qs0.get('tz'); } if (qs0.get('tier')) $('s_tier').value = qs0.get('tier'); if (qs0.get('mf')) $('s_mf').value = qs0.get('mf'); E.setMode($('s_mode').value); updTier(); }
     const noWorker = new URLSearchParams(location.search).has('noworker');
     try { if (noWorker) throw new Error('worker disabled'); worker = new Worker('worker.js'); worker.onerror = () => { worker = null; }; } catch (e) { worker = null; }
 
