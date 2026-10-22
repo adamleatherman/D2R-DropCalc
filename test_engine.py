@@ -98,6 +98,30 @@ class Ref:
             a += [x for x in self.anc(r["type2"]) if x not in a]
         return a
 
+    def affixes(self, code, alvl=99):
+        """Eligible magic prefixes/suffixes ('name|class') for a base at an affix level, straight from the raw tables.
+        Rule: type (or a parent) in itype, none in etype; a class tagged affix (classspecific) may appear on any matching base
+        except a class-specific base (type chain with a Class in itemtypes), which only takes its own class."""
+        anc = self.item_anc(code)
+        cls = [self.types[t]["Class"] for t in anc if self.types[t].get("Class")]
+        out = {}
+        for key, fname in (("p", "magicprefix"), ("s", "magicsuffix")):
+            res = []
+            for a in rd(fname):
+                if not a.get("Name") or n(a.get("version")) < 1 or n(a.get("frequency")) <= 0 or not n(a.get("spawnable")):
+                    continue
+                if n(a["level"]) > alvl or (a.get("maxlevel") and n(a["maxlevel"]) < alvl):
+                    continue
+                its = [a["itype%d" % i] for i in range(1, 8) if a.get("itype%d" % i)]
+                ets = [a["etype%d" % i] for i in range(1, 6) if a.get("etype%d" % i)]
+                if not any(t in anc for t in its) or any(t in anc for t in ets):
+                    continue
+                if a.get("classspecific") and cls and a["classspecific"] not in cls:
+                    continue
+                res.append(a["Name"] + "|" + a.get("classspecific", ""))
+            out[key] = sorted(res)
+        return out
+
     def adj_nodrop(self, nd, s, N):
         if nd <= 0 or N <= 1 or s <= 0:
             return nd
@@ -598,6 +622,20 @@ def main():
     info("Hell Countess Ist (r24) per kill, 1 player", "1 in %.0f" % (1 / ist), "1 in 287 (old forum figure)",
          "rune table alone gives 1 in %.0f; the item table's 'Act 2 (H) Good' -> Runes 14 -> ... -> Runes 12 chain adds the rest. 287 is a 1.10-era number." % (1 / rune_only))
     check("Hell Countess Ist is within 2%% of the rune-table-only hand value", ist / rune_only, 1.0, 0.02)
+    # ---- class tagged affixes (engine.eligible vs the raw-table reference)
+    AF = js["affix"]
+    for code in ("ob1", "ba1", "am5", "amu"):
+        want = ref.affixes(code)
+        check("affixes %s: prefix set equals reference (%d)" % (code, len(want["p"])), AF[code]["p"] == want["p"], True, 0)
+        check("affixes %s: suffix set equals reference (%d)" % (code, len(want["s"])), AF[code]["s"] == want["s"], True, 0)
+    # ob1 = Sorceress orb: before the fix the dead check let nine Barbarian affixes (Expert's, Raging, Echoing, ...) through
+    ob = [x for x in AF["ob1"]["p"] + AF["ob1"]["s"] if x.split("|")[1]]
+    check("Sorceress orb ob1: no foreign class affix (barbarian leak gone)", sum(1 for x in ob if not x.endswith("|sor")), 0)
+    check("Sorceress orb ob1: own class affixes remain", 1 if any(x.endswith("|sor") for x in ob) else 0, 1)
+    check("Sorceress orb ob1: Expert's (bar) excluded", 1 if "Expert's|bar" in AF["ob1"]["p"] else 0, 0)
+    amcls = {x.split("|")[1] for x in AF["amu"]["p"] + AF["amu"]["s"] if x.split("|")[1]}
+    check("amulet still gets class affixes of all 8 classes", len(amcls), 8)
+    check("amulet class set matches reference", 1 if amcls == {"ama", "bar", "nec", "pal", "sor", "ass", "dru", "war"} else 0, 1)
     # ---- game modes (LoD = excel\base, RotW = root) ------------------------------------------------
     M = js["modes"]
     base_armor = {r["code"]: r for r in rd_sub("armor", "base") if r.get("code")}

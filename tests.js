@@ -80,6 +80,12 @@
         return p - Math.floor((p * baalTc.u) / 1024);
       })(),
     };
+    // ---- class tagged affixes: class-specific bases only take their own class, neutral bases of a matching type take any
+    res.affix = {};
+    for (const code of ['ob1', 'ba1', 'am5', 'amu']) {
+      const el = E.eligible(code, 99, false);
+      res.affix[code] = { p: el.p.map((a) => a.n + '|' + a.cls).sort(), s: el.s.map((a) => a.n + '|' + a.cls).sort() };
+    }
     // ---- game modes -----------------------------------------------------------------------------
     res.modes = {};
     const grim = Object.keys(data.items).filter((c) => data.items[c].t === 'grim');

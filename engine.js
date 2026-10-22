@@ -779,7 +779,9 @@
             if (rare && !a.rare) continue;
             if (a.lvl > alvl) continue;
             if (a.max && a.max < alvl) continue;
-            // class tagged affixes (e.g. +Sorceress skills) may appear on any base of a matching item type (amulets, staves, charms),\n            // but a class-specific base (e.g. an Amazon bow) only takes affixes of its own class.\n            if (a.cls && cls.length && cls.indexOf(a.cls) < 0) continue;
+            // class tagged affixes (e.g. +Sorceress skills) may appear on any base of a matching item type (amulets, staves, charms),
+            // but a class-specific base (e.g. an Amazon bow) only takes affixes of its own class.
+            if (a.cls && cls.length && cls.indexOf(a.cls) < 0) continue;
             let bad = false;
             for (const e of a.et) if (it.anc.indexOf(e) >= 0) { bad = true; break; }
             if (bad) continue;
