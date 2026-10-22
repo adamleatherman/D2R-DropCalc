@@ -3,7 +3,7 @@
 
 1. Runs tests.js inside headless Edge/Chrome (no Node needed) and collects the engine's numbers.
 2. Re-computes the same numbers with an independent Python implementation that reads the *raw*
-   game tables (D2R-excel .txt files), not data.json, and compares the two.
+   game tables (excel/ .txt files), not data.json, and compares the two.
 3. Checks the engine against figures published by the community (sources listed in README.md).
 
 Usage:  python test_engine.py [path-to-excel-folder]
@@ -19,7 +19,7 @@ import sys
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-SRC = sys.argv[1] if len(sys.argv) > 1 else r"C:\Users\thein\D2R-excel"
+SRC = sys.argv[1] if len(sys.argv) > 1 else os.path.join(HERE, "excel")
 
 FAIL = []
 ROWS = []
@@ -385,7 +385,15 @@ def find_browser():
               r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe"):
         if os.path.exists(p):
             return p
-    return shutil.which("msedge") or shutil.which("chrome") or shutil.which("google-chrome")
+    for p in ("/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+              "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+              "/Applications/Chromium.app/Contents/MacOS/Chromium"):
+        if os.path.exists(p):
+            return p
+    for n in ("msedge", "microsoft-edge", "google-chrome", "google-chrome-stable", "chromium", "chromium-browser", "chrome"):
+        if shutil.which(n):
+            return shutil.which(n)
+    return None
 
 
 def run_engine():

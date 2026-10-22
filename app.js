@@ -286,7 +286,7 @@
     const data = await resp.json();
     E = Engine.create(data);
     E.setMode($('s_mode').value); updTier();
-    $('dataInfo').textContent = 'data built ' + data.meta.built + ' from ' + data.meta.source;
+    $('dataInfo').textContent = 'data: D2R ' + data.meta.gameVersion + ', built ' + data.meta.built;
     INDEX = E.searchIndex();
     { const qs0 = new URLSearchParams(location.search); if (qs0.get('mode')) $('s_mode').value = qs0.get('mode'); if (qs0.get('tz')) { $('s_tz').checked = true; $('s_clvl').value = qs0.get('tz'); } if (qs0.get('tier')) $('s_tier').value = qs0.get('tier'); if (qs0.get('mf')) $('s_mf').value = qs0.get('mf'); E.setMode($('s_mode').value); updTier(); }
     const noWorker = new URLSearchParams(location.search).has('noworker');

@@ -1,17 +1,27 @@
-# D2R Drop Calculator (local, offline)
+# D2R Drop Calculator
 
-Static page + vanilla JS, Python standard library only. No framework, no CDN, no build step apart from parsing the game tables.
+Static page + vanilla JS, Python standard library only. No framework, no CDN, no build step apart from parsing the game tables. Everything runs in your browser; the game does not need to be installed.
 
-## Usage
+## Use it
+
+**Online:** https://adamleatherman.github.io/D2R-DropCalc/ (GitHub Pages; the repo owner must enable it once under Settings -> Pages -> Deploy from a branch -> `main` / root).
+
+**Locally, no game needed:** clone or download the repo and run `run.bat` (Windows) or `./run.sh` (macOS/Linux), or serve the folder with any static web server (for example `python -m http.server`) and open `index.html`. The page loads `data.json` with a relative fetch, so it also works under a sub-path. Needs Python 3 only for the tiny server.
+
+`data.json` is derived from Blizzard's game data tables (Diablo II: Resurrected) and is included for convenience; Blizzard owns the game data.
+
+## Update the data after a game patch (maintainers, needs D2R installed)
 
 ```
-python tools/extract_tables.py [out-folder] [--force]  # default C:\Users\thein\D2R-excel; reads the game archive (read-only), prints the game version
-python build.py [path-to-excel-folder] [out.json]      # default C:\Users\thein\D2R-excel  -> writes data.json (re-run after each patch)
-run.bat                                                # builds data.json if missing, starts http.server on :8000, opens the browser
-python test_engine.py                                  # validation (starts its own server + headless Edge/Chrome)
+python tools/extract_tables.py [out-folder] [--force]  # default ./excel (gitignored); reads the game archive (read-only), writes extract.json with the game version
+python build.py [path-to-excel-folder] [out.json]      # default ./excel -> data.json (records the game version in meta)
+python test_engine.py                                  # validation (starts its own server + headless Edge/Chrome/Chromium)
+git add data.json && git commit && git push           # GitHub Pages then serves the new data
 ```
 
-**Where the tables come from.** `tools/extract_tables.py` (standard library only) reads the installed game's CASC archive directly: `.build.info` (active row: Build Key, Version) -> `Data\config\xx\yy\<Build Key>` -> the `vfs-*` TVFS blobs -> `data/global/excel/*.txt|bin` (Reign of the Warlock, written to the root), `data/global/excel/base/*` (Lord of Destruction, `base\`) and `data/hd/global/excel/desecratedzones.json` (`hd\`). It refuses to write into a non-empty folder unless `--force`. Current extract: build 3.3.93847 (a fresh extract is byte-identical to `D2R-excel`). **Refresh after a patch:** `python tools/extract_tables.py C:\Users\thein\D2R-excel --force`, then `python build.py`, then `python test_engine.py` (`--game <folder>` points at a different install). `build.py` runs a guard first (`check_extract`): it exits with an error naming the matching tables if `treasureclassex`, `uniqueitems`, `monstats` or `misc` in the root folder is byte-identical to its `base\` copy, or if more than 60 root tables are (53 of 91 legitimately match). An earlier bad extract had put the LoD tables in the root folder (89 of 91 identical).
+Order: extract -> build -> test -> commit `data.json` -> push. `run.bat` / `run.sh` start a local server on :8000 and open the browser (`--game <folder>` on the extractor points at a non-default install).
+
+**Where the tables come from.** `tools/extract_tables.py` (standard library only) reads the installed game's CASC archive directly: `.build.info` (active row: Build Key, Version) -> `Data\config\xx\yy\<Build Key>` -> the `vfs-*` TVFS blobs -> `data/global/excel/*.txt|bin` (Reign of the Warlock, written to the root), `data/global/excel/base/*` (Lord of Destruction, `base\`) and `data/hd/global/excel/desecratedzones.json` (`hd\`). It refuses to write into a non-empty folder unless `--force`. Current extract: build 3.3.93847 (a fresh extract is byte-identical to the previous verified extract). **Refresh after a patch:** `python tools/extract_tables.py --force`, then `python build.py`, then `python test_engine.py` (`--game <folder>` points at a different install). `build.py` runs a guard first (`check_extract`): it exits with an error naming the matching tables if `treasureclassex`, `uniqueitems`, `monstats` or `misc` in the root folder is byte-identical to its `base\` copy, or if more than 60 root tables are (53 of 91 legitimately match). An earlier bad extract had put the LoD tables in the root folder (89 of 91 identical).
 
 Files: `build.py` (tables -> `data.json`), `engine.js` (all math, no DOM), `app.js` + `index.html` (UI), `worker.js` (Web Worker for the affix search), `test.html` + `tests.js` + `test_engine.py` (validation). The game folder is only read.
 
@@ -52,7 +62,7 @@ Exact game integer math (D2MOO `D2GAME_DropTC_6FC51360`, Items.cpp; C division t
 
 ## Game modes
 
-`D2R-excel\base\` is the **Lord of Destruction** mode (not classic) and the root folder is **Reign of the Warlock**. 38 of the 91 tables differ between them, 53 are byte-identical. The differences are mostly new content or retuned values: `treasureclassex` (+220 rows: Herald, Ancient Statue, Worldstone Shard, Uber TCs), `uniqueitems` (+12 rows: PreCrafted/Crafted Sunders, the Ars grimoires; new `disableChronicle` column), `monstats` (herald TC columns, Uber Ancients), `levels` (+Colossal Summit), `misc`/`itemtypes` (+1 row each), `cubemain` (+72), `armor`/`automagic`/`weapons`/`runes`/`sets`/`setitems`/`magicsuffix`/`properties` and skill/state/sound tables (value changes), and a few cosmetic ones. The calculator reads the RotW values everywhere; `build.py` stores only the two LoD overrides as `spl` flags in `data.json`. (An earlier version of this README said only `armor.txt` and `automagic.txt` differ; that was wrong: it came from a bad extract in which 36 root tables were copies of the LoD ones.)
+`excel\base\` is the **Lord of Destruction** mode (not classic) and the root folder is **Reign of the Warlock**. 38 of the 91 tables differ between them, 53 are byte-identical. The differences are mostly new content or retuned values: `treasureclassex` (+220 rows: Herald, Ancient Statue, Worldstone Shard, Uber TCs), `uniqueitems` (+12 rows: PreCrafted/Crafted Sunders, the Ars grimoires; new `disableChronicle` column), `monstats` (herald TC columns, Uber Ancients), `levels` (+Colossal Summit), `misc`/`itemtypes` (+1 row each), `cubemain` (+72), `armor`/`automagic`/`weapons`/`runes`/`sets`/`setitems`/`magicsuffix`/`properties` and skill/state/sound tables (value changes), and a few cosmetic ones. The calculator reads the RotW values everywhere; `build.py` stores only the two LoD overrides as `spl` flags in `data.json`. (An earlier version of this README said only `armor.txt` and `automagic.txt` differ; that was wrong: it came from a bad extract in which 36 root tables were copies of the LoD ones.)
 
 * `armor.txt`: the 15 Warlock grimoires (`wa1`..`waf`, type `grim`) are spawnable only in RotW. In RotW they join the generated `armoN` pools and dilute the other armor bases (a mid-level base such as `xhl` has about 4% better per-kill odds in LoD, checked against an independent bracket-weight calculation).
 * `automagic.txt`: the 8 grimoire auto-mods (group 306) exist only in RotW.

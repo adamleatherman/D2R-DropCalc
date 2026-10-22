@@ -2,7 +2,7 @@
 """Extract the game tables straight from the installed D2R CASC archive (read-only on the game folder).
 
 Usage:  python tools/extract_tables.py [out-folder] [--game "C:\\Program Files (x86)\\Diablo II Resurrected"] [--force]
-Default out-folder: C:\\Users\\thein\\D2R-excel. Refuses to write into a non-empty folder unless --force.
+Default out-folder: excel/ in the repo root (gitignored). Refuses to write into a non-empty folder unless --force.
 Only the Python standard library is used.
 
 Output layout (what build.py expects):
@@ -22,6 +22,10 @@ import shutil
 import struct
 import sys
 import zlib
+import json
+import time
+
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 WANTED = [
     (re.compile(r"data/global/excel/(?:base/)?[^/]+\.(?:txt|bin)", re.I), lambda p: p[len("data/global/excel/"):]),
@@ -136,7 +140,7 @@ def main():
         game = args[i + 1]
         del args[i:i + 2]
     args = [a for a in args if a != "--force"]
-    out = args[0] if args else r"C:\Users\thein\D2R-excel"
+    out = args[0] if args else os.path.join(REPO, "excel")
 
     if os.path.isdir(out) and os.listdir(out) and not force:
         sys.exit("output folder %s is not empty; pass --force to write into it (files with the same name are overwritten)" % out)
@@ -203,6 +207,10 @@ def main():
             os.makedirs(os.path.dirname(dst), exist_ok=True)
             shutil.move(src, dst)
     shutil.rmtree(staged)
+    with open(os.path.join(out, "extract.json"), "w", encoding="utf-8", newline="\n") as f:
+        json.dump({"gameVersion": info.get("Version", "unknown"), "buildKey": info["Build Key"],
+                   "extracted": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}, f)
+        f.write("\n")
     print("extracted %d files into %s (game version %s)" % (len(todo), out, info.get("Version", "?")))
 
 

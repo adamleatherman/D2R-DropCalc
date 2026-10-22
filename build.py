@@ -2,7 +2,7 @@
 """Parse D2R excel tables into a compact data.json for the drop calculator.
 
 Usage:  python build.py [path-to-excel-folder] [output.json]
-Default folder: C:\\Users\\thein\\D2R-excel   Default output: data.json (next to this script)
+Default folder: excel/ next to this script (see tools/extract_tables.py)   Default output: data.json (next to this script)
 Only the Python standard library is used. Input files are only read.
 """
 import json
@@ -10,8 +10,9 @@ import os
 import re
 import sys
 
-SRC = sys.argv[1] if len(sys.argv) > 1 else r"C:\Users\thein\D2R-excel"
-OUT = sys.argv[2] if len(sys.argv) > 2 else os.path.join(os.path.dirname(os.path.abspath(__file__)), "data.json")
+HERE = os.path.dirname(os.path.abspath(__file__))
+SRC = sys.argv[1] if len(sys.argv) > 1 else os.path.join(HERE, "excel")
+OUT = sys.argv[2] if len(sys.argv) > 2 else os.path.join(HERE, "data.json")
 
 
 def check_extract():
@@ -506,8 +507,16 @@ for z in dz.get("zones", []) + [zz for g in dz.get("manual_zones", []) for zz in
             tz["levels"][str(lid)] = z["id"]
     tz["zones"][z["id"]] = ids
 
+EXTRACT = {}
+try:
+    with open(os.path.join(SRC, "extract.json"), encoding="utf-8") as f:
+        EXTRACT = json.load(f)
+except (OSError, ValueError):
+    print("warning: no readable extract.json in %s; game version unknown" % SRC)
+
 data = {
-    "meta": {"source": SRC, "built": __import__("time").strftime("%Y-%m-%d %H:%M:%S")},
+    "meta": {"gameVersion": EXTRACT.get("gameVersion") or "unknown", "buildKey": EXTRACT.get("buildKey") or "unknown",
+             "built": __import__("time").strftime("%Y-%m-%d %H:%M:%S")},
     "types": types, "items": items, "tc": tcs, "groups": groups, "levels": levels,
     "monsters": monsters, "su": su, "su_area": SU_AREA, "su_unused": SU_UNUSED, "boss_area": BOSS_AREA,
     "uniques": uniques, "sets": setitems, "ratio": ratio,
