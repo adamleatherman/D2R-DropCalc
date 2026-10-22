@@ -480,6 +480,7 @@
       const it = items[code];
       const out = { unique: 0, set: 0, rare: 0, magic: 0, hq: 0, normal: 0, low: 0, uniques: [], sets: [] };
       if (!it || it.an) { out.normal = 1; return out; }
+      if (it.nq) return out;   // quest-type items (keys, essences, organs, statue pieces, shards) have no quality: nothing is magic or better (build.py "nq" flag), so P(base) is the whole chance
       const row = ratioRow(it);
       const ilvl = Math.min(mlvl, 99);
       const eu = eligibleUniques(code, ilvl, ladder, mlvl, diff === undefined ? 2 : diff), es = eligibleSets(code, ilvl, ladder, diff === undefined ? 2 : diff);

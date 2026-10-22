@@ -201,9 +201,12 @@ class Ref:
         anc0 = self.item_anc(code)
         if n(tt0.get("Normal")) == 1 or (any(n(self.types[a].get("Normal")) == 1 for a in anc0 if a in self.types) and not (n(tt0.get("Magic")) or n(tt0.get("Rare")))):
             return {"unique": 0, "set": 0, "rare": 0, "magic": 0, "u": {}, "s": {}}
+        # quest-type misc items (type 'ques': keys, essences, organs, statue pieces, shards): no Rare/Magic/Normal flag anywhere in the type chain -> no quality
+        if it["_f"] == "misc" and not any(n(self.types[a].get("Rare")) or n(self.types[a].get("Magic")) or n(self.types[a].get("Normal")) for a in anc0 if a in self.types):
+            return {"unique": 0, "set": 0, "rare": 0, "magic": 0, "u": {}, "s": {}}
         row = self.ratio_row(code)
         q = n(it.get("level"))
-        eu = [u for u in self.uniq if u["code"] == code and n(u.get("spawnable")) == 1 and n(u.get("disabled")) == 0 and n(u["lvl"]) <= min(mlvl, 99) and (not u.get("DropConditionCalc") or (hell and u["DropConditionCalc"].strip('"') == "cond('Difficulty', hell)"))]
+        eu =[u for u in self.uniq if u["code"] == code and n(u.get("spawnable")) == 1 and n(u.get("disabled")) == 0 and n(u["lvl"]) <= min(mlvl, 99) and (not u.get("DropConditionCalc") or (hell and u["DropConditionCalc"].strip('"') == "cond('Difficulty', hell)"))]
         es = [s for s in self.sets if s["item"] == code and n(s.get("spawnable")) == 1 and n(s.get("disabled")) == 0 and n(s["lvl"]) <= min(mlvl, 99) and not s.get("DropConditionCalc")]
         tt = self.types.get(it.get("type", ""), {})
         anc = self.item_anc(code)
@@ -717,6 +720,16 @@ def main():
     for idn, a in DR["ars"].items():
         ROWS.append(("PASS" if a["inIndex"] and a["n"] > 0 else "FAIL", "%s in search index with >=1 source" % idn, a["n"], ">0", "; ".join("%s (%s) %s %s%s 1 in %.0f" % (x[0], x[1], x[2], "NmH"[x[3]], " TZ" if x[4] else "", 1 / x[5]) for x in a["top"]) + " | no TZ: " + "; ".join("%s (%s) %s 1 in %.0f" % (x[0], x[1], x[2], 1 / x[5]) for x in a["topNoTz"])))
         if not (a["inIndex"] and a["n"] > 0): FAIL.append("ars " + idn)
+    nq = DR["nq"]
+    check("quest item pk2 (Hell Summoner): P(target) == P(base) > 0", nq["target"], nq["base"], 1e-12)
+    ROWS.append(("PASS" if nq["base"] > 0 else "FAIL", "quest item pk2 base chance > 0", nq["base"], ">0", "1 in %.1f" % (1 / nq["base"] if nq["base"] else 0)))
+    if not nq["base"] > 0: FAIL.append("nq base")
+    for k in ("magic", "rare", "set", "unique", "normal", "low", "hq"):
+        check("quest item pk2 has no quality: %s == 0" % k, nq[k], 0, 1e-12)
+    check("quest item pk2 quality() sums to 0 (no quality at all)", nq["qsum"], 0, 1e-12)
+    check("magic-capable jewel is unaffected: quality() sums to 1", nq["jewSum"], 1, 1e-9)
+    ROWS.append(("PASS" if nq["jewMagic"] > 0 else "FAIL", "jewel (always magic or better) still has P(magic) > 0", nq["jewMagic"], ">0", ""))
+    if not nq["jewMagic"] > 0: FAIL.append("jew magic")
     for nm, r in DR["ubers"].items():
         check("%s: rows only in Hell (%s)" % (nm, r["diffs"]), 1 if r["diffs"] == [2] else 0, 1)
         check("%s mlvl = monstats Level(H) 110" % nm, r["mlvl"], 110)

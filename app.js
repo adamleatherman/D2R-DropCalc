@@ -43,16 +43,10 @@
   }
 
   // ---------------- formatting ----------------
-  function pct(p) {
+  /** Every probability is shown as odds: "1 in 4,334,276", "1 in 1.50" below 10, "always" at p >= 1, "-" for none. */
+  function odds(p) {
     if (!(p > 0)) return '-';
-    const v = p * 100;
-    if (v >= 10) return v.toFixed(1) + '%';
-    if (v >= 1) return v.toFixed(2) + '%';
-    if (v >= 0.01) return v.toFixed(3) + '%';
-    return v.toExponential(2) + '%';
-  }
-  function oneIn(p) {
-    if (!(p > 0)) return '-';
+    if (p >= 1) return 'always';
     const n = 1 / p;
     if (n < 10) return '1 in ' + n.toFixed(2);
     return '1 in ' + Math.round(n).toLocaleString('en-US');
@@ -132,22 +126,20 @@
   const isWhiteBase = () => target1 && target1.kind === 'base' && (E.items[target1.code].k === 'a' || E.items[target1.code].k === 'w') && !E.items[target1.code].an;
   const BQN = { white: 'white (low+normal+superior)', normsup: 'normal+superior', sup: 'superior only' };
   const cols1 = srcCols.concat([
-    { k: 'sTable', show: isSun, label: 'Sunder: table path', note: 'Data-driven: the Sunder Charms TC inside desecrated champ/unique/boss TCs and the Herald Item TCs (herald tier gates the extra item picks), incl. player-count NoDrop.', get: (r) => r.sp ? r.sp.table : 0, fmt: (r) => pct(r.sp.table) },
-    { k: 'sMf', show: isSun, label: 'Sunder: MF path', note: 'Data-driven: the PreCrafted Sunders are spawnable unique grand charms (rarity 1, lvl 75, DropConditionCalc Hell only), so a unique cm3 roll can pick one.', get: (r) => r.sp ? r.sp.mf : 0, fmt: (r) => pct(r.sp.mf) },
-    { k: 'sTotal', show: isSun, label: 'Sunder: total', note: 'Combined chance of both paths.', get: (r) => r.sp ? r.sp.total : 0, fmt: (r) => pct(r.sp.total) },
-    { k: 'pbase', label: 'P(base)', get: (r) => r.c.base, fmt: (r) => pct(r.c.base) },
-    { k: 'plow', show: isWhiteBase, label: 'P(low)', note: 'Low quality (crude/cracked/damaged/low quality) base. Boss, champion and unique TCs force Magic=1024, so this is 0 there.', get: (r) => r.c.low, fmt: (r) => pct(r.c.low) },
-    { k: 'pnorm', show: isWhiteBase, label: 'P(normal)', note: 'Normal quality base (what is left after unique/set/rare/magic/superior/low).', get: (r) => r.c.normal, fmt: (r) => pct(r.c.normal) },
-    { k: 'psup', show: isWhiteBase, label: 'P(superior)', note: 'Superior quality base.', get: (r) => r.c.hq, fmt: (r) => pct(r.c.hq) },
-    { k: 'pmag', note: QNOTE, label: 'P(magic)', get: (r) => r.c.magic, fmt: (r) => pct(r.c.magic) },
-    { k: 'prare', note: QNOTE, label: 'P(rare)', get: (r) => r.c.rare, fmt: (r) => pct(r.c.rare) },
-    { k: 'pset', note: QNOTE, label: 'P(set)', get: (r) => r.c.set, fmt: (r) => pct(r.c.set) },
-    { k: 'puni', note: QNOTE, label: 'P(unique)', get: (r) => r.c.unique, fmt: (r) => pct(r.c.unique) },
-    { k: 'ptar', label: 'P(target)', get: (r) => r.c.target, fmt: (r) => pct(r.c.target) },
-    { k: 'oneN', label: '1 in N kills', get: (r) => r.c.target, fmt: (r) => oneIn(r.c.target) },
+    { k: 'sTable', show: isSun, label: 'Sunder: table path', note: 'Data-driven: the Sunder Charms TC inside desecrated champ/unique/boss TCs and the Herald Item TCs (herald tier gates the extra item picks), incl. player-count NoDrop.', get: (r) => r.sp ? r.sp.table : 0, fmt: (r) => odds(r.sp.table) },
+    { k: 'sMf', show: isSun, label: 'Sunder: MF path', note: 'Data-driven: the PreCrafted Sunders are spawnable unique grand charms (rarity 1, lvl 75, DropConditionCalc Hell only), so a unique cm3 roll can pick one.', get: (r) => r.sp ? r.sp.mf : 0, fmt: (r) => odds(r.sp.mf) },
+    { k: 'sTotal', show: isSun, label: 'Sunder: total', note: 'Combined chance of both paths.', get: (r) => r.sp ? r.sp.total : 0, fmt: (r) => odds(r.sp.total) },
+    { k: 'pbase', label: 'P(base)', get: (r) => r.c.base, fmt: (r) => odds(r.c.base) },
+    { k: 'plow', show: isWhiteBase, label: 'P(low)', note: 'Low quality (crude/cracked/damaged/low quality) base. Boss, champion and unique TCs force Magic=1024, so this is 0 there.', get: (r) => r.c.low, fmt: (r) => odds(r.c.low) },
+    { k: 'pnorm', show: isWhiteBase, label: 'P(normal)', note: 'Normal quality base (what is left after unique/set/rare/magic/superior/low).', get: (r) => r.c.normal, fmt: (r) => odds(r.c.normal) },
+    { k: 'psup', show: isWhiteBase, label: 'P(superior)', note: 'Superior quality base.', get: (r) => r.c.hq, fmt: (r) => odds(r.c.hq) },
+    { k: 'pmag', note: QNOTE, label: 'P(magic)', get: (r) => r.c.magic, fmt: (r) => odds(r.c.magic) },
+    { k: 'prare', note: QNOTE, label: 'P(rare)', get: (r) => r.c.rare, fmt: (r) => odds(r.c.rare) },
+    { k: 'pset', note: QNOTE, label: 'P(set)', get: (r) => r.c.set, fmt: (r) => odds(r.c.set) },
+    { k: 'puni', note: QNOTE, label: 'P(unique)', get: (r) => r.c.unique, fmt: (r) => odds(r.c.unique) },
+    { k: 'ptar', label: 'P(target) per kill', note: 'Chance that one kill drops the target (shown as odds; sorts by probability).', get: (r) => r.c.target, fmt: (r) => odds(r.c.target) },
     { k: 'runs', label: 'kills/run', get: (r) => r.src.perRun, fmt: (r) => r.src.herald ? 'n/a' : r.src.perRun < 10 ? r.src.perRun.toFixed(2) : r.src.perRun.toFixed(0) },
-    { k: 'perrun', label: 'per run', get: (r) => r.c.target * r.src.perRun, fmt: (r) => pct(r.c.target * r.src.perRun) },
-    { k: 'oneR', label: '1 in N runs', get: (r) => r.c.target * r.src.perRun, fmt: (r) => oneIn(r.c.target * r.src.perRun) },
+    { k: 'perrun', label: 'P(target) per run', note: 'Chance of finding the target in one run (kills/run x per-kill chance, rough model; shown as odds).', get: (r) => r.c.target * r.src.perRun, fmt: (r) => odds(r.c.target * r.src.perRun) },
   ]);
 
   // percentile columns: kills (or runs) needed to have found the target with probability q; selector s_pct = off / kills / runs
@@ -198,14 +190,12 @@
   let T2 = null, conds = [], statCodes = [];
   const cols2 = srcCols.concat([
     { k: 'alvl', label: 'alvl', get: (r) => r.alvl },
-    { k: 'pbase', label: 'P(base)', get: (r) => r.pBase, fmt: (r) => pct(r.pBase) },
-    { k: 'pq', label: 'P(base x quality)', get: (r) => r.pQual, fmt: (r) => pct(r.pQual) },
-    { k: 'paff', label: 'P(affixes | quality)', get: (r) => r.pAff, fmt: (r) => pct(r.pAff) },
-    { k: 'ptot', label: 'P per kill', get: (r) => r.pTotal, fmt: (r) => pct(r.pTotal) },
-    { k: 'oneN', label: '1 in N kills', get: (r) => r.pTotal, fmt: (r) => oneIn(r.pTotal) },
+    { k: 'pbase', label: 'P(base)', get: (r) => r.pBase, fmt: (r) => odds(r.pBase) },
+    { k: 'pq', label: 'P(base x quality)', get: (r) => r.pQual, fmt: (r) => odds(r.pQual) },
+    { k: 'paff', label: 'P(affixes | quality)', get: (r) => r.pAff, fmt: (r) => odds(r.pAff) },
+    { k: 'ptot', label: 'P per kill', note: 'Chance that one kill drops a matching item (shown as odds; sorts by probability).', get: (r) => r.pTotal, fmt: (r) => odds(r.pTotal) },
     { k: 'runs', label: 'kills/run', get: (r) => r.src.perRun, fmt: (r) => r.src.herald ? 'n/a' : r.src.perRun < 10 ? r.src.perRun.toFixed(2) : r.src.perRun.toFixed(0) },
-    { k: 'perrun', label: 'P per run', get: (r) => r.perRun, fmt: (r) => pct(r.perRun) },
-    { k: 'oneR', label: '1 in N runs', get: (r) => r.perRun, fmt: (r) => oneIn(r.perRun) },
+    { k: 'perrun', label: 'P per run', note: 'Chance of a matching item in one run (rough model; shown as odds).', get: (r) => r.perRun, fmt: (r) => odds(r.perRun) },
   ]);
   let base2 = null;
 
@@ -367,7 +357,7 @@
 
   function aboutHtml() {
     const C = E.CONFIG;
-    return '<p><b>How to read the tables.</b> Probabilities are per kill unless the column says run. "P(target)" for a base item equals P(base); for a unique or set item it is the chance of that exact item. ' +
+    return '<p><b>How to read the tables.</b> Probabilities are per kill unless the column says run, and are shown as odds ("1 in N")."P(target)" for a base item equals P(base); for a unique or set item it is the chance of that exact item. ' +
       'Rank tags: champion (+' + C.champOffset + ' mlvl), unique (+' + C.uniqueOffset + '), minion of a unique (+' + C.minionOffset + '), super = super unique, boss = act boss.</p>' +
       '<p><b>Per-run numbers are a rough estimate.</b> kills/run = area tiles x ' + C.run.areaFill + ' x MonDen/100000 packs x rarity share x average pack size, plus unique/champion packs from MonUMin/MonUMax ' +
       '(champion share ' + C.run.champShare + ', champion pack ' + C.run.champPackSize + ' monsters). Bosses and super uniques count as one kill per run.</p>' +

@@ -188,6 +188,13 @@
       res.drops.src['The Countess|pk1'] = one('The Countess', 'super', 'pk1');
       res.drops.src['The Summoner|pk2'] = one('The Summoner', 'boss', 'pk2');
       res.drops.src['Nihlathak|pk3'] = one('Nihlathak', 'boss', 'pk3');
+      // quest-type items have no quality: all of their chance is P(base), none of it magic (pk2 from Hell Summoner); a normal magic-capable item (cm3 grand charm, small charm) is unaffected
+      { const s = E.sources(ctx).find((x) => x.name === 'The Summoner' && x.diff === 2 && x.rank === 'boss' && !x.tz);
+        const c = E.chanceFor(ctx, s, { kind: 'base', code: 'pk2' }, 0);
+        const qn = E.quality('pk2', s.mlvl, 0, [0, 0, 0, 1024], true, 2), qj = E.quality('jew', s.mlvl, 0, [0, 0, 0, 1024], true, 2);
+        const tot = E.qualityTotals(ctx, s, 0);
+        res.drops.nq = { base: c.base, target: c.target, magic: c.magic, rare: c.rare, set: c.set, unique: c.unique, normal: c.normal, low: c.low, hq: c.hq, qsum: qn.magic + qn.rare + qn.set + qn.unique + qn.hq + qn.normal + qn.low,
+          jewMagic: qj.magic, jewSum: qj.magic + qj.rare + qj.set + qj.unique + qj.hq + qj.normal + qj.low, totalsItems: tot.items }; }
       // Hell champion in act 1 -> Western Worldstone Shard (first champion row whose TC can drop it)
       { const cs = E.sources(ctx).filter((x) => x.diff === 2 && x.rank === 'champion' && x.act === 1 && !x.tz);
         let hit = null; for (const s of cs) { const p = E.chanceFor(ctx, s, { kind: 'base', code: 'xa1' }, 0).target; if (p > 0) { hit = [s, p]; break; } }

@@ -14,6 +14,32 @@ SRC = sys.argv[1] if len(sys.argv) > 1 else r"C:\Users\thein\D2R-excel"
 OUT = sys.argv[2] if len(sys.argv) > 2 else os.path.join(os.path.dirname(os.path.abspath(__file__)), "data.json")
 
 
+def check_extract():
+    """Fail early when the root folder is a copy of base\\ (a bad extract: the LoD tables in place of the RotW ones).
+    Today 53 of the 91 root tables legitimately equal their base\\ copy; the four key tables below must differ."""
+    base = os.path.join(SRC, "base")
+    if not os.path.isdir(base):
+        return
+    def same(name):
+        a, b = os.path.join(SRC, name), os.path.join(base, name)
+        if not (os.path.isfile(a) and os.path.isfile(b)):
+            return False
+        with open(a, "rb") as fa, open(b, "rb") as fb:
+            return fa.read() == fb.read()
+    tables = sorted(f for f in os.listdir(SRC) if f.endswith(".txt") and os.path.isfile(os.path.join(SRC, f)))
+    matched = [f for f in tables if same(f)]
+    key = [f for f in ("treasureclassex.txt", "uniqueitems.txt", "monstats.txt", "misc.txt") if f in matched]
+    if key or len(matched) > 60:
+        sys.exit("bad extract: %s looks like a copy of base\\ (LoD tables) instead of the Reign of the Warlock tables.\n"
+                 "  %d of %d root tables are byte-identical to base\\ (expected about 53 of 91, at most 60)%s\n"
+                 "  identical: %s\n  Re-extract with tools/extract_tables.py." % (
+                     SRC, len(matched), len(tables), "; key tables identical: " + ", ".join(key) if key else "", ", ".join(matched)))
+    print("extract check ok: %d of %d root tables equal base\\ (key tables differ)" % (len(matched), len(tables)))
+
+
+check_extract()
+
+
 def rd(name, sub=""):
     """Read a tab separated table -> list of dicts (header names as keys). sub="base" reads the LoD-mode copy."""
     path = os.path.join(SRC, sub, name + ".txt") if sub else os.path.join(SRC, name + ".txt")
@@ -90,6 +116,10 @@ for fname, kind in (("armor", "a"), ("weapons", "w"), ("misc", "m")):
         always_normal = bool(own.get("normal")) or (
             any(types[a]["normal"] for a in anc if a in types) and not (own.get("magic") or own.get("rare")))
         cls_specific = "clas" in anc
+        # "No quality": a misc item whose type can be neither rare, magic nor normal (ItemTypes Rare/Magic/Normal all 0 along the
+        # type chain). Today that is exactly the quest-type items (keys of terror/hate/destruction, essences, organs, statue pieces,
+        # worldstone shards, Khalim's/Horadric parts, ...). Such items have no quality, so they cannot be magic or better.
+        no_quality = kind == "m" and not (can_rare or always_magic or always_normal or any(types[a]["rare"] or types[a]["magic"] for a in anc if a in types))
         tier = 0
         if kind != "m":
             if r.get("ubercode") == code:
@@ -109,6 +139,7 @@ for fname, kind in (("armor", "a"), ("weapons", "w"), ("misc", "m")):
             "cr": 1 if can_rare else 0,
             "am": 1 if always_magic else 0,
             "an": 1 if always_normal else 0,
+            "nq": 1 if no_quality else 0,
             "cs": 1 if cls_specific else 0,
             "ap": num(r.get("auto prefix"), 0) if r.get("auto prefix") else 0,
             "ver": num(r.get("version"), 0),
