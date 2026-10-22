@@ -44,6 +44,12 @@ def rd(name):
     return [{h: (l[i] if i < len(l) else "") for i, h in enumerate(head)} for l in lines[1:] if l and l[0]]
 
 
+def idiv(a, b):
+    """C integer division (truncates toward zero)"""
+    q = abs(a) // abs(b)
+    return q if (a >= 0) == (b > 0) else -q
+
+
 def n(v, d=0):
     try:
         return int(v)
@@ -107,7 +113,7 @@ class Ref:
                 continue
             q = n(r.get("level"))
             if max(3, -(-q // 3) * 3) == br:
-                out.append((code, q, n(r.get("rarity"), 0)))
+                out.append((code, q, max(1, n(self.types[r["type"]].get("Rarity")))))   # D2MOO: ItemTypes Rarity of wType[0], floor 1
         return out or None
 
     def dist(self, name, mlvl, N, inh=(0, 0, 0, 0)):
@@ -150,9 +156,9 @@ class Ref:
         else:
             g = self.generic(name)
             if g:
-                W = sum(w for _, q, w in g if q <= mlvl)
+                W = sum(w for _, q, w in g)
                 for code, q, w in g:
-                    if q <= mlvl and W:
+                    if W:
                         out[("i", code, inh)] = w / W
         self.cache[key] = out
         return out
@@ -164,13 +170,21 @@ class Ref:
         return [x for x in self.ratio if n(x["Version"]) == 1 and n(x["Uber"]) == uber and n(x["Class Specific"]) == cls][0]
 
     def succ(self, base, div, mn, qlvl, mlvl, mf, dim, tcf):
-        p = base * 128 - ((mlvl - qlvl) * 128) // div
+        # game integer math (C division truncates); independent form: D = MF+100, div per D2MOO D2GAME_DropTC_6FC51360
+        p = base - idiv(mlvl - qlvl, div)
         if mf is not None:
-            eff = (mf * dim) // (mf + dim) if (dim and mf > 10) else mf
-            p = (p * 100) // (100 + eff)
+            D = mf + 100
+            if dim and D > 110:
+                if dim == 250: d = idiv(50 * (5 * D - 500), D + 150) + 100
+                elif dim == 500: d = idiv(100 * (5 * D - 500), D + 400) + 100
+                else: d = idiv(200 * (3 * D - 300), D + 500) + 100
+            else: d = D
+            p = idiv(12800 * p, d)
+        else:
+            p = p * 128
         if mn is not None and p < mn:
             p = mn
-        p = p - (p * tcf) // 1024
+        p = p - idiv(p * tcf, 1024)
         return 1.0 if p <= 128 else 128.0 / p
 
     def sunder_ids(self):
@@ -333,7 +347,7 @@ class MC:
                 g = gen_cache.get((name, mlvl))
                 if g is None:
                     lst = ref.generic(name)
-                    g = [(c, w) for c, q, w in lst if q <= mlvl] if lst else []
+                    g = [(c, w) for c, q, w in lst] if lst else []
                     gen_cache[(name, mlvl)] = g
                 W = sum(w for _, w in g)
                 if W > 0:
@@ -465,8 +479,8 @@ def main():
             FAIL.append("equip mean " + tcn)
     # cap = null / 0 reproduces the old numbers; Cow King (never reaches 6 items) is unchanged with the cap on
     kn = CP["knell"]
-    check("Knell Striker from normal Cow King, 620 MF, cap off: ~1 in 446 (mlvl 31)", 1 / kn["0"]["target"], 446, 0.004, "1 in %.1f" % (1 / kn["0"]["target"]))
-    check("Knell Striker (cap off) P(base scepter) = 5.10%", kn["0"]["base"], 0.0510, 0.005)
+    check("Knell Striker from normal Cow King, 620 MF, cap off: ~1 in 921 (mlvl 31; regression pin, ItemTypes rarity weights)", 1 / kn["0"]["target"], 920.8, 0.004, "1 in %.1f" % (1 / kn["0"]["target"]))
+    check("Knell Striker (cap off) P(base scepter) = 2.47% (regression pin)", kn["0"]["base"], 0.0247, 0.005)
     check("Knell Striker from Cow King identical with cap 6", kn["6"]["target"], kn["0"]["target"], 1e-12)
     SU = CP["su"]
     check("Pindleskin Hell mlvl 86", SU["pind"], 86)
@@ -561,10 +575,10 @@ def main():
             if n(r.get("spawnable")) != 1 and code not in grims: continue
             if code in grims and not include_grim: continue
             if "armo" in ref.item_anc(code) and max(3, -(-n(r.get("level")) // 3) * 3) == br and n(r.get("level")) <= 87:
-                w += n(r.get("rarity"), 0)
+                w += max(1, n(ref.types[r["type"]].get("Rarity")))
         return w
     check("armor pool dilution matches independent bracket weights (LoD/RotW)", ratio_mode, wsum(True) / wsum(False), 1e-3,
-          "bracket %d, rarity sum RotW %d vs LoD %d (only exact if this bracket is reached through armoN entries only)" % (br, wsum(True), wsum(False)))
+          "bracket %d, type-rarity sum RotW %d vs LoD %d (only exact if this bracket is reached through armoN entries only)" % (br, wsum(True), wsum(False)))
 
     # ---- heralds ----------------------------------------------------------------------------------
     Hh = js["herald"]
@@ -640,9 +654,8 @@ def main():
     check("trialsFor p=1/449, 50% -> 311", tr["p449"], 311, 0)
     # MF diminishing returns apply above 10% MF (data guide "exceeds 110%" includes the baseline 100); scepter unique, mlvl 31, TC unique factor 850
     def uniq_ref(mf):
-        p = 400 * 128 - (31 - 3) * 128
         eff = (mf * 250) // (mf + 250) if mf > 10 else mf
-        p = max((p * 100) // (100 + eff), 6400)
+        p = max((12800 * (400 - 28)) // (100 + eff), 6400)
         p -= (p * 850) // 1024
         return 1.0 if p <= 128 else 128.0 / p
     mt = js["mfThresh"]
@@ -669,6 +682,28 @@ def main():
             check("Hell regular (%s), Archon Plate: base == magic+rare+set+unique+hq+normal+low" % r["name"], c["base"], c["magic"] + c["rare"] + c["set"] + c["unique"] + wq, 1e-9)
         else:
             check("Hell champion (%s), Archon Plate: low+normal+superior == 0" % r["name"], wq, 0)
+    # ---- no qlvl<=mlvl filter on generic TCs (D2MOO D2GAME_DropTC_6FC51360): Hell Bovine (mlvl 81) drops Archon Plate (qlvl 84) via armo84
+    BV = js["bovine"]
+    if not BV:
+        ROWS.append(("FAIL", "Hell Bovine regular source exists", "none", "-", "")); FAIL.append("bovine")
+    else:
+        c = BV["c"]
+        check("Hell Bovine mlvl", BV["mlvl"], 81, 0)
+        check("Hell Bovine (mlvl 81), Archon Plate (qlvl 84): P(base) > 0", 1 if c["base"] > 0 else 0, 1, 0)
+        check("Hell Bovine, Archon Plate: low > normal > superior > 0", 1 if c["low"] > c["normal"] > c["hq"] > 0 else 0, 1, 0)
+        # hand-computed game integers at diff -3 (Uber v1 row), TC factors 0: unique 400/1, set 160/2, rare 100/2, magic 34/3, hq 12/8, normal 1/1
+        ch = {k: 128 * (r - idiv(-3, d)) for k, (r, d) in dict(u=(400, 1), s=(160, 2), r=(100, 2), m=(34, 3), h=(12, 8), n=(1, 1)).items()}
+        for k, want in zip("usrmhn", (51584, 20608, 12928, 4480, 1536, 512)):
+            check("hand-computed game chance %s" % k, ch[k], want, 0)
+        pr = {k: min(1.0, 128.0 / v) for k, v in ch.items()}
+        rem = 1.0; U = pr["u"]; rem -= U; S = rem * pr["s"]; rem -= S; R = rem * pr["r"]; rem -= R; M = rem * pr["m"]; rem -= M
+        hq = rem * pr["h"]; rem -= hq; nm = rem * pr["n"]; lo = rem - nm
+        q = BV["q"]
+        for k, want in (("rare", R + U), ("magic", M + S), ("hq", hq), ("normal", nm), ("low", lo), ("unique", 0), ("set", 0)):
+            check("quality('utp', 81, 0 MF, no TC factor): %s" % k, q[k], want, 1e-12)
+        tot = c["base"] or 1   # splits are shares of the base chance
+        info("Hell Bovine (regular, 0%% MF) Archon Plate per kill", "1 in %.0f" % (1 / (c["base"] or 1e-12)), "online calc: 1:11,021",
+             "split of base: low %.2f%% normal %.2f%% superior %.2f%% magic %.2f%% rare %.2f%% (online: 50.87/16.96/6.17/21.44/4.57)" % tuple(100 * c[k] / tot for k in ("low", "normal", "hq", "magic", "rare")))
     # ---- print
     w = max(len(r[1]) for r in ROWS)
     for st, name, got, want, note in ROWS:

@@ -56,6 +56,7 @@ for r in types_rows:
         "magic": num(r.get("Magic")),
         "normal": num(r.get("Normal")),
         "tc": num(r.get("TreasureClass")),
+        "rar": num(r.get("Rarity")),
         "cls": r.get("Class", ""),
     }
 
@@ -101,7 +102,7 @@ for fname, kind in (("armor", "a"), ("weapons", "w"), ("misc", "m")):
             "t": t,
             "anc": anc,
             "q": num(r.get("level")),
-            "r": num(r.get("rarity")),
+            "r": max(1, own.get("rar", 0)),   # generic weapN/armoN weight = ItemTypes.txt Rarity of the first type, floor 1 (D2MOO DATATBLS_CreateItemTypeTreasureClasses)
             "sp": num(r.get("spawnable")),
             "ml": num(r.get("magic lvl")),
             "tier": tier,

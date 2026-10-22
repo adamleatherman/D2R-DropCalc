@@ -54,8 +54,8 @@
       // baal hell, base qlvl 85, 200 MF : final p (integer arithmetic)
       baal_unique_p: (function () {
         const row = data.ratio.find((r) => r.ver === 1 && r.uber === 1 && r.cls === 0);
-        let p = row.u[0] * 128 - Math.floor(((99 - 85) * 128) / row.u[1]);
-        p = Math.floor((p * 100) / (100 + 111));
+        let p = row.u[0] - Math.trunc((99 - 85) / row.u[1]);
+        p = Math.trunc((12800 * p) / (100 + 111));
         p = Math.max(p, row.u[2]);
         return p - Math.floor((p * baalTc.u) / 1024);
       })(),
@@ -199,7 +199,10 @@
     res.mfThresh = Object.fromEntries([0, 10, 11, 100, 110, 111, 200].map((mf) => [mf, E.quality('scp', 31, mf, [850, 983, 983, 1024], true, 0).unique]));
     { const ctx = ctxFor(1, 1), tg = { kind: 'base', code: 'utp' }, hell = E.sources(ctx).filter((s) => s.diff === 2);
       const pick = (rank, boss) => { for (const s of hell) { if (s.rank !== rank) continue; const c = E.chanceFor(ctx, s, tg, 0); if (c.base > 0) return { name: s.name, c }; } return null; };
-      res.baseQuality = { baal: E.chanceFor(ctx, find(ctx, 'Baal', 2, ['boss']), tg, 0), regular: pick('regular'), champion: pick('champion') }; }
+      res.baseQuality = { baal: E.chanceFor(ctx, find(ctx, 'Baal', 2, ['boss']), tg, 0), regular: pick('regular'), champion: pick('champion') };
+      // no qlvl <= mlvl filter on generic TCs: Hell Bovine (mlvl 81, regular) can drop Archon Plate (utp, qlvl 84); quality at diff -3 with zero TC factors
+      const bs = E.sources(ctxFor(1, 1)).find((s) => s.name === 'Hell Bovine' && s.diff === 2 && s.rank === 'regular');
+      res.bovine = bs ? { mlvl: bs.mlvl, c: E.chanceFor(ctx, bs, tg, 0), q: E.quality('utp', 81, 0, [0, 0, 0, 0], true, 2) } : null; }
     res.sourcesCount = E.sources(ctxFor(1, 1)).length;
     res.config = E.CONFIG;
   } catch (e) { res.errors.push(String(e.stack || e)); }

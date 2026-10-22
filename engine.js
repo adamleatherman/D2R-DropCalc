@@ -228,8 +228,8 @@
         const g = genericInfo(name);
         if (g) {
           let W = 0;
-          for (const c of g) if (c.q <= mlvl) W += c.w;
-          if (W > 0) for (const c of g) if (c.q <= mlvl) out.set(leafKey('i', c.code, inh), c.w / W);
+          for (const c of g) W += c.w;
+          if (W > 0) for (const c of g) out.set(leafKey('i', c.code, inh), c.w / W);
         }
         // else: unknown entry (gold with modifier, quest flags, ...) -> contributes nothing
       }
@@ -368,10 +368,10 @@
         const g = genericInfo(name);
         if (g) {
           let W = 0;
-          for (const c of g) if (c.q <= mlvl) W += c.w;
+          for (const c of g) W += c.w;
           if (W > 0) {
             const D = new Map();
-            for (const c of g) if (c.q <= mlvl) D.set(leafKey('i', c.code, inh), leafMat(c.w / W, kit));
+            for (const c of g) D.set(leafKey('i', c.code, inh), leafMat(c.w / W, kit));
             res = { T: kit.TL, D };
           }
         }
@@ -416,15 +416,16 @@
     }
 
     function succ(arr, qlvl, mlvl, mf, dim, tcF, hasMin) {
-      // arr = [ratio, divisor, min]
-      let p = arr[0] * 128 - floor(((mlvl - qlvl) * 128) / arr[1]);
-      if (p < 1) p = 1;
+      // arr = [ratio, divisor, min]; exact game integer math (D2MOO D2GAME_DropTC_6FC51360, C division truncates): divide level diff first, then <<7, MF divisor = 100 + effMF
+      // (game: div = 50*(5D-500)/(D+150)+100 etc. with D = MF+100 > 110, which is 100 + trunc(MF*dim/(MF+dim)) for dim 250/500/600)
+      const t = Math.trunc;
+      let p = arr[0] - t((mlvl - qlvl) / arr[1]);
       if (mf !== null) {
-        const eff = (dim && mf > CONFIG.mfThreshold) ? floor((mf * dim) / (mf + dim)) : mf;
-        p = floor((p * 100) / (100 + eff));
-      }
+        const eff = (dim && mf > CONFIG.mfThreshold) ? t((mf * dim) / (mf + dim)) : mf;
+        p = t((12800 * p) / (100 + eff));
+      } else p *= 128;
       if (hasMin && p < arr[2]) p = arr[2];
-      p = p - floor((p * tcF) / 1024);
+      p = p - t((p * tcF) / 1024);
       if (p <= 128) return 1;
       return 128 / p;
     }
