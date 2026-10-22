@@ -7,7 +7,7 @@
   let worker = null, reqId = 0;
 
   // ---------------- persistent selectors ----------------
-  const KEYS = ['s_mode', 's_tier', 's_bonus', 's_diff', 's_players', 's_party', 's_mf', 's_tz', 's_clvl', 's_ladder', 's_act', 's_pct'];
+  const KEYS = ['s_mode', 's_tier', 's_bonus', 's_diff', 's_players', 's_party', 's_mf', 's_quest', 's_tz', 's_clvl', 's_ladder', 's_act', 's_pct'];
   function loadSel() {
     try {
       const raw = localStorage.getItem('d2rdropcalc.sel');
@@ -37,7 +37,7 @@
     { const v = parseFloat($('s_bonus').value); if (E) E.CONFIG.heraldSunderBonusBase = isNaN(v) || v < 0 ? null : Math.min(1, v / 100); }
     return {
       diff: parseInt($('s_diff').value, 10), players, party,
-      mf: clampInt($('s_mf'), 0, 1000), tz: $('s_tz').checked, clvl: clampInt($('s_clvl'), 1, 99),
+      mf: clampInt($('s_mf'), 0, 1000), tz: $('s_tz').checked, quest: $('s_quest').checked, clvl: clampInt($('s_clvl'), 1, 99),
       bonus: (() => { const v = parseFloat($('s_bonus').value); return isNaN(v) || v < 0 ? null : Math.min(1, v / 100); })(),
       mode: $('s_mode').value, tier: parseInt($('s_tier').value, 10) || 1,
       ladder: $('s_ladder').value === '1', act: parseInt($('s_act').value, 10),
@@ -166,8 +166,8 @@
 
   let srcCache = { sig: '', list: null };
   function getSources(sel) {
-    const ctx = E.getCtx({ players: sel.players, party: sel.party, ladder: sel.ladder, tz: sel.tz, clvl: sel.clvl, mf: sel.mf, tier: sel.tier });
-    const sig = JSON.stringify([sel.tz, sel.clvl, sel.mode, sel.tier, sel.players, sel.party]);
+    const ctx = E.getCtx({ players: sel.players, party: sel.party, ladder: sel.ladder, tz: sel.tz, quest: sel.quest, clvl: sel.clvl, mf: sel.mf, tier: sel.tier });
+    const sig = JSON.stringify([sel.quest, sel.tz, sel.clvl, sel.mode, sel.tier, sel.players, sel.party]);
     if (srcCache.sig !== sig) srcCache = { sig, list: E.sources(ctx) };
     return { ctx, list: srcCache.list };
   }
@@ -195,7 +195,7 @@
     const r = T1.render();
     const it = target1.kind === 'base' ? E.items[target1.code] : E.items[(target1.kind === 'unique' ? E.uniqById : E.setById)[target1.id].code];
     $('info1').textContent = target1.label + '  |  base qlvl ' + it.q + '  |  ' + r.total.toLocaleString() + ' sources can drop it (showing ' + r.shown + ')  |  N=' + ctx.N +
-      '  MF=' + sel.mf + '%' + (bq ? '  |  base quality: ' + BQN[bq] : '') + '  |  ' + Math.round(performance.now() - t0) + ' ms. Click a column header to sort.';
+      '  MF=' + sel.mf + '%' + (sel.quest ? '  |  quest drop (act bosses)' : '') + (bq ? '  |  base quality: ' + BQN[bq] : '') + '  |  ' + Math.round(performance.now() - t0) + ' ms. Click a column header to sort.';
   }
 
   // ---------------- Tab 2 ----------------
@@ -253,7 +253,7 @@
     const sel = S = readSel(); saveSel();
     const opts = { codes: baseCodes(base2), quality: $('ql2').value, conds: cs, mf: sel.mf, diff: sel.diff, act: sel.act,
       area: parseInt($('ar2').value || '0', 10), rolls: parseInt($('mc2').value, 10) };
-    const ctxS = { players: sel.players, party: sel.party, ladder: sel.ladder, tz: sel.tz, clvl: sel.clvl, mf: sel.mf, tier: sel.tier };
+    const ctxS = { players: sel.players, party: sel.party, ladder: sel.ladder, tz: sel.tz, quest: sel.quest, clvl: sel.clvl, mf: sel.mf, tier: sel.tier };
     const id = ++reqId;
     $('prog2').hidden = false; $('prog2').value = 0; $('info2').textContent = 'Working...'; $('go2').disabled = true;
     const t0 = performance.now();
@@ -266,7 +266,7 @@
       T2.key = opts.area ? 'perrun' : 'ptot'; T2.dir = -1;
       const r = T2.render();
       $('info2').textContent = r.total.toLocaleString() + ' sources (showing ' + r.shown + '); ' + res.pools + ' distinct (base, affix level) pools; ' +
-        (opts.quality === 'rare' ? 'Monte Carlo ' + opts.rolls.toLocaleString() + ' rolls/pool' : 'exact enumeration') + '; ' + Math.round(performance.now() - t0) + ' ms';
+        (opts.quality === 'rare' ? 'Monte Carlo ' + opts.rolls.toLocaleString() + ' rolls/pool' : 'exact enumeration') + (sel.quest ? '; quest drop (act bosses)' : '') + '; ' + Math.round(performance.now() - t0) + ' ms';
       const lines = [];
       cs.forEach((c, i) => {
         let best = null;

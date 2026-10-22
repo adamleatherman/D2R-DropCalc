@@ -43,6 +43,26 @@
         res.cases['spec|' + name + '|' + (tg.id || tg.code) + '|mf' + mf] = { mlvl: s.mlvl, tc: s.tc, c };
       }
     }
+    // ---- quest drop (act bosses use TreasureClassQuest) ----
+    res.quest = {};
+    { const cq = (q) => E.getCtx({ players: 1, party: 1, ladder: true, tz: false, mf: 0, quest: q });
+      const hc = { kind: 'unique', id: 'Harlequin Crest' };
+      for (const nm of ['Mephisto', 'Andariel', 'Baal', 'Diablo', 'Duriel']) {
+        const r = {};
+        for (const q of [false, true]) {
+          const ctx = cq(q), sr = find(ctx, nm, 2, ['boss']);
+          r[q ? 'on' : 'off'] = { tc: sr.tc, mlvl: sr.mlvl, N: ctx.N, quest: sr.quest, totals: E.qualityTotals(ctx, sr, 0), hc: E.chanceFor(ctx, sr, hc, 0).target, hc300: E.chanceFor(ctx, sr, hc, 300).target };
+        }
+        res.quest[nm] = r;
+      }
+      { const ctx = cq(true), sr = find(ctx, 'Mephisto', 2, ['boss']);   // a base the quest TC can drop: weapon/armor -> rare-or-better only
+        let code = null; for (const [k, p] of E.srcDist(ctx, sr)) { const m = E.metaCache.get(k); if (m.kind === 'i' && p > 0 && E.items[m.id] && E.items[m.id].k && E.items[m.id].t !== 'grim' && !/^r\d\d$|^gld$/.test(m.id) && E.spOf(E.items[m.id])) { code = m.id; break; } }
+        const c = code && E.chanceFor(ctx, sr, { kind: 'base', code }, 0), o = code && E.chanceFor(cq(false), find(cq(false), 'Mephisto', 2, ['boss']), { kind: 'base', code }, 0);
+        res.quest.mephBase = { code, on: c, off: o }; }
+      { const f = (q) => E.sources(E.getCtx({ players: 1, party: 1, ladder: true, tz: true, clvl: 85, mf: 0, quest: q })).find((x) => x.rank === 'boss' && x.mon === 'diablo' && x.diff === 2 && x.tz);   // getCtx returns a shared object: use each result at once
+        const on = f(true), off = f(false); E.CONFIG.questOverridesTz = false; const fl = f(true); E.CONFIG.questOverridesTz = true;
+        res.quest.tz = { on: on && on.tc, off: off && off.tc, flagOff: fl && fl.tc }; }
+    }
     // pure formula checks
     const baalTc = data.tc['Baal (H)'];
     res.formula = {

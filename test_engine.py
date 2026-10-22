@@ -433,6 +433,43 @@ def main():
         for q in ("unique", "set", "rare", "magic"):
             check("%s Hell p%d MF%d: expected %s items/kill" % (name, pl, mf, q), c["totals"][q], t[q], 1e-9)
 
+    # ---- quest drop: act bosses switch to TreasureClassQuest
+    Q = js["quest"]
+    for nm, qn in (("Mephisto", "Mephistoq (H)"), ("Baal", "Baalq (H)"), ("Diablo", "Diabloq (H)"), ("Duriel", "Durielq (H)")):
+        on, off = Q[nm]["on"], Q[nm]["off"]
+        ROWS.append(("PASS" if on["tc"] == qn and on["quest"] else "FAIL", "Hell %s quest on: source tc" % nm, on["tc"], qn, ""))
+        if on["tc"] != qn: FAIL.append("quest tc " + nm)
+        for mf, key in ((0, "hc"), (300, "hc300")):
+            for lab, d in (("on", on), ("off", off)):
+                t = ref.totals(d["tc"], d["mlvl"], d["N"], mf) if key == "hc" else None
+                if t:
+                    for qk in ("unique", "set", "rare", "magic"):
+                        check("Hell %s quest %s: expected %s items/kill vs reference" % (nm, lab, qk), d["totals"][qk], t[qk], 1e-9)
+                check("Hell %s quest %s MF%d: P(Harlequin Crest) vs reference" % (nm, lab, mf), d[key], ref.target(d["tc"], d["mlvl"], d["N"], mf, "unique", "Harlequin Crest"), 1e-9)
+    mb = Q["mephBase"]   # Rare=1024 only applies to the quest TC's equipment sub-branches, so magic is not zero for every base: assert the magic share drops
+    ok = bool(mb["code"]) and mb["on"]["base"] > 0 and mb["on"]["magic"] / mb["on"]["base"] < mb["off"]["magic"] / mb["off"]["base"]
+    ROWS.append(("PASS" if ok else "FAIL", "Hell Mephisto base %s: magic share of drops lower with quest on" % mb["code"], mb["on"]["magic"] / mb["on"]["base"], mb["off"]["magic"] / mb["off"]["base"], ""))
+    if not ok: FAIL.append("meph quest magic share")
+    check("Hell Mephisto quest on: no gold", Q["Mephisto"]["on"]["totals"]["gold"], 0)
+    ROWS.append(("PASS" if Q["Mephisto"]["off"]["totals"]["gold"] > 0 else "FAIL", "Hell Mephisto quest off: gold > 0", Q["Mephisto"]["off"]["totals"]["gold"], ">0", ""))
+    mq = Q["Mephisto"]; ok = mq["on"]["totals"]["magic"] / mq["on"]["totals"]["items"] < mq["off"]["totals"]["magic"] / mq["off"]["totals"]["items"]
+    ROWS.append(("PASS" if ok else "FAIL", "Hell Mephisto quest on: magic share of items lower (rare-or-better factor)", mq["on"]["totals"]["magic"] / mq["on"]["totals"]["items"], mq["off"]["totals"]["magic"] / mq["off"]["totals"]["items"], ""))
+    if not ok: FAIL.append("meph quest magic items")
+    A_ = Q["Andariel"]
+    ROWS.append(("PASS" if A_["on"]["tc"] == A_["off"]["tc"] == "Andarielq (H)" else "FAIL", "Hell Andariel: same tc with quest on/off", A_["on"]["tc"], A_["off"]["tc"], ""))
+    for k in ("unique", "set", "rare", "magic", "items", "gold"):
+        check("Hell Andariel quest on == off: totals.%s" % k, A_["on"]["totals"][k], A_["off"]["totals"][k], 1e-12)
+    check("Hell Andariel quest on == off: P(Harlequin Crest)", A_["on"]["hc"], A_["off"]["hc"], 1e-12)
+    B_ = Q["Baal"]
+    ROWS.append(("PASS" if abs(B_["on"]["hc"] - B_["off"]["hc"]) > 1e-9 else "FAIL", "Hell Baal: P(Harlequin Crest) differs quest on vs off", B_["on"]["hc"], B_["off"]["hc"], ""))
+    T_ = Q["tz"]
+    ROWS.append(("PASS" if T_["on"] == "Diabloq (H)" and T_["flagOff"] == T_["off"] and T_["off"] != "Diabloq (H)" else "FAIL", "TZ Diablo: quest overrides desecrated TC; questOverridesTz=false keeps it", T_["on"], T_["off"], "flag off: %s" % T_["flagOff"]))
+    if not (T_["on"] == "Diabloq (H)" and T_["flagOff"] == T_["off"] and T_["off"] != "Diabloq (H)"): FAIL.append("quest tz")
+    for nm in ("Mephisto", "Diablo", "Baal"):
+        for lab in ("off", "on"):
+            t = Q[nm][lab]["totals"]
+            info("Hell %s quest %s, 0%% MF, 1p: uniques / items per kill" % (nm, lab), "%.5f" % t["unique"], "%.4f items" % t["items"], "tc %s" % Q[nm][lab]["tc"])
+
     # ---- specific item chances
     for key, c in C.items():
         if not key.startswith("spec|"):

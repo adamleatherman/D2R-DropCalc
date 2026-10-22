@@ -228,6 +228,9 @@ for r in rd("monstats"):
             if v:
                 tc[d][key] = v
     m["tc"] = tc
+    if r.get("TCQuestId"):  # quest TC (replaces the TC on the first kill while the quest is open)
+        m["qid"] = num(r.get("TCQuestId")); m["qcp"] = num(r.get("TCQuestCP"))
+        m["qtc"] = [r.get("TreasureClassQuest" + suf, "") for suf in ("", "(N)", "(H)")]
     monsters[mid] = m
 
 # ---------------------------------------------------------------- superuniques

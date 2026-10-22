@@ -31,6 +31,11 @@
     // The two folders differ only in the Warlock grimoire bases (spawnable in rotw) and their automagic mods.
     // The mode also picks the desecratedzones.json section (expansion vs rotw) and enables heralds (rotw + Hell + TZ only).
     gameMode: 'rotw',
+    // --- quest drop (setting `quest`): act bosses with a monstats TreasureClassQuest use it instead of their TC (D2MOO MonsterMode.cpp:
+    //     first kill while the killer's quest is open; Andariel's normal TC already is Andarielq). ---
+    // ASSUMPTION: D2MOO is 1.10 (no desecrated TCs); in a terror zone D2R may use the desecrated column as-is (Andariel's desecrated
+    // columns are 'Andarielq ... Desecrated', which hints at that). true = the quest TC overrides the desecrated TC too (D2MOO order).
+    questOverridesTz: true,
     // --- heralds (rotw Hell terror zones) ---
     // ASSUMPTION: monstats TreasureClassHerald* are empty in 3.3, so a herald is assumed to use the monster's
     // TreasureClassDesecratedUnique(H) TC, group-upgraded at (mlvl + herald_treasure_class_level_boost).
@@ -143,7 +148,7 @@
 
     class Ctx {
       constructor(s) {
-        this.s = Object.assign({ players: 1, party: 1, mf: 0, ladder: true, tz: false, clvl: 85 }, s);
+        this.s = Object.assign({ players: 1, party: 1, mf: 0, ladder: true, tz: false, clvl: 85, quest: false }, s);
         this.N = playersN(this.s.players, this.s.party);
         this.ladder = !!this.s.ladder;
         this.cache = new Map();
@@ -591,10 +596,12 @@
           const inTz = tzOn && D.tz.levels[String(lid)] !== undefined;
           const base = m.lv[d];
           const mlvl = inTz ? tzLevel(base, s.clvl, d) : base;
-          const tcn = pickTC(m, d, 'regular', inTz);
+          let tcn = pickTC(m, d, 'regular', inTz);
+          const qtc = s.quest && m.qtc && m.qtc[d] && TC[m.qtc[d]] && (!inTz || CONFIG.questOverridesTz) ? m.qtc[d] : null;
+          if (qtc) tcn = qtc;
           if (!tcn || !TC[tcn]) continue;
           out.push({ key: 'boss|' + id + '|' + d, mon: id, name: BOSS_NAMES[id] || m.n, rank: 'boss', diff: d, area: lid,
-            areaName: A.name, act: A.act, mlvl, tc: tcn, boss: true, perRun: 1, tz: inTz });
+            areaName: A.name, act: A.act, mlvl, tc: tcn, boss: true, perRun: 1, tz: inTz, quest: !!qtc });
         }
       }
       return out;
