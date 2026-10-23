@@ -337,6 +337,10 @@ class Rules:
             c = a.get("mod%dcode" % i)
             if c:
                 mn = n(a.get("mod%dmin" % i)); mx = n(a.get("mod%dmax" % i), mn) if a.get("mod%dmax" % i) else mn
+                if c == "dmg-pois":   # ITEMMODS_PropertyFunc15/16/17: per-frame damage in 1/256, param = frames; the tooltip (and the builder) show value * frames / 256
+                    fr = n(a.get("mod%dparam" % i)); mn, mx = mn * fr // 256, mx * fr // 256
+                if c in ("dmg-pois", "dmg-fire", "dmg-cold", "dmg-ltng", "dmg-mag"):   # min and max damage are fixed (func 15 / 16 do not roll); the builder filters on the maximum
+                    mn = mx
                 out.append((c, mn, mx))
         return out
 
@@ -1750,6 +1754,94 @@ def main():
     check("3 prefixes (boots): rare only, with an explanation for magic", 1 if (not CB["boots ED30 + cold20 + fire20 (3 prefixes)"]["magic"] and CB["boots ED30 + cold20 + fire20 (3 prefixes)"]["rare"] and CB["boots ED30 + cold20 + fire20 (3 prefixes)"]["why"]["magic"]) else 0, 1, 0)
     check("Jeweler's (Monarch, 4 sockets): magic only", 1 if (CB["monarch sockets 4"]["magic"] and not CB["monarch sockets 4"]["rare"]) else 0, 1, 0)
     check("Chromatic-class automagic (auric shield, group 304): offered on magic, never on rare", 1 if (B["chromatic"]["magic"] > 0 and B["chromatic"]["rare"] == 0) else 0, 1, 0, str(B["chromatic"]))
+    # ---- labels with several numbers (poison, elemental damage, charged skills, chance to cast): tooltip text per row, merged text, thresholds
+    LB = B["labels"]
+    idx_sk = {r["*Id"]: r for r in RU.skills}
+    def sk_levels(sid, lvl):
+        """ITEMMODS_PropertyFunc11 / Func19 skill level at item level 99 (the lowest is 1 for the item level dependent ones)"""
+        r = idx_sk[sid]; req = n(r["reqlevel"]); mxl = n(r.get("maxlvl"))
+        if lvl > 0:
+            return lvl, lvl
+        if lvl < 0:
+            t = max(1, -idiv(max(1, 99 - req), lvl))
+            return 1, max(1, idiv(99 - req, t))
+        return 1, max(1, min(idiv(99 - req, 4) + 1, mxl if mxl > 0 else 20))
+    def charges(mn, L):
+        """max charges of ITEMMODS_PropertyFunc19"""
+        if mn == 0:
+            return 5
+        v = mn if mn > 0 else idiv(L * -mn, 8) - mn
+        return min(v, 255) if v > 1 else 1
+    def raw_rows(rf, affs, code, prop):
+        """(side, display name, affix row, mod index) of every spawnable prefix / suffix with property `prop` that fits the base"""
+        anc = rf.item_anc(code); out = []
+        for kind, side in (("p", "prefix"), ("s", "suffix")):
+            for a in affs[kind]:
+                if n(a.get("version")) < 1 or n(a.get("frequency")) <= 0 or not n(a.get("spawnable")):
+                    continue
+                its = [a["itype%d" % i] for i in range(1, 8) if a.get("itype%d" % i)]
+                ets = [a["etype%d" % i] for i in range(1, 6) if a.get("etype%d" % i)]
+                if any(t in anc for t in ets) or not any(t in anc for t in its):
+                    continue
+                for i in (1, 2, 3):
+                    if a.get("mod%dcode" % i) == prop:
+                        out.append((side, ST_AF.get(a["Name"].lower(), a["Name"]), a, i))
+        return sorted(out, key=lambda x: (x[0], x[1], n(x[2]["level"])))
+    def pois_txt(mn, mx, fr):
+        a, b = mn * fr // 256, mx * fr // 256
+        return ("+%d" % a if a == b else "Adds %d-%d" % (a, b)) + " poison damage over %d seconds" % (fr // 25)
+    AFFS = {"rotw": (ref, RU.aff), "lod": (ref_l, {k: [a for a in rd(f, "base") if a.get("Name")] for k, f in (("p", "magicprefix"), ("s", "magicsuffix"))})}
+    for mode in ("rotw", "lod"):
+        rf, affs = AFFS[mode]
+        T = LB["text"][mode]
+        want = sorted((d_, s_, pois_txt(n(a_["mod%dmin" % i_]), n(a_["mod%dmax" % i_]), n(a_["mod%dparam" % i_]))) for s_, d_, a_, i_ in raw_rows(rf, affs, "cm1", "dmg-pois"))
+        check("%s: small charm poison rows: tooltip text per row == value * frames / 256 over frames / 25 seconds (%d rows)" % (mode, len(want)), 1 if sorted(map(tuple, T["pois"])) == want and len(want) == 8 else 0, 1)
+        check("%s: small charm poison texts are the in-game ones (Blight 6/3s, Septic 15/3s, Venom 15/4s, Foul 50/4s, Pestilence 25/5s, Toxic 100/5s, Anthrax 50/6s, Pestilent 175/6s)" % mode,
+              1 if sorted(x[2] for x in T["pois"]) == sorted("+%d poison damage over %d seconds" % v for v in ((6, 3), (15, 3), (15, 4), (50, 4), (25, 5), (100, 5), (50, 6), (175, 6))) else 0, 1)
+        want_c = []
+        for s_, d_, a_, i_ in raw_rows(rf, affs, "sst", "charged"):
+            mn_, mx_, sid = n(a_["mod%dmin" % i_]), n(a_["mod%dmax" % i_]), a_["mod%dparam" % i_]
+            lo, hi = sk_levels(sid, mx_)
+            ts = [charges(mn_, L) for L in range(lo, hi + 1)]
+            want_c.append((lo, hi, min(t // 8 + 1 for t in ts), max(ts), min(ts), max(ts)))
+        got_c = []
+        for d_, s_, t_ in T["charged"]:
+            m_ = re.match(r"^Level (\d+)(?:-(\d+))? .+ \((\d+)(?:-(\d+))?/(\d+)(?:-(\d+))? Charges\)$", t_)
+            g = [int(x) if x else None for x in m_.groups()] if m_ else [None] * 6
+            got_c.append((g[0], g[1] or g[0], g[2], g[3] or g[2], g[4], g[5] or g[4]))
+        check("%s: charged skill rows (short staff, %d): level range and current / max charges == ITEMMODS_PropertyFunc19 (max charges 5 if 0, fixed, or level * -min / 8 - min; drops with max/8 + 1 .. max left)" % (mode, len(want_c)),
+              1 if sorted(got_c) == sorted(want_c) and len(want_c) > 20 else 0, 1)
+        check("%s: charged text example (Fire Bolt staff -30/-10: level 1-10, 5-67/33-67 charges)" % mode, 1 if ("of Fire Bolt", "suffix", "Level 1-10 Fire Bolt (5-67/33-67 Charges)") in map(tuple, T["charged"]) else 0, 1)
+        want_p = sorted((d_, n(a_["mod%dmin" % i_]) or 5, sk_levels(a_["mod%dparam" % i_], n(a_["mod%dmax" % i_]))) for s_, d_, a_, i_ in raw_rows(rf, affs, "cap", "gethit-skill"))
+        got_p = []
+        for d_, s_, t_ in T["proc"]:
+            m_ = re.match(r"^(\d+)% Chance to cast level (\d+)(?:-(\d+))? .+ when struck$", t_)
+            got_p.append((d_, int(m_.group(1)), (int(m_.group(2)), int(m_.group(3) or m_.group(2)))))
+        check("%s: chance-to-cast rows (cap, when struck, %d): chance and level == property func 11" % (mode, len(want_p)), 1 if sorted(got_p) == want_p and len(want_p) >= 6 else 0, 1)
+        check("%s: chance-to-cast text example" % mode, 1 if ("of Nova Shield", "suffix", "12% Chance to cast level 4 Nova when struck") in map(tuple, T["proc"]) else 0, 1)
+        want_e = []
+        for prop, nm in (("dmg-fire", "fire"), ("dmg-cold", "cold")):
+            for s_, d_, a_, i_ in raw_rows(rf, affs, "dgr", prop):
+                lo_, hi_ = n(a_["mod%dmin" % i_]), n(a_["mod%dmax" % i_])
+                want_e.append((nm, d_, ("+%d %s damage" % (lo_, nm)) if lo_ == hi_ else "Adds %d-%d %s damage" % (lo_, hi_, nm)))
+        got_e = [("fire", d_, t_) for d_, s_, t_ in T["fire"]] + [("cold", d_, t_) for d_, s_, t_ in T["cold"]]
+        check("%s: elemental damage rows (dagger): 'Adds min-max <element> damage', the single form when min == max" % mode, 1 if sorted(got_e) == sorted(want_e) and len(want_e) == 2 else 0, 1)
+        check("%s: on striking / on attack rows show chance and level" % mode, 1 if ("of Nova", "suffix", "12% Chance to cast level 4 Nova on striking") in map(tuple, T["hit"]) and
+              ("of Firebolts", "suffix", "10% Chance to cast level 4 Fire Bolt on attack") in map(tuple, T["att"]) else 0, 1)
+    check("RotW: magic damage rows (Warlock grimoire automagic): Adds 3-5 / 6-10 / 11-20 / 21-30", 1 if sorted(x[2] for x in LB["text"]["rotw"]["magic"]) == sorted("Adds %s magic damage" % v for v in ("3-5", "6-10", "11-20", "21-30")) else 0, 1)
+    check("merged 'all tiers' description of every multi-number stat has no '#' left (all item types)", len(LB["left"]), 0, 0, str(LB["left"][:3]))
+    pw = raw_rows(ref, RU.aff, "cm1", "dmg-pois")
+    tot = [n(a_["mod%dmax" % i_]) * n(a_["mod%dparam" % i_]) // 256 for s_, d_, a_, i_ in pw]
+    secs = [n(a_["mod%dparam" % i_]) // 25 for s_, d_, a_, i_ in pw]
+    check("small charm poison stat: slider range %d-%d (total damage), merged text 'Adds %d-%d poison damage over %d-%d seconds'" % (min(tot), max(tot), min(tot), max(tot), min(secs), max(secs)),
+          1 if LB["sl"]["pois"][:3] == [min(tot), max(tot), "Adds %d-%d poison damage over %d-%d seconds" % (min(tot), max(tot), min(secs), max(secs))] else 0, 1)
+    check("slider texts: poison threshold shows the other numbers as ranges; sliders name their number",
+          1 if LB["sl"]["at"] == "Adds %d-50 poison damage over %d-%d seconds" % (min(tot), min(secs), max(secs)) and LB["sl"]["atFire"] == "Adds 1-5 fire damage" and
+          LB["sl"]["pois"][3] == "maximum total poison damage" and LB["sl"]["what"] == ["skill level (at item level 99)", "chance to cast, %"] else 0, 1)
+    for mn_, p_ in LB["pois"]:
+        check("small charm magic ilvl 99: total poison damage >= %d: %.5f (engine) vs independent enumeration" % (mn_, p_), p_, RU.magic("cm1", 99, [("dmg-pois", mn_)]), 1e-9)
+    for mn_, p_ in LB["fire"]:
+        check("dagger magic ilvl 3: maximum fire damage >= %d: %.5f vs independent enumeration" % (mn_, p_), p_, RU.magic("dgr", 3, [("dmg-fire", mn_)]), 1e-9)
     check("lower-is-better condition (le): -30 <= -20 holds, -30 >= -20 does not", B["le"]["reqLe"] + 10 * B["le"]["reqGe"], 1, 0)
     check("old deep link ?q2=Monarch&ql=magic&c=Socketed (#):4 resolves in the page: magic result, rare impossible", 1 if ("Magic" in js["deeplink"] and "77" in js["deeplink"] and "not possible" in js["deeplink"] and "sources" in js["deeplink"]) else 0, 1, 0, js["deeplink"][:160].replace(chr(10), " "))
     # ---- low / normal / superior items: sockets, ethereal, superior bonus (independent reference from the raw tables and the D2MOO rules) ----

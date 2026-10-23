@@ -225,7 +225,7 @@
   const baseName = (c) => E.items[c].n;
   const tierName = (c) => ['', 'exceptional', 'elite'][E.items[c].tier] || '';
   const condsOf = () => bd.sel.map((s) => { const st = bd.stats.get(s.key); return st && st.le ? { key: s.key, min: s.thr, le: true } : { key: s.key, min: s.thr }; });
-  const statText = (s) => { const st = bd.stats.get(s.key); return E.describe(s.key, s.thr, s.thr) + (st && st.flag ? '' : st && st.le ? '  (or lower)' : '  (or more)'); };
+  const statText = (s) => { const st = bd.stats.get(s.key); return E.describeAt(s.key, s.thr, st && st.v) + (st && st.flag ? '' : st && st.le ? '  (or lower)' : '  (or more)'); };
 
   function pctx() {
     const sel = S = readSel();
@@ -255,11 +255,12 @@
   }
 
   // ----- the affix table (every prefix / suffix / automagic row / staff skill that can roll on the type) -----
+  const POIS_TIP = 'Poison damage is the total the item tooltip shows (per-frame value x frames / 256). Poison from several sources adds the damage per frame, but the lengths are summed and divided by the number of poison sources when you hit (LoD 1.10-1.14 decompilation), so with two sources you get (sum of both per-frame values) x (half the summed length), usually well below the summed tooltip total.';
   const sideTag = (r) => '<span class="side ' + r.side + '">' + r.side + '</span>';
   const lvWindow = (r) => r.minIl === null ? '-' : r.maxIl >= 99 ? r.minIl + '+' : r.minIl + ' to ' + r.maxIl;
   const colsA = [
     { k: 'name', label: 'Name', l: 1, get: (r) => r.name.toLowerCase(), html: (r) => esc(r.name) + ' ' + sideTag(r) },
-    { k: 'desc', label: 'Description (all tiers)', l: 1, get: (r) => r.desc.toLowerCase(), html: (r) => esc(r.desc) },
+    { k: 'desc', label: 'Description (all tiers)', l: 1, get: (r) => r.desc.toLowerCase(), html: (r) => r.desc.indexOf('poison damage over') >= 0 ? '<span title="' + esc(POIS_TIP) + '">' + esc(r.desc) + '</span>' : esc(r.desc) },
     { k: 'lvl', label: 'Affix lvl', note: 'Affix level. Staff skills have a tier instead.', get: (r) => r.lvl === null ? r.tier : r.lvl, fmt: (r) => r.lvl === null ? (r.tier ? 'tier ' + r.tier : '-') : r.lvl },
     { k: 'lr', label: 'Req lvl', note: 'Character level the affix requires (levelreq).', get: (r) => r.lr === null ? 0 : r.lr, fmt: (r) => r.lr === null ? '-' : r.lr },
     { k: 'il', label: 'Item level', note: 'Item levels at which some base of the type can roll it: "20+" or a window "24 to 35" (affix max level, staff skill tiers).', get: (r) => r.minIl === null ? 999 : r.minIl, fmt: lvWindow },
@@ -356,7 +357,7 @@
       const st = bd.stats.get(s.key);
       return '<div class="selrow" data-i="' + i + '"><div class="nm"><span>' + esc(statText(s)) + '</span><button class="rm" title="remove">x</button></div>' + (st.flag ? '' :
         '<div class="ctl"><span>' + (st.le ? '&lt;=' : '&gt;=') + '</span><input type="number" class="thr" value="' + s.thr + '" min="' + st.min + '" max="' + st.max + '">' +
-        '<input type="range" class="thrr" min="' + st.min + '" max="' + st.max + '" step="1" value="' + s.thr + '"><small class="note">' + st.min + ' to ' + st.max + '</small></div>') + '</div>';
+        '<input type="range" class="thrr" min="' + st.min + '" max="' + st.max + '" step="1" value="' + s.thr + '"><small class="note">' + st.min + ' to ' + st.max + (st.what ? ' ' + st.what : '') + '</small></div>') + '</div>';
     }).join('');
   }
   let anTimer = null, farmTimer = null;
@@ -677,6 +678,8 @@
       'packs include party minions (e.g. the Fallen with a Fallen Shaman, counted as their own monster). Champion/unique packs follow MonUMin/MonUMax (' + C.run.champShare * 100 + '% champion packs of 2-4, else a unique with ' + C.run.uniqueMinions.join('-') + ' minions). ' +
       'Treat the numbers as about +/-50%; they rank areas against each other better than they count them. Bosses and super uniques count as one kill per run. Monsters the map files place at fixed spots (Fallen camps, unique and champion packs in treasure rooms, the Act 5 siege) are added where the level generator fixes which presets appear; they also use up unique slots, so such levels get fewer random champion/unique packs. Super uniques bring their minions (Council members, Baal waves, ...) as minion rows of the same area. Tal Rasha Tomb = the true tomb with the orifice (the staff tomb, about 3x a plain tomb), shown once for all seven tombs. Matron Den, Forgotten Sands, Furnace of Pain and Uber Tristram only open in Hell and are not listed for Normal and Nightmare.</p>' +
       '<p><b>Config in use</b> (Engine.CONFIG in engine.js): <code>' + esc(JSON.stringify(C)) + '</code></p>' +
+      '<p><b>Poison in the item builder.</b> The numbers are what the item tooltip shows: total poison damage (the stored per-frame value x frames / 256) over frames / 25 seconds. Poison from several sources adds the damage per frame, but the durations are summed and divided by the number of poison sources at hit time (LoD 1.10-1.14 decompilation, <code>dwPoisLen /= nPoisonCount</code>), while the tooltip shows the summed duration. A Pestilent + of Anthrax charm reads 451 over 12 seconds but, as the only poison source, deals about 225 over 6 seconds. ' +
+      'The slider of a multi-number stat names what it filters on: maximum damage, chance to cast, or skill level (charged skills: the level reached at item level 99).</p>' +
       '<p>See README.md for formulas, research sources and limitations.</p>';
   }
 

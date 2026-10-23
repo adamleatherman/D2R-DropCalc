@@ -1460,13 +1460,62 @@
     }
 
     /** Description template ("+#% Faster Cast Rate") with its value placeholder filled by a value or a range ("+10-20% Faster Cast Rate").
-     *  Templates with several placeholders (skill procs, charges) are returned unchanged. */
-    function describe(tpl, mn, mx) {
+     *  Templates with several placeholders (damage ranges, poison, skill procs, charges) take `v` instead: one [lowest, highest] per '#' in text order
+     *  (the sixth element of a data mod, merged over rows by mergeSlots); without it the template is returned unchanged. */
+    function describe(tpl, mn, mx, v) {
       const at = tpl.indexOf('#');
-      if (at < 0 || tpl.indexOf('#', at + 1) >= 0) return tpl;
+      if (at >= 0 && tpl.indexOf('#', at + 1) >= 0) {
+        if (!v || v.length !== tpl.split('#').length - 1) return tpl;
+        const st = (s) => (s[0] === s[1] ? String(s[0]) : s[0] + '-' + s[1]);
+        let k = 0, rest = tpl;
+        let head = '';
+        if (tpl.indexOf('Adds #-# ') === 0) {   // same fixed min and max damage: the game's single form "+# fire damage" (strMod*Damage) instead of "Adds #-# ..." (strMod*DamageRange)
+          const a = v[0], b = v[1];
+          head = a[0] === a[1] && b[0] === b[1] && a[0] === b[0] ? '+' + a[0] + ' ' : 'Adds ' + a[0] + '-' + b[1] + ' ';
+          rest = tpl.slice(9); k = 2;
+        }
+        return head + rest.replace(/#/g, () => st(v[k++]));
+      }
+      if (at < 0) return tpl;
       const val = mn === mx ? String(mn) : (mn < 0 || mx < 0 ? mn + ' to ' + mx : mn + '-' + mx);
       const signed = at > 0 && tpl[at - 1] === '+';
       return tpl.slice(0, signed && val[0] === '-' ? at - 1 : at) + val + tpl.slice(at + 1);
+    }
+
+    /** slot ranges of two mods of one label merged (new array, the data is not touched) */
+    function mergeSlots(a, b) {
+      if (!b) return a;
+      if (!a) return b.map((s) => s.slice());
+      return a.map((s, i) => [Math.min(s[0], b[i][0]), Math.max(s[1], b[i][1])]);
+    }
+    /** which '#' of a multi-number label the builder slider filters on: the maximum of "Adds #-# <element> damage", else the first number
+     *  (chance of "#% Chance to cast level # ...", level of "Level # ... (#/# Charges)") */
+    const sliderSlot = (key) => (key.indexOf('Adds #-# ') === 0 ? 1 : 0);
+    /** what the slider of a multi-number label measures (shown next to its range), '' for single-number labels */
+    function sliderWhat(key) {
+      if (key.split('#').length < 3) return '';
+      if (key.indexOf('Adds #-# ') === 0) return key.indexOf('poison') >= 0 ? 'maximum total poison damage' : 'maximum damage';
+      return key.indexOf('Charges)') >= 0 ? 'skill level (at item level 99)' : 'chance to cast, %';
+    }
+    let slotMapC = null;
+    /** label -> slot ranges merged over every affix and superior bonus row of the data */
+    function slotMap() {
+      if (!slotMapC) {
+        slotMapC = new Map();
+        for (const a of allAffixes.concat(D.automagic)) for (const m of a.mods) if (m[5]) slotMapC.set(m[4], mergeSlots(slotMapC.get(m[4]), m[5]));
+        for (const r of D.qi) for (const m of r) if (m[5]) slotMapC.set(m[4], mergeSlots(slotMapC.get(m[4]), m[5]));
+      }
+      return slotMapC;
+    }
+    /** Description of a label with the slider number set to `thr` (a "minimum" threshold): the other numbers of a multi-number label show their
+     *  range (v, else over all data) */
+    function describeAt(key, thr, v) {
+      if (key.split('#').length < 3) return describe(key, thr, thr);
+      v = v || slotMap().get(key);
+      if (!v) return key;
+      const w = v.map((s) => s.slice());
+      w[sliderSlot(key)] = [thr, thr];
+      return describe(key, thr, thr, w);
     }
 
     /** stats available (label list) for a set of bases at max alvl and given quality */
@@ -1475,10 +1524,11 @@
       for (const code of codes) {
         const el = eligible(code, 99, quality_ === 'rare');
         for (const L of (isPlain(quality_) ? [el.auto] : [el.p, el.s, el.auto])) for (const a of L) for (const m of a.mods) {
-          const cur = set.get(m[4]) || { key: m[4], min: m[2], max: m[3], text: describe(m[4], m[2], m[3]) };
+          const cur = set.get(m[4]) || { key: m[4], min: m[2], max: m[3], v: null };
           if (m[3] > cur.max) cur.max = m[3];
           if (m[2] < cur.min) cur.min = m[2];
-          cur.text = describe(m[4], cur.min, cur.max);
+          cur.v = mergeSlots(cur.v, m[5]);
+          cur.text = describe(m[4], cur.min, cur.max, cur.v);
           set.set(m[4], cur);
         }
         // staff mod skills of the base's type (+1..+3 each)
@@ -1617,7 +1667,7 @@
         const mk = (side, a) => () => ({
           side, name: a.dn || a.n, lvl: a.lvl, lr: a.lr, cls: a.cls || '', rare: !!a.rare, g: a.g, groupName: groupName(a.g), maxLvl: a.max || 0,
           quals: side === 'auto' ? ['low', 'normal', 'sup', 'magic'].concat(a.rare ? ['rare'] : []) : a.rare ? ['magic', 'rare'] : ['magic'],
-          mods: a.mods.map((m) => m[0] === 'sock' ? { key: m[4], min: Math.max(1, Math.min(m[2] || +m[1] || 0, socketHi)), max: Math.max(1, Math.min(m[3] || +m[1] || 0, socketHi)) } : { key: m[4], min: m[2], max: m[3] }),
+          mods: a.mods.map((m) => m[0] === 'sock' ? { key: m[4], min: Math.max(1, Math.min(m[2] || +m[1] || 0, socketHi)), max: Math.max(1, Math.min(m[3] || +m[1] || 0, socketHi)) } : { key: m[4], min: m[2], max: m[3], v: m[5] }),
         });
         const okAt = (a, il) => { const al = affixLevel(il, it); return a.lvl <= al && (!a.max || a.max >= al) && (!(a.mods.length && a.mods[0][0] === 'sock') || maxSockets(code, il) > 0); };
         for (const kind of ['p', 's']) {
@@ -1643,7 +1693,7 @@
         const extra = (id, side, name, quals, mods, rng) => put(id, () => ({ side, name, lvl: null, lr: null, cls: '', rare: true, quals, g: 0, groupName: '', maxLvl: 0, tier: 0, mods }), code, rng);
         if (qualityPossible(code, 'normal') && plainSocketMax(code, 99, 2) > 0) extra('xsock', 'socket', 'Sockets (normal / superior)', ['normal', 'sup'], [{ key: SOCK_KEY, min: 1, max: Math.max(1, socketHi) }], ilRange(code, (il) => plainSocketMax(code, il, 2) > 0));
         if (ethItem(code)) extra('xeth', 'ethereal', 'Ethereal', CONFIG.nonMagic.ethQualities.filter((q) => QUALS.indexOf(q) >= 0), [{ key: ETH_KEY, min: 1, max: 1 }], ilRange(code, () => true));
-        if (qualityPossible(code, 'sup')) for (const r of supRowsOf(code)) extra('xsup' + r, 'superior', 'Superior bonus', ['sup'], D.qi[r].map((m) => ({ key: m[4], min: m[2], max: m[3] })), ilRange(code, () => true));
+        if (qualityPossible(code, 'sup')) for (const r of supRowsOf(code)) extra('xsup' + r, 'superior', 'Superior bonus', ['sup'], D.qi[r].map((m) => ({ key: m[4], min: m[2], max: m[3], v: m[5] })), ilRange(code, () => true));
       }
       return rows;
     }
@@ -1651,11 +1701,11 @@
     function builderStats(codes) {
       const m = new Map();
       for (const r of builderCatalog(codes).values()) for (const x of r.mods) {
-        const cur = m.get(x.key) || { key: x.key, min: x.min, max: x.max, staff: r.side === 'staff' };
-        cur.min = Math.min(cur.min, x.min); cur.max = Math.max(cur.max, x.max);
+        const cur = m.get(x.key) || { key: x.key, min: x.min, max: x.max, staff: r.side === 'staff', v: null };
+        cur.min = Math.min(cur.min, x.min); cur.max = Math.max(cur.max, x.max); cur.v = mergeSlots(cur.v, x.v);
         m.set(x.key, cur);
       }
-      for (const s of m.values()) { s.le = s.max <= 0 && s.min < 0 && s.key.split('#').length === 2; s.flag = s.key === ETH_KEY; s.text = describe(s.key, s.min, s.max); }
+      for (const s of m.values()) { s.le = s.max <= 0 && s.min < 0 && s.key.split('#').length === 2; s.flag = s.key === ETH_KEY; s.text = describe(s.key, s.min, s.max, s.v); s.what = sliderWhat(s.key); }
       return Array.from(m.values()).sort((a, b) => a.text.localeCompare(b.text));
     }
 
@@ -1763,7 +1813,7 @@
           if (il >= a && il <= b) nOn++;
         }
         const pbOf = (q) => codes.map((c) => { const m = per[q].get(c); return m ? m.get(r.id) || 0 : 0; });
-        rows.push({ id: r.id, side: r.side, name: r.name, mods: r.mods, desc: r.mods.map((m) => describe(m.key, m.min, m.max)).join(' / '), lvl: r.lvl, lr: r.lr, cls: r.cls, rare: r.rare,
+        rows.push({ id: r.id, side: r.side, name: r.name, mods: r.mods, desc: r.mods.map((m) => describe(m.key, m.min, m.max, m.v)).join(' / '), lvl: r.lvl, lr: r.lr, cls: r.cls, rare: r.rare,
           g: r.g, groupName: r.groupName, maxLvl: r.maxLvl, tier: r.tier || 0, minIl: lo, maxIl: hi, nBases: r.per.size, nOn, avail: nOn > 0,
           magic: mean('magic', r.id), rareP: r.rare ? mean('rare', r.id) : 0, quals: r.quals,
           ap: Object.fromEntries(quals.map((q) => [q, r.quals.indexOf(q) >= 0 ? mean(q, r.id) : 0])),
@@ -1859,7 +1909,7 @@
     const anyOk = (codes, conds, q, relax) => codes.some((c) => comboForBase(c, conds, q, relax).ok);
     /** why no base can carry the combination as a `quality_` item: list of sentences (relax.diff = difficulty for the sockets of white items) */
     function explainCombo(codes, conds, quality_, diff) {
-      const txt = (c) => describe(c.key, c.min, c.min);
+      const txt = (c) => describeAt(c.key, c.min);
       const ql = QLABEL[quality_] || quality_, plain = isPlain(quality_), dd = { diff };
       if (!codes.some((c) => qualityPossible(c, quality_))) return ['A ' + ql + ' item is not possible for this type' + (plain ? ' (rings, amulets, charms and jewels are always magic or better' + (quality_ === 'sup' ? '; only weapons and armor can be superior' : '') + ').' : '.')];
       const dead = conds.filter((c) => !anyOk(codes, [c], quality_, Object.assign({ groups: true, slots: true }, dd)));
@@ -1938,7 +1988,7 @@
     return {
       CONFIG, data: D, DIFFS, items, types, getCtx, playersN, adjNoDrop, dist, upgradeTC, areaSources, DUP_OF, areaRun, areaRolls, listShares, bossPacks,
       mode, heraldsAvailable, sunderChance, sunderPaths, isSunder, adjQuality, heraldSpawnPct, quality, qualityTotals, sources, srcDist, chanceFor, baseQualityChance, affixLevel, minIlvlForAlvl, eligible, maxSockets, affixProb, minLevels, staffDist, staffBase,
-      statList, describe, affixSearch, searchIndex, baseTypes, metaCache, uniqById, setById, uniqByCode, setByCode, prettyId, tzLevel,
+      statList, describe, describeAt, sliderWhat, affixSearch, searchIndex, baseTypes, metaCache, uniqById, setById, uniqByCode, setByCode, prettyId, tzLevel,
       eligibleUniques, eligibleSets, condProb, trialsFor,
       builderTypes, builderBases, builderCatalog, builderStats, builderAffixTable, baseDropWeights, affixAppearance, planCombo, comboForBase, comboAnalysis, explainCombo, groupName,
       qualityPossible, ethItem, ethChance, plainSocketMax, plainSocketDist, extrasDist, QUALS, QLABEL, SOCK_KEY, ETH_KEY,

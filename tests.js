@@ -480,6 +480,21 @@
       // lower-is-better direction: "Requirements +#%" <= -20 vs >= -20
       res.builder.le = { statLe: E.builderStats(E.builderBases('boot', -1)).filter((s) => s.le).map((s) => s.key),
         reqLe: E.condProb({ mods: [['x', '', -30, -30, 'R']] }, { key: 'R', min: -20, le: true }), reqGe: E.condProb({ mods: [['x', '', -30, -30, 'R']] }, { key: 'R', min: -20 }) };
+      // labels with several numbers: per-row tooltip text, merged text of a type, poison / damage threshold odds, slider ranges
+      { const POIS = 'Adds #-# poison damage over # seconds', FIRE = 'Adds #-# fire damage';
+        const L = res.builder.labels = { text: {}, left: [], pois: [], fire: [], sl: {}, nodata: 0 };
+        for (const [mode, Em] of [['rotw', E], ['lod', EL]]) {
+          const rowsOf = (code, re) => Array.from(Em.builderCatalog([code], 99).values()).map((r) => r.mods.filter((m) => re.test(m.key)).map((m) => [r.name, r.side, Em.describe(m.key, m.min, m.max, m.v)])).reduce((x, y) => x.concat(y), []);
+          L.text[mode] = { pois: rowsOf('cm1', /poison damage over/), charged: rowsOf('sst', /Charges\)/), proc: rowsOf('cap', /Chance to cast/), fire: rowsOf('dgr', /fire damage/), cold: rowsOf('dgr', /cold damage/), magic: Em.items.wa1 ? rowsOf('wa1', /magic damage/) : [], hit: rowsOf('lsd', /on striking/), att: rowsOf('lsd', /on attack/) };
+        }
+        for (const t of E.builderTypes()) for (const x of E.builderStats(t.codes)) if (x.text.indexOf('#') >= 0 && x.key.split('#').length > 2) L.left.push([t.code, x.key, x.text]);
+        const al = E.affixLevel(99, E.items.cm1);
+        for (const min of [1, 6, 7, 15, 16, 25, 26, 50, 51, 100, 101, 175, 176]) L.pois.push([min, E.affixProb('cm1', al, 'magic', [{ key: POIS, min }], { ilvl: 99 })]);
+        for (const min of [1, 2, 3]) L.fire.push([min, E.affixProb('dgr', E.affixLevel(3, E.items.dgr), 'magic', [{ key: FIRE, min }], { ilvl: 3 })]);
+        const bs = new Map(E.builderStats(['cm1']).map((x) => [x.key, x]));
+        L.sl = { pois: [bs.get(POIS).min, bs.get(POIS).max, bs.get(POIS).text, bs.get(POIS).what], at: E.describeAt(POIS, 50, bs.get(POIS).v), atAll: E.describeAt(POIS, 50), atFire: E.describeAt(FIRE, 5), what: [E.sliderWhat('Level # Teleport (#/# Charges)'), E.sliderWhat('#% Chance to cast level # Nova on striking')] };
+        L.nodata = E.describe('Level # Fire Bolt (#/# Charges)', 1, 5);
+      }
     }
     // ---- low / normal / superior items: sockets, ethereal, superior bonus (CONFIG.nonMagic) ----
     res.white = { cases: [], facts: {} };

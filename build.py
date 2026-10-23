@@ -560,6 +560,7 @@ def build(mode):
         return MOD.get(key.lower()) if key else None
 
     SKILLS = {}
+    SKILL_LV = {}      # skill id / name -> (required level, max level) for the skill levels that depend on the item level
     CLASS_SKILLS = {}  # charclass code -> [(skill id, skill name, itypea1)]
     SKILL_CLASS = {}   # skill name -> charclass code (for "(Sorceress Only)")
     sdesc = {r["skilldesc"]: r for r in rd("skilldesc") if r.get("skilldesc")}
@@ -568,6 +569,7 @@ def build(mode):
             dn = name_of("skills", (sdesc.get(r.get("skilldesc")) or {}).get("str name"), r["skill"])
             SKILLS[r["*Id"]] = dn
             SKILLS[r["skill"]] = dn
+            SKILL_LV[r["*Id"]] = SKILL_LV[r["skill"]] = (num(r.get("reqlevel")), num(r.get("maxlvl")))
             SKILL_CLASS[r["skill"]] = r.get("charclass", "")
             if r.get("charclass"):
                 CLASS_SKILLS.setdefault(r["charclass"], []).append((int(r["*Id"]), r["skill"], r.get("itypea1", "")))
@@ -662,6 +664,55 @@ def build(mode):
         FALLBACKS.setdefault(code, ("descfunc " + (ISC.get(stats[0], {}).get("descfunc") or "-") if p["st"] else "implicit func %s" % p["f"], tip))
         return tip
 
+    def skill_levels(par, lvl):
+        """[lowest, highest] skill level a property rolls on items up to item level 99 (ITEMMODS_PropertyFunc11 / Func19, D2Common ItemMods.cpp):
+        lvl > 0 is fixed; lvl < 0 is (ilvl - skill reqlevel) / ((99 - reqlevel) / -lvl) (at least 1); 0 is (ilvl - reqlevel) / 4 + 1 capped at the skill max level (20 if none)."""
+        req, mxl = SKILL_LV.get(str(par), (0, 0))
+        if lvl > 0:
+            return [lvl, lvl]
+        if lvl < 0:
+            return [1, max(1, (99 - req) // max(1, max(1, 99 - req) // -lvl))]
+        return [1, max(1, min((99 - req) // 4 + 1, mxl if mxl > 0 else 20))]
+
+    def multi_mod(c, par, mn, mx, label):
+        """Mod [code, param, min, max, label(, slots)].  min / max are the number the builder slider filters on; a label with several numbers also
+        carries `slots`, one [lowest, highest] per '#' of the label in text order, so the game's tooltip numbers can be shown:
+          dmg-fire / ltng / mag / cold (func 15 + 16), dmg-pois (+ func 17): min and max damage are fixed values of the row (func 15 / 16 do not roll), the
+            filter is the maximum damage; poison is stored per frame in 1/256, the tooltip shows value * frames / 256 over frames / 25 seconds (param = frames)
+          hit / att / gethit / kill / death / levelup-skill (func 11): param = skill, min = chance % (0 -> 5), max = skill level; the filter is the chance
+          charged (func 19): param = skill, max = skill level, min = max charges (0 -> 5; < 0: level * -min / 8 - min, 1..255); the item drops with
+            1 + max/8 .. max charges left (rolled); the filter is the skill level (at item level 99, lower on lower item levels)"""
+        mod = [c, par, mn, mx, label]
+        p = props.get(c)
+        if not p or label.count("#") < 2:
+            return mod
+        f = p["f"]
+        if f == 15:
+            if "poison" in p["st"][0][1]:
+                fr = num(par)
+                assert fr > 0, (c, par)
+                mn, mx = mn * fr // 256, mx * fr // 256
+                slots = [[mn, mn], [mx, mx], [fr // 25, fr // 25]]
+            else:
+                slots = [[mn, mn], [mx, mx]]
+            mod[2] = mod[3] = mx
+        elif f == 11:
+            ch = mn if mn > 0 else 5
+            slots = [[ch, ch], skill_levels(par, mx)]
+            mod[2] = mod[3] = ch
+        elif f == 19:
+            lv = skill_levels(par, mx)
+            ts = []
+            for L in range(lv[0], lv[1] + 1):
+                t = 5 if mn == 0 else min(255, max(1, mn if mn > 0 else L * -mn // 8 - mn))
+                ts.append(t)
+            slots = [lv, [min(t // 8 + 1 for t in ts), max(ts)], [min(ts), max(ts)]]
+            mod[2] = mod[3] = lv[1]
+        else:
+            return mod
+        assert len(slots) == label.count("#"), (c, label)
+        return mod + [slots]
+
     def parse_affix(r):
         mods = []
         for i in (1, 2, 3):
@@ -674,7 +725,7 @@ def build(mode):
             pr = props.get(c)
             if pr and pr["st"] and num(ISC.get(pr["st"][0][1], {}).get("descfunc")) in (5, 10):   # descfunc 5/10 show value*100/128 (hit causes monster to flee: 32 -> 25%)
                 mn, mx = round(mn * 100 / 128), round(mx * 100 / 128)
-            mods.append([c, par, mn, mx, label_for(c, par)])
+            mods.append(multi_mod(c, par, mn, mx, label_for(c, par)))
         return mods
 
 
@@ -713,7 +764,7 @@ def build(mode):
             c = r.get("mod%dcode" % i)
             if c:
                 par = r.get("mod%dparam" % i, "") or "0"
-                mods.append([c, par, num(r.get("mod%dmin" % i), 0), num(r.get("mod%dmax" % i), 0), label_for(c, par)])
+                mods.append(multi_mod(c, par, num(r.get("mod%dmin" % i), 0), num(r.get("mod%dmax" % i), 0), label_for(c, par)))
         qi.append({"m": mods, "f": {k: num(r.get(k), 0) for k in ("armor", "weapon", "shield", "scepter", "wand", "staff", "bow", "boots", "gloves", "belt")}})
     SPECIAL = {"shie": "shield", "scep": "scepter", "wand": "wand", "staf": "staff", "bow": "bow", "xbow": "bow", "boot": "boots", "glov": "gloves", "belt": "belt"}
 
