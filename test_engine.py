@@ -8,6 +8,7 @@
 
 Usage:  python test_engine.py [path-to-excel-folder]
 """
+import itertools
 import json
 import math
 import os
@@ -811,6 +812,152 @@ def run_engine():
         srv.terminate()
 
 
+class RunRef:
+    """Independent per-run reference (README "Per-run estimate"): straight from levels / lvlmaze / monstats, itertools over the monster-list picks,
+    a plain loop for the champion/unique ramp. Same game rules as engine.js areaRun, written separately."""
+    ACT5 = {111: (64, 160), 112: (64, 160), 117: (64, 160)}
+    FIXED = {114, 116, 119, 125, 126, 127}
+    PER8 = (40 // 3) * 40 // 3   # 173 rolls in an 8x8-tile room
+
+    def __init__(self, cfg):
+        self.c = cfg
+        self.lv = {n(r["Id"]): r for r in rd("levels") if n(r.get("Id"), -1) > 0}
+        self.mz = {n(r["Level"]): r for r in rd("lvlmaze") if r.get("Level")}
+        self.ms = {r["Id"]: r for r in rd("monstats") if r.get("Id")}
+
+    def rolls(self, lid, d):
+        r, suf = self.lv[lid], ["", "(N)", "(H)"][d]
+        specials = sum(1 for i in range(8) if n(r.get("Vis%d" % i)) > 0) + (1 if r.get("Waypoint") and n(r.get("Waypoint"), 255) < 255 else 0)
+        mz = self.mz.get(lid)
+        if n(r["DrlgType"]) == 1 and mz:
+            w, h = n(mz["SizeX"]), n(mz["SizeY"])
+            base_ = n(mz["Rooms" + suf])
+            cells = base_ + (0 if lid in self.FIXED or w > 24 or h > 24 else max(2, specials) * (1 if base_ <= 2 else self.c["mazeSpecialCells"]))
+            if w <= 12 and h <= 12:
+                rolls, rooms = cells * ((5 * w // 3) * 5 * h // 3), cells
+            else:
+                rolls, rooms = cells * w * h * self.PER8 / 64, cells * (-(-w // 8)) * (-(-h // 8))
+        else:
+            if lid in self.ACT5:
+                w, h = self.ACT5[lid]
+            else:
+                w = n(r.get("SizeX" + suf), n(r["SizeX"])) if d else n(r["SizeX"])
+                h = n(r.get("SizeY" + suf), n(r["SizeY"])) if d else n(r["SizeY"])
+            if w <= 0 or h <= 0:
+                return 0, 0
+            rolls, rooms = w * h * self.PER8 / 64, (-(-w // 8)) * (-(-h // 8))
+        return max(0, rolls - self.c["warpLossRooms"] * specials * self.PER8), rooms
+
+    def shares(self, lst, num, ranged):
+        k = min(num, 13, len(lst))
+        out = {}
+        if not k:
+            return out
+        nn = len(lst)
+        isr = [bool(lst[i] in self.ms and n(self.ms[lst[i]].get("rangedtype"))) for i in range(nn)]
+        nr = sum(isr)
+        q = 1 - nr / nn
+
+        def pf(i):
+            if not ranged or not nr or q == 0:
+                return 1 / nn
+            return sum(q ** t for t in range(21)) / nn if isr[i] else q ** 20 / nn
+        for f in range(nn):
+            combos = list(itertools.combinations([i for i in range(nn) if i != f], k - 1))
+            for cmb in combos:
+                sel = [i for i in (f,) + cmb if lst[i] in self.ms and n(self.ms[lst[i]].get("isSpawn")) and n(self.ms[lst[i]].get("Rarity")) > 0]
+                tot = sum(n(self.ms[lst[i]]["Rarity"]) for i in sel)
+                for i in sel:
+                    out[lst[i]] = out.get(lst[i], 0) + pf(f) / len(combos) * n(self.ms[lst[i]]["Rarity"]) / tot
+        return out
+
+    @staticmethod
+    def bosses(packs, rooms, umin, umax):
+        e = int(math.floor(packs + 0.5))   # JS Math.round
+        top = max(umin, umax)
+        if not e or not rooms or top <= 0:
+            return 0.0
+        dist = [1.0] + [0.0] * top
+        for i in range(e):
+            room = min(rooms, int((i + 0.5) * rooms / e) + 1)
+            ramp = int(100 * room / rooms) / 100
+            new = [0.0] * (top + 1)
+            for c, pc in enumerate(dist):
+                if not pc:
+                    continue
+                pb = ramp if c < umin else 0
+                if c < umax:
+                    pb += (1 - pb) * 0.06
+                if c >= top:
+                    pb = 0
+                else:
+                    new[c + 1] += pc * pb
+                new[c] += pc * (1 - pb)
+            dist = new
+        return sum(c * pc for c, pc in enumerate(dist))
+
+    def area(self, lid, d):
+        r, suf = self.lv[lid], ["", "(N)", "(H)"][d]
+        pre = "" if d == 0 else "n"
+        lst = [r["%smon%d" % (pre, i)] for i in range(1, 26) if r.get("%smon%d" % (pre, i))]
+        rolls, rooms = self.rolls(lid, d)
+        packs = rolls * (min(n(r["MonDen" + suf]), 10000) + 1) / 100000 * self.c["placeFactor"]
+        bosses = min(packs, self.bosses(packs, rooms, n(r["MonUMin" + suf]), n(r["MonUMax" + suf])))
+        sh = self.shares(lst, n(r["NumMon"]), n(r.get("rangedspawn")))
+        kills = {}
+
+        def add(mid, rk, x):
+            if mid in self.ms and x > 0:
+                kills.setdefault(mid, {})
+                kills[mid][rk] = kills[mid].get(rk, 0) + x
+
+        def swapped(mid, x, keep):
+            m = self.ms[mid]
+            if n(m.get("placespawn")) and m.get("spawn") in self.ms:
+                return [(mid, x * keep), (m["spawn"], x * (1 - keep))]
+            return [(mid, x)]
+        for mid, s_ in sh.items():
+            for t, x in swapped(mid, (packs - bosses) * s_, 0.21):
+                m = self.ms[t]
+                lo, hi = n(m["MinGrp"], 1), n(m["MaxGrp"], 1)
+                if m.get("BaseId") in ("fallen1", "scarab1"):
+                    g = 1
+                elif hi >= lo and lo > 0:
+                    g = (lo + hi) / 2 if hi > lo else lo
+                else:
+                    g = 0
+                sp = n(m.get("sparsePopulate"))
+                mem = x * g * ((sp + 1) / 100 if sp > 0 else 1)
+                add(t, "regular", mem)
+                m1, m2 = m.get("minion1"), m.get("minion2")
+                if m1 in self.ms:
+                    a_, b_ = n(m["PartyMin"]), max(n(m["PartyMin"]), n(m["PartyMax"]))
+                    cnt = [0, 0]
+                    for z in range(a_, b_ + 1):
+                        one = (z + 1) // 2 if m2 in self.ms else z
+                        cnt[0] += one
+                        cnt[1] += z - one
+                    add(m1, "regular", mem * cnt[0] / (b_ - a_ + 1))
+                    if m2 in self.ms:
+                        add(m2, "regular", mem * cnt[1] / (b_ - a_ + 1))
+        if d == 0:
+            um = [r["umon%d" % i] for i in range(1, 26) if r.get("umon%d" % i)]
+            bsh = {}
+            for u in um:
+                if u in self.ms:
+                    bsh[u] = bsh.get(u, 0) + 1 / len(um)
+        else:
+            bsh = sh
+        cs, cp, umn = self.c["champShare"], self.c["champPackSize"], self.c["uniqueMinions"]
+        for mid, s_ in bsh.items():
+            for t, x in swapped(mid, bosses * s_, 1 if d == 0 else 0.01):
+                add(t, "champion", x * cs * cp)
+                add(t, "unique", x * (1 - cs))
+                mm = self.ms[t].get("minion1")
+                add(mm if mm in self.ms else t, "minion", x * (1 - cs) * ((umn[0] + umn[1]) / 2 if umn[1] > umn[0] else umn[0]))
+        return {"rolls": rolls, "rooms": rooms, "packs": packs, "bosses": bosses, "kills": kills}
+
+
 def main():
     js = run_engine()
     if js["errors"]:
@@ -956,11 +1103,27 @@ def main():
     check("no duplicate (name, area, difficulty) among super/boss rows", len(CP["dups"]["dupName"]), 0, 0, ",".join(CP["dups"]["dupName"][:3]))
     for nm, ranks in zip(("Nihlathak", "Radament", "The Summoner", "Griswold"), CP["dups"]["bossNames"]):
         check("%s appears exactly once in Hell sources" % nm, len(ranks), 1, 0, "rank " + ",".join(ranks))
-    T = CP["tal"]
-    unr = [r for r in T["shares"] if r["mon"] == "unraveler3"]
-    check("Tal Rasha's Tomb (Hell): Unraveler listed twice -> share 2/7", unr[0]["share"], 2 / 7, 1e-12)
-    check("Tal Rasha's Tomb (Hell): shares of all distinct monsters sum to 1", sum(r["share"] for r in T["shares"]), 1.0, 1e-12)
-    check("Tal Rasha's Tomb (Hell): Apparition regular kills/run ~151", T["apparition"][0]["perRun"], 151, 0.01, "%.1f" % T["apparition"][0]["perRun"])
+    # ---- per-run model: independent reference from the raw tables (levels, lvlmaze, monstats) ----
+    RUN = CP["run"]
+    run_ref = RunRef(js["config"]["run"])
+    for key_, got in RUN.items():
+        lid_, d_ = (int(x) for x in key_.split("|"))
+        ref_ = run_ref.area(lid_, d_)
+        nm_ = "per-run %s (%d) %s" % (run_ref.lv[lid_]["LevelName"], lid_, ["Normal", "Nightmare", "Hell"][d_])
+        check(nm_ + ": spawn rolls", got["rolls"], ref_["rolls"], 1e-9)
+        check(nm_ + ": packs", got["packs"], ref_["packs"], 1e-9)
+        check(nm_ + ": champion/unique packs", got["bosses"], ref_["bosses"], 1e-9)
+        worst_ = 0.0
+        for id_ in set(ref_["kills"]) | set(got["kills"]):
+            for rk_ in ("regular", "champion", "unique", "minion"):
+                a_, b_ = got["kills"].get(id_, {}).get(rk_, 0), ref_["kills"].get(id_, {}).get(rk_, 0)
+                worst_ = max(worst_, abs(a_ - b_) / max(abs(b_), 1e-9))
+        check(nm_ + ": kills by monster and rank == reference (worst rel diff)", worst_, 0, 0, "total %.1f" % sum(sum(v.values()) for v in ref_["kills"].values()))
+        check(nm_ + ": sources() kills/run == areaRun", got["srcSum"], got["runSum"], 1e-9)
+        info(nm_ + ": expected kills per full clear (all ranks)", round(got["runSum"], 1), "-", "%.0f packs, %.1f champion/unique packs, %d rooms" % (got["packs"], got["bosses"], got["rooms"]))
+    cow_ = RUN["39|2"]
+    check("Cow Level (Hell) regular cows per run near the measured ~516 (placement factor calibrated on it)", cow_["kills"]["hellbovine"]["regular"], 516, 0.05, "%.0f" % cow_["kills"]["hellbovine"]["regular"])
+    check("Cow Level (Hell) champion+unique packs near the measured 6.3", cow_["bosses"], 6.3, 0.3, "%.2f" % cow_["bosses"])
     ROWS.append(("INFO", "all Hell sources srcDist, cold context (ms): cap off / cap on", "%d / %d" % (CP["perf"]["0"]["ms"], CP["perf"]["6"]["ms"]), "-", "%d sources" % CP["perf"]["6"]["n"]))
     # ---- published figures
     f = js["formula"]

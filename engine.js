@@ -112,10 +112,13 @@
     heraldQualityAdj: { t12: { unique: 1, set: 1, rare: 1 }, t3plus: { rarePlus: 1 } },
     // --- per-run estimate (rough!) ---
     run: {
-      areaFill: 0.4,               // fraction of the SizeX*SizeY bounding box that is actually walkable/populated
-      champShare: 0.2,             // a champion-or-unique pack is a champion pack 20% of the time
-      champPackSize: 3,            // champions per champion pack (2-4)
-      minionDefault: 2,            // minions with a unique when the monster has no PartyMin/PartyMax
+      placeFactor: 0.56,           // share of successful spawn rolls that place a pack (walls, void, failed placement). NOT from the game code: calibrated on
+                                   // the one measured count found (Cow Level, Hell: ~516 cows/run vs ~924 by the rules alone)
+      mazeSpecialCells: 0.5,       // extra maze cells per entrance / exit / waypoint preset in caves of 3+ cells (each replaces a dead end or adds a cell; 0.5 = half add)
+      warpLossRooms: 1,            // rooms of spawn rolls lost per warp / waypoint (no spawns within WarpDist)
+      champShare: 0.2,             // a champion-or-unique pack is a champion pack 20% of the time (monumod.txt constants row 0)
+      champPackSize: 3,            // champions per champion pack: 1 + rand(3)+1 = 2-4 (PopulateRoom)
+      uniqueMinions: [3, 6],       // minions with a unique (D2GAME_SpawnMinions_6FC6F440(..., 1, 3, 6))
     },
     maxMlvl: 110,
     // --- per-kill drop cap ---
@@ -584,6 +587,131 @@
 
     const prettyId = (s) => s.replace(/([a-z])(\d+)$/i, '$1 $2');
 
+    // ---------------- per-run model: expected kills in one full clear of an area ----------------
+    // Spawn rules from the D2MOO decompilation (LoD 1.10-1.14; not verified for D2R), see README "Per-run estimate".
+    const ROLLS8 = Math.floor(Math.floor(40 / 3) * 40 / 3);   // 173 spawn rolls in an 8x8-tile room: one per 3x3 subtiles (PopulateRoom: (dx/3)*dy/3)
+    /** spawn rolls and populated rooms of one area at difficulty d (before placement losses) */
+    function areaRolls(A, d) {
+      const R = CONFIG.run, g = A.geo;
+      if (!g) return { rolls: 0, rooms: 0 };
+      let rolls, rooms;
+      if (g.t === 'maze') {
+        // lvlmaze cells; a cell up to 12x12 tiles is one room (DrlgMaze.cpp bSingleRoom), bigger cells are split into 8x8 rooms.
+        // Entrance / exit / waypoint presets (at least two: the way in and the way on, e.g. Act 1 caves place prev + down / Den preset) replace a free
+        // dead-end cell of the right orientation or add a cell (DRLGMAZE_ScanReplaceSpecialPreset): a cave of 1-2 cells has none free, so each adds one;
+        // bigger ones add mazeSpecialCells per special on average.
+        const specials = Math.max(2, A.nw + A.wp);
+        const big = g.w > 24 || g.h > 24;   // 32x32+ cells are whole preset pieces (ice pools, Nihlathak halls): no extra special cells
+        const cells = g.cells[d] + (g.fixed || big ? 0 : specials * (g.cells[d] <= 2 ? 1 : R.mazeSpecialCells));
+        const single = g.w <= 12 && g.h <= 12;
+        rolls = cells * (single ? Math.floor(Math.floor(5 * g.w / 3) * 5 * g.h / 3) : g.w * g.h * ROLLS8 / 64);
+        rooms = cells * (single ? 1 : Math.ceil(g.w / 8) * Math.ceil(g.h / 8));
+      } else {
+        const w = g.w[d], h = g.h[d];
+        if (!(w > 0 && h > 0)) return { rolls: 0, rooms: 0 };
+        rolls = w * h * ROLLS8 / 64;
+        rooms = Math.ceil(w / 8) * Math.ceil(h / 8);
+      }
+      // no spawns within WarpDist (2025 = 45 subtiles squared) of a warp / waypoint room: about one room of rolls each
+      rolls = Math.max(0, rolls - R.warpLossRooms * (A.nw + A.wp) * ROLLS8);
+      return { rolls, rooms };
+    }
+    /** Expected share of each monster type in an area's packs: the game picks min(NumMon, 13) list entries uniformly without replacement (the first one
+     *  re-rolled up to 20 times for a rangedtype monster when levels rangedspawn is set), keeps the isSpawn ones, and picks each pack by Rarity among them
+     *  (MONSTERREGION_InitializeAll, MONSTERCHOOSE_GetPresetMonsterId). Exact average over every possible pick (at most 120 here). -> Map id -> E[share] */
+    function listShares(list, num, ranged) {
+      const n = list.length, k = Math.min(num, 13, n), out = new Map();
+      if (!k) return out;
+      const mon = list.map((id) => D.monsters[id]);
+      const isR = mon.map((m) => !!(m && m.rt));
+      const nR = isR.filter(Boolean).length, q = 1 - nR / n;
+      const pFirst = (i) => !ranged || !nR || q === 0 ? 1 / n : isR[i] ? (1 - Math.pow(q, 21)) / (1 - q) / n : Math.pow(q, 20) / n;
+      const pick = [];
+      const visit = (first, from, left, w) => {
+        if (!left) {
+          const sel = [first].concat(pick).filter((i) => mon[i] && mon[i].sp && mon[i].rar > 0);
+          let tot = 0; for (const i of sel) tot += mon[i].rar;
+          for (const i of sel) out.set(list[i], (out.get(list[i]) || 0) + w * mon[i].rar / tot);
+          return;
+        }
+        for (let i = from; i < n; i++) { if (i === first) continue; pick.push(i); visit(first, i + 1, left - 1, w); pick.pop(); }
+      };
+      const nComb = (a, b) => { let r = 1; for (let i = 1; i <= b; i++) r = r * (a - b + i) / i; return r; };
+      const c = nComb(n - 1, k - 1);
+      for (let f = 0; f < n; f++) visit(f, 0, k - 1, pFirst(f) / c);
+      return out;
+    }
+    /** Expected champion/unique packs among `packs` packs spread evenly over `rooms` rooms (MONSTERCHOOSE_GetBossSpawnType): while the count is below
+     *  MonUMin a pack in room r of R is one with chance floor(100 r / R)%, and below MonUMax with 6% more. Exact step-by-step expectation. */
+    function bossPacks(packs, rooms, umin, umax) {
+      const n = Math.round(packs), top = Math.max(umin, umax);
+      if (!n || !rooms || top <= 0) return 0;
+      let p = new Float64Array(top + 1); p[0] = 1;
+      for (let e = 0; e < n; e++) {
+        const r = Math.min(rooms, Math.floor((e + 0.5) * rooms / n) + 1), ramp = Math.floor(100 * r / rooms) / 100;
+        const nx = new Float64Array(top + 1);
+        for (let c = 0; c <= top; c++) {
+          if (!p[c]) continue;
+          let pb = c < umin ? ramp : 0;
+          if (c < umax) pb += (1 - pb) * 0.06;
+          if (c < top) nx[c + 1] += p[c] * pb; else pb = 0;
+          nx[c] += p[c] * (1 - pb);
+        }
+        p = nx;
+      }
+      let ex = 0; for (let c = 0; c <= top; c++) ex += c * p[c];
+      return ex;
+    }
+    const avgRange = (a, b) => (b > a ? (a + b) / 2 : a);
+    /** expected [minion1, minion2] counts of PartyMin..PartyMax party minions, alternating minion1 / minion2 (MonsterSpawn.cpp sub_6FC69C00) */
+    function partyOf(m) {
+      if (!m.mn || !m.mn.length || !D.monsters[m.mn[0]]) return [0, 0];
+      const lo = m.pm[0], hi = Math.max(m.pm[0], m.pm[1]), two = m.mn.length > 1 && D.monsters[m.mn[1]];
+      let a = 0, b = 0;
+      for (let x = lo; x <= hi; x++) { const first = two ? Math.ceil(x / 2) : x; a += first; b += x - first; }
+      return [a / (hi - lo + 1), b / (hi - lo + 1)];
+    }
+    const runCache = new Map();
+    /** Expected kills per full clear of level lid at difficulty d by monster type and rank -> {kills: Map id -> {regular, champion, unique, minion},
+     *  share: Map id -> E[pack share], packs, bosses, rolls, rooms}. Cached per CONFIG.run. */
+    function areaRun(lid, d) {
+      const R = CONFIG.run, key = lid + '|' + d + '|' + JSON.stringify(R);
+      if (runCache.has(key)) return runCache.get(key);
+      const A = D.levels[lid], list = d === 0 ? A.mon : A.nmon;
+      const { rolls, rooms } = areaRolls(A, d);
+      const packs = rolls * (Math.min(A.den[d], 10000) + 1) / 100000 * R.placeFactor;   // rand % 100000 <= MonDen per roll
+      const bosses = Math.min(packs, bossPacks(packs, rooms, A.umin[d], A.umax[d]));
+      const share = listShares(list, A.num, A.rs);
+      const kills = new Map();
+      const add = (id, rank, x) => { if (!(x > 0) || !D.monsters[id]) return; const o = kills.get(id) || {}; o[rank] = (o[rank] || 0) + x; kills.set(id, o); };
+      const regularPack = (id, nPacks) => {   // one regular pack of type id: MinGrp..MaxGrp (1 for Fallen / Scarab bases), sparsePopulate, party minions
+        const m = D.monsters[id];
+        const g = m.g1 ? 1 : m.g[1] >= m.g[0] && m.g[0] > 0 ? avgRange(m.g[0], m.g[1]) : 0;
+        const members = nPacks * g * (m.spp > 0 ? (m.spp + 1) / 100 : 1);
+        add(id, 'regular', members);
+        const [p1, p2] = partyOf(m);
+        add(m.mn && m.mn[0], 'regular', members * p1);
+        add(m.mn && m.mn[1], 'regular', members * p2);
+      };
+      const swap = (id, x, keep) => {   // placespawn: replaced by its spawn monster unless rand % 100 <= chance (20 regular packs, 0 bosses)
+        const m = D.monsters[id];
+        return m.ps && D.monsters[m.ps] ? [[id, x * keep], [m.ps, x * (1 - keep)]] : [[id, x]];
+      };
+      for (const [id, sh] of share) for (const [t, x] of swap(id, (packs - bosses) * sh, 0.21)) regularPack(t, x);
+      // champion / unique packs: Normal picks the type from umon uniformly, NM / Hell from the area's types by Rarity; 20% champion packs
+      // (monumod constants row 0) of 1 + rand(3)+1 champions, else a unique with 3-6 minions (minion1, else its own type)
+      const bossShare = d === 0 ? (() => { const o = new Map(); for (const id of A.umon) if (D.monsters[id]) o.set(id, (o.get(id) || 0) + 1 / A.umon.length); return o; })() : share;
+      for (const [id, sh] of bossShare) for (const [t, x] of swap(id, bosses * sh, d === 0 ? 1 : 0.01)) {
+        const m = D.monsters[t];
+        add(t, 'champion', x * R.champShare * R.champPackSize);
+        add(t, 'unique', x * (1 - R.champShare));
+        add(m.mn && m.mn.length && D.monsters[m.mn[0]] ? m.mn[0] : t, 'minion', x * (1 - R.champShare) * avgRange(R.uniqueMinions[0], R.uniqueMinions[1]));
+      }
+      const res = { kills, share, packs, bosses, rolls, rooms };
+      runCache.set(key, res);
+      return res;
+    }
+
     /** All kill sources (monster x rank x area x difficulty) for a context.
      *  Each: {key, name, rank, diff, area, areaName, act, mlvl, tc, boss, perRun, tz} */
     function sources(ctx) {
@@ -599,30 +727,23 @@
           const list = d === 0 ? A.mon : A.nmon;
           if (!list.length || !A.den[d]) continue;
           const inTz = tzOn && D.tz.levels[lid] !== undefined;
-          const types_ = list.map((id) => D.monsters[id]).filter(Boolean);
-          let rarSum = 0;
-          const rarOf = {};   // a monster listed twice has double weight
-          for (const id of list) { const m = D.monsters[id]; if (m && m.rar > 0) { rarSum += m.rar; rarOf[id] = (rarOf[id] || 0) + m.rar; } }
-          if (rarSum <= 0) continue;
-          const packs = A.sx[d] * A.sy[d] * R.areaFill * A.den[d] / 100000;
-          const U = (A.umin[d] + A.umax[d]) / 2;
+          const run = areaRun(lid, d);
+          const lvOf = (m) => { const base = d === 0 ? m.lv[0] : A.lvl[d]; return inTz ? tzLevel(base, s.clvl, d) : base; };
+          const OFF = { regular: 0, champion: CONFIG.champOffset, unique: CONFIG.uniqueOffset, minion: CONFIG.minionOffset };
           const seen = {};
-          for (const id of list) {
+          // list monsters (every rank, also at 0 kills/run so their per-kill odds stay listed), then the minion types they bring
+          const ids = list.filter((id) => D.monsters[id] && D.monsters[id].rar > 0);
+          for (const id of run.kills.keys()) if (ids.indexOf(id) < 0) ids.push(id);
+          for (const id of ids) {
             const m = D.monsters[id];
-            if (!m || m.rar <= 0 || seen[id]) continue;
+            if (!m || seen[id]) continue;
             seen[id] = 1;
-            const share = rarOf[id] / rarSum;
-            const base = d === 0 ? m.lv[0] : A.lvl[d];
-            const lv0 = inTz ? tzLevel(base, s.clvl, d) : base;
-            const avgGrp = (m.g[0] + m.g[1]) / 2;
-            const minions = m.pm[1] > 0 ? (m.pm[0] + m.pm[1]) / 2 : R.minionDefault;
-            const recs = [
-              ['regular', lv0, packs * share * avgGrp],
-              ['champion', lv0 + CONFIG.champOffset, U * R.champShare * share * R.champPackSize],
-              ['unique', lv0 + CONFIG.uniqueOffset, U * (1 - R.champShare) * share],
-              ['minion', lv0 + CONFIG.minionOffset, U * (1 - R.champShare) * share * minions],
-            ];
-            if (d === 2 && inTz && heraldsAvailable(s) && !m.nh) {
+            const inList = list.indexOf(id) >= 0 && m.rar > 0;
+            const k = run.kills.get(id) || {};
+            const share = run.share.get(id) || 0;
+            const lv0 = lvOf(m);
+            const recs = ['regular', 'champion', 'unique', 'minion'].filter((rk) => (inList && rk !== 'minion') || k[rk] > 0).map((rk) => [rk, lv0 + OFF[rk], k[rk] || 0]);
+            if (inList && d === 2 && inTz && heraldsAvailable(s) && !m.nh) {
               // herald TC from monstats TreasureClassHerald(H), group-upgraded at mlvl + tier boost
               const tier = Math.max(1, Math.min(5, s.tier || 1));
               const hb = (D.tz.herald[tier - 1] || { boost: 0 }).boost;
@@ -1758,7 +1879,7 @@
     }
 
     return {
-      CONFIG, data: D, DIFFS, items, types, getCtx, playersN, adjNoDrop, dist, upgradeTC, areaSources, DUP_OF,
+      CONFIG, data: D, DIFFS, items, types, getCtx, playersN, adjNoDrop, dist, upgradeTC, areaSources, DUP_OF, areaRun, areaRolls, listShares, bossPacks,
       mode, heraldsAvailable, sunderChance, sunderPaths, isSunder, adjQuality, heraldSpawnPct, quality, qualityTotals, sources, srcDist, chanceFor, baseQualityChance, affixLevel, minIlvlForAlvl, eligible, maxSockets, affixProb, minLevels, staffDist, staffBase,
       statList, describe, affixSearch, searchIndex, baseTypes, metaCache, uniqById, setById, uniqByCode, setByCode, prettyId, tzLevel,
       eligibleUniques, eligibleSets, condProb, trialsFor,

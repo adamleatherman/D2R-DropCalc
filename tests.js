@@ -327,12 +327,15 @@
       const nm = {}; const dupName = [];
       for (const s of E.sources(ctx)) { if (s.rank === 'regular' || s.rank === 'champion' || s.rank === 'unique' || s.rank === 'minion' || s.rank === 'herald') continue; const k = s.name + '|' + s.area + '|' + s.diff; if (nm[k]) dupName.push(k); nm[k] = 1; }
       res.cap.dups = { dup, dupName, bossNames: ['Nihlathak', 'Radament', 'The Summoner', 'Griswold'].map((n) => E.sources(ctx).filter((s) => s.name === n && s.diff === 2).map((s) => s.rank)) }; }
-    // Tal Rasha's Tomb: Unraveler listed twice
-    { const ctx = ctxFor(1, 1); const rows = E.sources(ctx).filter((s) => s.diff === 2 && s.rank === 'regular' && s.areaName === "Tal Rasha's Tomb" && s.area === 66);
-      const A = data.levels['66']; const names = {}; for (const r of rows) names[r.mon] = r;
-      const packsBase = A.sx[2] * A.sy[2] * E.CONFIG.run.areaFill * A.den[2] / 100000;
-      const shares = rows.map((r) => ({ mon: r.mon, share: r.share, perRun: r.perRun }));
-      res.cap.tal = { shares, packsBase, nmon: A.nmon, rows: rows.length, apparition: rows.filter((r) => /wraith/.test(r.mon)).map((r) => ({ mon: r.mon, n: r.name, perRun: r.perRun })) }; }
+    // per-run model: engine areaRun for a spread of areas (independent Python reference in test_engine.py), and sources() perRun == areaRun
+    { const ctx = ctxFor(1, 1); const S = E.sources(ctx); const run = {};
+      for (const [lid, d] of [[8, 0], [2, 0], [3, 2], [12, 2], [39, 2], [66, 2], [74, 1], [107, 2], [111, 2], [113, 2], [116, 2], [119, 2], [122, 2], [126, 2], [128, 2], [133, 2]]) {
+        const r = E.areaRun(String(lid), d), kills = {}, share = {};
+        for (const [id, k] of r.kills) kills[id] = k; for (const [id, x] of r.share) share[id] = x;
+        let srcSum = 0, runSum = 0; for (const x of S) if (x.area === lid && x.diff === d && x.rank !== 'super' && x.rank !== 'boss' && x.rank !== 'herald') srcSum += x.perRun;
+        for (const k of r.kills.values()) for (const rk in k) runSum += k[rk];
+        run[lid + '|' + d] = { kills, share, packs: r.packs, bosses: r.bosses, rolls: r.rolls, rooms: r.rooms, srcSum, runSum }; }
+      res.cap.run = run; }
     { E.CONFIG.dropCap = 6; const ctx = ctxFor(1, 1); const S = E.sources(ctx); const f1 = (n, d) => S.find((s) => s.name === n && s.diff === d && s.rank === 'super');
       const rak = f1('Rakanishu', 0), rad = S.find((s) => s.name === 'Radament' && s.diff === 2);
       res.cap.su = { pind: f1('Pindleskin', 2).mlvl, countess: f1('The Countess', 2).mlvl, rak: rak.mlvl, cow: S.find((s) => s.name === 'The Cow King' && s.diff === 0).mlvl,

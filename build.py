@@ -252,6 +252,14 @@ def build(mode):
         groups[g].sort(key=lambda x: x[0])
 
     # --------------------------------------------------------------------- levels
+    # Level geometry for the per-run model (engine.js areaRolls). DrlgType 1 (maze): lvlmaze Rooms[diff] cells of SizeX x SizeY tiles
+    # (D2MOO D2Common DrlgMaze.cpp DRLGMAZE_GenerateLevel adds cells until pLevel->nRooms == dwRooms[difficulty]); levels.txt SizeX/SizeY is only
+    # the bounding box there. Others: levels.txt SizeX/SizeY. Act 5 Frigid Highlands / Arreat Plateau / Frozen Tundra are forced to 64x160 or 160x64
+    # tiles by the Act 5 level linker (DrlgOutRoom.cpp DRLGOUTROOM_LinkLevelsByLevelCoords / ...ByOffsetCoords / ...ByLevelDef; levels.txt: -1 / 128x80).
+    # Fixed single-preset caves (Frozen River, Drifter Cavern, Icy Cellar) and the Hell1-3 lava layouts get no extra special-preset cells.
+    maze = {num(r.get("Level")): r for r in rd("lvlmaze") if r.get("Level")}
+    ACT5_LINKED = {111: (64, 160), 112: (64, 160), 117: (64, 160)}
+    FIXED_MAZE = {114, 116, 119, 125, 126, 127}
     levels = {}
     for r in rd("levels"):
         lid = num(r.get("Id"), -1)
@@ -279,7 +287,18 @@ def build(mode):
             "nmon": [r["nmon%d" % i] for i in range(1, 26) if r.get("nmon%d" % i)],
             "umon": [r["umon%d" % i] for i in range(1, 26) if r.get("umon%d" % i)],
             "wp": 1 if r.get("Waypoint") and num(r.get("Waypoint"), 255) < 255 else 0,
+            "rs": num(r.get("rangedspawn")),
+            "nw": sum(1 for i in range(8) if num(r.get("Vis%d" % i), 0) > 0),   # adjacent levels (warps); each costs about one room of spawn rolls (WarpDist)
         }
+        mz = maze.get(lid)
+        L = levels[str(lid)]
+        if num(r.get("DrlgType")) == 1 and mz:
+            L["geo"] = {"t": "maze", "cells": [num(mz.get("Rooms")), num(mz.get("Rooms(N)")), num(mz.get("Rooms(H)"))],
+                        "w": num(mz.get("SizeX")), "h": num(mz.get("SizeY")), "fixed": 1 if lid in FIXED_MAZE else 0}
+        elif lid in ACT5_LINKED:
+            L["geo"] = {"t": "area", "w": [ACT5_LINKED[lid][0]] * 3, "h": [ACT5_LINKED[lid][1]] * 3}
+        else:
+            L["geo"] = {"t": "area", "w": L["sx"], "h": L["sy"]}
 
     # ------------------------------------------------------------------- monsters
     monsters = {}
@@ -300,6 +319,13 @@ def build(mode):
             "rar": num(r.get("Rarity")),
             "g": [num(r.get("MinGrp"), 1), num(r.get("MaxGrp"), 1)],
             "pm": [num(r.get("PartyMin")), num(r.get("PartyMax"))],
+            # spawn-model fields (engine.js areaRun): party / unique minions, group forced to 1 for Fallen / Scarab bases (PopulateRoom),
+            # sparsePopulate, placespawn -> spawn swap, rangedtype (levels rangedspawn re-rolls the first list pick for one)
+            "mn": [x for x in (r.get("minion1"), r.get("minion2")) if x],
+            "g1": 1 if r.get("BaseId") in ("fallen1", "scarab1") else 0,
+            "spp": num(r.get("sparsePopulate")),
+            "ps": r.get("spawn") if num(r.get("placespawn")) and r.get("spawn") else "",
+            "rt": num(r.get("rangedtype")),
             "npc": num(r.get("npc")),
             "nh": num(r.get("CannotHerald")),
             "en": num(r.get("enabled")),

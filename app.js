@@ -665,8 +665,10 @@
     const C = E.CONFIG;
     return '<p><b>How to read the tables.</b> Probabilities are per kill unless the column says run, and are shown as odds ("1 in N")."P(target)" for a base item equals P(base); for a unique or set item it is the chance of that exact item. ' +
       'Rank tags: champion (+' + C.champOffset + ' mlvl), unique (+' + C.uniqueOffset + '), minion of a unique (+' + C.minionOffset + '), super = super unique, boss = act boss.</p>' +
-      '<p><b>Per-run numbers are a rough estimate.</b> kills/run = area tiles x ' + C.run.areaFill + ' x MonDen/100000 packs x rarity share x average pack size, plus unique/champion packs from MonUMin/MonUMax ' +
-      '(champion share ' + C.run.champShare + ', champion pack ' + C.run.champPackSize + ' monsters). Bosses and super uniques count as one kill per run.</p>' +
+      '<p><b>Per-run numbers are an estimate of one full clear.</b> The game makes one spawn roll per 3x3 subtiles of every room (about 2.7 per tile; caves use the real lvlmaze size, not the levels.txt box) and spawns a pack with chance MonDen/100000. ' +
+      'Only a share of those packs actually place (placement factor ' + C.run.placeFactor + ', calibrated on a measured Cow Level count, not from the game code). Pack types follow how the game picks from the area monster list and their Rarity; ' +
+      'packs include party minions (e.g. the Fallen with a Fallen Shaman, counted as their own monster). Champion/unique packs follow MonUMin/MonUMax (' + C.run.champShare * 100 + '% champion packs of 2-4, else a unique with ' + C.run.uniqueMinions.join('-') + ' minions). ' +
+      'Treat the numbers as about +/-50%; they rank areas against each other better than they count them. Bosses and super uniques count as one kill per run.</p>' +
       '<p><b>Config in use</b> (Engine.CONFIG in engine.js): <code>' + esc(JSON.stringify(C)) + '</code></p>' +
       '<p>See README.md for formulas, research sources and limitations.</p>';
   }
