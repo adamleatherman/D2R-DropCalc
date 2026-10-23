@@ -166,6 +166,12 @@
       res.lod.hcAndariel = EL.chanceFor(ctx, s, { kind: 'unique', id: 'Harlequin Crest' }, 0).target;
       const ctxR = E.getCtx({ players: 1, party: 1, ladder: true, tz: false, mf: 0 }), sR = E.sources(ctxR).find((x) => x.name === 'Andariel' && x.diff === 2 && x.rank === 'boss');
       res.lod.hcAndarielRotw = E.chanceFor(ctxR, sR, { kind: 'unique', id: 'Harlequin Crest' }, 0).target; }
+    // ladder season gating (CONFIG.currentSeason): RotW season-15 uniques are ladder-only, the Angelic set too (15-16), Sunders (2-2) open to non-ladder; LoD has no gating
+    { const hell = (Em, ladder) => { const ctx = Em.getCtx({ players: 1, party: 1, ladder, tz: false, mf: 0 }); return [ctx, Em.sources(ctx).find((x) => x.name === 'Andariel' && x.diff === 2 && x.rank === 'boss')]; };
+      const p = (Em, ladder, tg) => { const [ctx, s] = hell(Em, ladder); return Em.chanceFor(ctx, s, tg, 0).target; };
+      const bane = { kind: 'unique', id: 'Bane Ash' }, halo = { kind: 'set', id: 'Angelic Halo' };
+      res.ladder = { season: E.CONFIG.currentSeason, baneL: p(E, true, bane), baneNL: p(E, false, bane), haloL: p(E, true, halo), haloNL: p(E, false, halo), baneLodNL: p(EL, false, bane),
+        sunderNL: E.eligibleUniques('cm3', 99, false, 99, 2).filter((u) => E.isSunder(u.id)).length, sunderL: E.eligibleUniques('cm3', 99, true, 99, 2).filter((u) => E.isSunder(u.id)).length }; }
 
     // ---- heralds ---------------------------------------------------------------------------------
     res.herald = { tiers: {}, sunder: {}, flame: {}, statue: {} };
@@ -621,6 +627,26 @@
           colossalLow: S.filter((s) => s.area === 137 && s.diff < 2).length, colossalHell: S.filter((s) => s.area === 137 && s.diff === 2).length };
         const grp = E.areaSources(cx).filter((s) => s.rank === 'minion' && s.diff === 2 && (s.area === 83 || s.area === 102));
         F.councilGroups = grp.map((s) => [s.area, s.mon, s.perRun, s.tc]); }
+    }
+    // ---- affix table fit test (fitsCombo, the fast structural test) against the full sweep (feasibleAny) ----
+    { const QSA = ['low', 'normal', 'sup', 'magic', 'rare'], T = E.builderTypes(), fit = res.fit = { cases: [], missed: 0, extra: 0, n: 0, bad: [], ms: {} };
+      let seed = 11; const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+      const mk = (st, cs, r) => { cs = cs.slice(); for (const m of r.mods) { const s = st.get(m.key); if (!s) continue; const v = s.le ? m.max : m.min, i = cs.findIndex((c) => c.key === m.key);
+        if (i >= 0) cs[i] = Object.assign({}, cs[i], { min: s.le ? Math.min(cs[i].min, v) : Math.max(cs[i].min, v) }); else cs.push(s.le ? { key: m.key, min: v, le: true } : { key: m.key, min: v }); } return cs; };
+      for (const [tn, quals] of [['Boots', QSA], ['Small Charm', QSA], ['Circlet', QSA], ['Staff', QSA], ['Boots', ['magic']], ['Circlet', ['rare']], ['Boots', ['normal']], ['Boots', ['sup']]]) {
+        const ty = T.find((t) => t.name === tn), codes = E.builderBases(ty.code, -1), idx = E.fitIndex(codes), cat = Array.from(E.builderCatalog(codes, 85).values()), st = new Map(E.builderStats(codes).map((x) => [x.key, x]));
+        for (let sc = 0; sc < 4; sc++) {
+          let conds = []; for (let k = 0; k < sc; k++) conds = mk(st, conds, cat[Math.floor(rnd() * cat.length)]);
+          for (const r of cat) { const cs = mk(st, conds, r), a = E.fitsCombo(idx, cs, quals, 2), b = E.feasibleAny(codes, cs, quals, 2); fit.n++; if (b && !a) fit.missed++; if (a && !b) fit.extra++; if (a !== b && fit.bad.length < 5) fit.bad.push([tn, quals.join(), JSON.stringify(cs)]); }
+        }
+      }
+      for (const tn of ['Any Armor', 'Melee Weapon']) {   // one full table pass on a broad type with two picks
+        const ty = T.find((t) => t.name === tn), codes = E.builderBases(ty.code, -1), cat = Array.from(E.builderCatalog(codes, 85).values()), st = new Map(E.builderStats(codes).map((x) => [x.key, x]));
+        const t0 = performance.now(), idx = E.fitIndex(codes), t1 = performance.now();
+        const conds = mk(st, mk(st, [], cat[40]), cat[200]); let unfit = 0;
+        for (const r of cat) if (!E.fitsCombo(idx, mk(st, conds, r), QSA, 2)) unfit++;
+        fit.ms[tn] = { bases: codes.length, rows: cat.length, unfit, index: Math.round(t1 - t0), pass: Math.round(performance.now() - t1) };
+      }
     }
     res.sourcesCount = E.sources(ctxFor(1, 1)).length;
     res.config = E.CONFIG;

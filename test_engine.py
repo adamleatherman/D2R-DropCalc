@@ -1398,6 +1398,12 @@ def main():
     ok = abs(js["lod"]["hcAndariel"] - js["lod"]["hcAndarielRotw"]) > 1e-9
     ROWS.append(("PASS" if ok else "FAIL", "Hell Andariel P(Harlequin Crest) differs between modes", js["lod"]["hcAndariel"], js["lod"]["hcAndarielRotw"], ""))
     if not ok: FAIL.append("andariel hc modes")
+    LD = js["ladder"]
+    for name, cond in [("RotW Bane Ash drops on ladder (season %d)" % LD["season"], LD["baneL"] > 0), ("RotW Bane Ash cannot drop on non-ladder in season 15", LD["baneNL"] == 0),
+                       ("RotW Angelic Halo drops on ladder", LD["haloL"] > 0), ("RotW Angelic Halo cannot drop on non-ladder in season 15", LD["haloNL"] == 0),
+                       ("LoD Bane Ash drops on non-ladder (no season gating)", LD["baneLodNL"] > 0), ("Sunders (season 2) open to non-ladder: 6 at mlvl 99 Hell", LD["sunderNL"] == 6 and LD["sunderL"] == 6)]:
+        ROWS.append(("PASS" if cond else "FAIL", name, "", "", ""))
+        if not cond: FAIL.append(name)
     # expansion bounds of desecratedzones for LoD, rotw section for RotW
     dzs = json.load(open(os.path.join(SRC, "hd", "desecratedzones.json"), encoding="utf-8"))["desecrated_zones"][0]["game_difficulties"]
     for mode, sec in (("lod", "expansion"), ("rotw", "rotw")):
@@ -1853,6 +1859,9 @@ def main():
           1 if (RG["cat"] == [arlo_, arall_] and RG["ar"] == [arlo_, arfine_] and RG["arMx"] == [arlo_, arall_] and RG["arAlone"] == [arlo_, arall_] and RG["arLf"] == [arlo_, arall_] and arfine_ < arall_) else 0, 1, 0, str(RG))
     check("small charm slider ranges with conflicting other stats fall back to the catalogue range", 1 if RG["conflict"] == RG["cat"] else 0, 1, 0, str(RG["conflict"]))
     check("lower-is-better condition (le): -30 <= -20 holds, -30 >= -20 does not", B["le"]["reqLe"] + 10 * B["le"]["reqGe"], 1, 0)
+    FT = js["fit"]
+    check("affix table fit test (fitsCombo) agrees with the full sweep (feasibleAny) on %d row/pick combinations: never says no to a feasible one, never says yes to an infeasible one" % FT["n"], FT["missed"] + 10 * FT["extra"], 0, 0, str(FT["bad"]))
+    info("affix table fit pass on broad types (ms: fitIndex once, then one pass over all rows with 2 picks)", str(FT["ms"]), "-")
     check("old deep link ?q2=Monarch&ql=magic&c=Socketed (#):4 resolves in the page: magic result, rare impossible", 1 if ("Magic" in js["deeplink"] and "77" in js["deeplink"] and "not possible" in js["deeplink"] and "sources" in js["deeplink"]) else 0, 1, 0, js["deeplink"][:160].replace(chr(10), " "))
     # ---- low / normal / superior items: sockets, ethereal, superior bonus (independent reference from the raw tables and the D2MOO rules) ----
     WH = js["white"]

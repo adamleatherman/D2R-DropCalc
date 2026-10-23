@@ -81,8 +81,8 @@
     },
     // --- monster rank level offsets (data guide: "The unique monster bonus can go over [the TZ max]") ---
     champOffset: 2, uniqueOffset: 3, minionOffset: 3,
-    // --- ladder: current ladder season used for first/lastLadderSeason gating ---
-    currentSeason: 99,
+    // --- ladder: current ladder season used for first/lastLadderSeason gating (Season 15 began 2026-08-21 with patch 3.3; bump each season) ---
+    currentSeason: 15,
     // --- terror zones ---
     // --- game mode: informational. Each data file is one mode ('rotw' = Reign of the Warlock = data.json, 'lod' = Lord of Destruction
     // = data-lod.json, see build.py); Engine.create sets this to the mode of the data it was given (meta.mode). Heralds exist when the
@@ -1979,6 +1979,73 @@
       return c.le ? { min: cand[lo], max: st.max } : { min: st.min, max: cand[lo] };
     }
 
+    /** Fast fit test for the affix table: can the combination exist on some base, at some item level, as one of `qualities`? Same rules as planCombo (slots,
+     *  groups, one automagic / socket / ethereal / superior row, staff skill count, item level windows) but run over the builder catalogue instead of the full
+     *  eligible lists, so it costs microseconds per base. It never says "no" for a combination feasibleAny accepts (item level windows are hulls); the app uses it to
+     *  mark table rows that no longer fit. fitIndex(codes) is built once per set of bases; fitsCombo(index, conds, qualities, diff) answers for one combination. */
+    function fitIndex(codes) {
+      const cat = Array.from(builderCatalog(codes).values()), by = new Map(), keys = new Map();
+      for (const r of cat) { r.cm = r.mods.map((m) => [0, 0, m.min, m.max, m.key]); for (const m of r.mods) { if (!keys.has(m.key)) keys.set(m.key, new Set()); keys.get(m.key).add(r); } }
+      for (const code of codes) {
+        const byId = new Map();
+        for (const r of cat) { const rng = r.per.get(code); if (rng) byId.set(r.id, { id: r.id, side: r.side, g: r.g || 0, quals: r.quals, lo: rng[0], hi: rng[1] }); }
+        by.set(code, byId);
+      }
+      return { codes, by, keys };
+    }
+    function fitsCombo(index, conds, qualities, diff) {
+      const nc = conds.length, kmax = CONFIG.staffMods.count.length - 1;
+      if (!nc) return true;
+      const full = (1 << nc) - 1;
+      const hit = new Map();   // catalogue row -> bitmask of the conditions it meets (once for all bases)
+      conds.forEach((c, i) => { for (const r of index.keys.get(c.key) || []) if (condProb({ mods: r.cm }, c) > 0) hit.set(r.id, (hit.get(r.id) || 0) | (1 << i)); });
+      if (Array.from(hit.values()).reduce((a, m) => a | m, 0) !== full) return false;   // a condition no affix of the type can meet
+      for (const code of index.codes) {
+        const byId = index.by.get(code);
+        const cand = [];
+        for (const [id, mask] of hit) {
+          const e = byId.get(id); if (!e) continue;
+          if (e.side === 'socket' && conds.some((c, i) => ((mask >> i) & 1) && c.key === SOCK_KEY && !c.le && c.min > plainSocketMax(code, 99, diff))) continue;
+          cand.push([e, mask]);
+        }
+        if (cand.reduce((a, x) => a | x[1], 0) !== full) continue;
+        for (const q of qualities) {
+          if (!qualityPossible(code, q)) continue;
+          const lim = isPlain(q) || q === 'magic' ? { p: 1, s: 1, tot: 2 } : { p: CONFIG.rareMaxPerSide, s: CONFIG.rareMaxPerSide, tot: Math.max.apply(null, items[code].t === 'jewl' ? CONFIG.rareJewelCounts : CONFIG.rareAffixCounts) };
+          const byBit = conds.map(() => []);
+          for (const [e, mask] of cand) {
+            if (e.quals.indexOf(q) < 0) continue;
+            if ((e.side === 'prefix' || e.side === 'suffix') && isPlain(q)) continue;
+            conds.forEach((c, i) => { if ((mask >> i) & 1) byBit[i].push([e, mask]); });
+          }
+          const groups = [], used = new Set();
+          const dfs = (cov, np, ns, na, nk, lo, hi) => {
+            if (cov === full) return true;
+            let bit = 0; while ((cov >> bit) & 1) bit++;
+            for (const [e, mask] of byBit[bit]) {
+              const nlo = Math.max(lo, e.lo), nhi = Math.min(hi, e.hi); if (nlo > nhi) continue;
+              let dp = 0, ds = 0, da = 0, dk = 0;
+              if (e.side === 'prefix') { if (np >= lim.p || np + ns >= lim.tot) continue; dp = 1; }
+              else if (e.side === 'suffix') { if (ns >= lim.s || np + ns >= lim.tot) continue; ds = 1; }
+              else if (e.side === 'auto') { if (na >= 1) continue; da = 1; }
+              else if (e.side === 'staff') { if (nk >= kmax) continue; dk = 1; }
+              else if (used.has(e.side)) continue;   // socket / ethereal / superior: one of each
+              if (e.g && groups.indexOf(e.g) >= 0) continue;
+              if (e.g) groups.push(e.g);
+              if (dp + ds + da + dk === 0) used.add(e.side);
+              const ok = dfs(cov | mask, np + dp, ns + ds, na + da, nk + dk, nlo, nhi);
+              if (e.g) groups.pop();
+              if (dp + ds + da + dk === 0) used.delete(e.side);
+              if (ok) return true;
+            }
+            return false;
+          };
+          if (dfs(0, 0, 0, 0, 0, 1, 99)) return true;
+        }
+      }
+      return false;
+    }
+
     // ---------------- search index ----------------
     function searchIndex() {
       const out = [];
@@ -2024,7 +2091,7 @@
       mode, heraldsAvailable, sunderChance, sunderPaths, isSunder, adjQuality, heraldSpawnPct, quality, qualityTotals, sources, srcDist, chanceFor, baseQualityChance, affixLevel, minIlvlForAlvl, eligible, maxSockets, affixProb, minLevels, staffDist, staffBase,
       statList, describe, describeAt, sliderWhat, affixSearch, searchIndex, baseTypes, metaCache, uniqById, setById, uniqByCode, setByCode, prettyId, tzLevel,
       eligibleUniques, eligibleSets, condProb, trialsFor,
-      builderTypes, builderBases, builderCatalog, builderStats, builderAffixTable, baseDropWeights, affixAppearance, planCombo, comboForBase, comboAnalysis, statRange, explainCombo, groupName,
+      builderTypes, builderBases, builderCatalog, builderStats, builderAffixTable, baseDropWeights, affixAppearance, planCombo, comboForBase, comboAnalysis, feasibleAny, fitIndex, fitsCombo, statRange, explainCombo, groupName,
       qualityPossible, ethItem, ethChance, plainSocketMax, plainSocketDist, extrasDist, QUALS, QLABEL, SOCK_KEY, ETH_KEY,
     };
   }

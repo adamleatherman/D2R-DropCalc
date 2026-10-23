@@ -69,28 +69,49 @@
   .lnk { display:flex; flex-direction:column; font-size:11px; color:var(--dim); gap:2px; margin-top:6px; } .lnk input { width:100%; }
   details summary { cursor:pointer; color:var(--accent); margin:6px 0; }
   .side { font-size:11px; padding:0 5px; border-radius:8px; background:var(--panel2); } .side.prefix { color:var(--side-prefix); } .side.suffix { color:var(--side-suffix); } .side.auto { color:var(--side-auto); } .side.staff { color:var(--side-staff); } .side.socket { color:var(--side-socket); } .side.ethereal { color:var(--side-ethereal); } .side.superior { color:var(--side-superior); }
+  .steps { margin:4px 0 8px; padding-left:20px; } .steps li { margin:1px 0; }
+  .card { border:1px solid var(--accent); border-radius:6px; background:var(--panel2); padding:6px 8px; margin-top:4px; }
+  .card .chd { display:flex; justify-content:space-between; align-items:baseline; gap:8px; border-bottom:1px solid var(--line); padding-bottom:4px; }
+  .card .slots { font-size:12px; color:var(--dim); margin:4px 0; }
+  .pk { border-top:1px solid var(--line); padding:4px 0; }
+  .pkh { display:flex; justify-content:space-between; align-items:center; gap:8px; }
+  .pk .selrow { border-top:none; padding:3px 0 3px 8px; }
+  tr.nofit td { opacity:.5; font-style:italic; } tr.nofit td:first-child { box-shadow:inset 3px 0 0 var(--bad); }
+  .nofit-tag { font-size:11px; font-style:normal; color:var(--bad); border:1px solid var(--bad); border-radius:8px; padding:0 5px; }
+  tr.picked td, tr.picked:hover td { background:var(--primary-bg); } .picked-tag { font-size:11px; color:var(--good); border:1px solid var(--good); border-radius:8px; padding:0 5px; }
+  .head { font-size:15px; border-left:3px solid var(--accent); padding:2px 0 2px 10px; margin-bottom:8px; }
+  .hrow { display:flex; flex-wrap:wrap; align-items:center; gap:4px 12px; } .hrow h1 { margin:0; }
+  .theme { margin-left:auto; display:flex; align-items:center; gap:5px; font-size:11px; color:var(--dim); }
+  .game { margin-top:6px; } .game > summary { margin:0; padding:3px 8px; background:var(--panel2); border:1px solid var(--line); border-radius:4px; display:inline-block; max-width:100%; } .game > summary::before { content:"▸  "; } .game[open] > summary::before { content:"▾  "; } .game[open] > summary { margin-bottom:8px; }
+  .wh { display:contents; }
+  .head #hl1 b { color:var(--accent); } .head .note { margin:2px 0; } .head button { margin-top:4px; }
+  .mem summary { margin:0; font-size:12px; } .mem div { font-size:12px; white-space:normal; text-align:left; } .mem .d { color:var(--dim); }
+  .why li { margin:2px 0; }
   @media (max-width:860px) { .b2grid { grid-template-columns:minmax(0,1fr); } #selbox { position:static; } }
-  @media (max-width:600px) { header, nav, main { padding-left:16px; padding-right:16px; } nav { flex-wrap:wrap; } nav button { padding:6px 9px; } .ac input { width:100%; } .row > label { min-width:0; } .row .ac { max-width:100%; } }
+  @media (max-width:600px) { header, nav, main { padding-left:16px; padding-right:16px; } nav { flex-wrap:wrap; } nav button { padding:6px 9px; } .ac input { width:100%; } .row > label { min-width:0; } .row .ac { max-width:100%; } .theme { margin-left:0; } .game > summary { display:block; } }
 </style>
 </head>
 <body>
 <header>
-  <h1>D2R Drop Calculator <span class="note" id="dataInfo"></span></h1>
-  <div class="sel">
-    <label>Difficulty
-      <select id="s_diff"><option value="-1">All</option><option value="0">Normal</option><option value="1">Nightmare</option><option value="2" selected>Hell</option></select></label>
-    <label>Players in game <input type="number" id="s_players" min="1" max="8" value="1"></label>
-    <label>Partied nearby (incl. you) <input type="number" id="s_party" min="1" max="8" value="1"></label>
-    <label>Magic Find % <input type="number" id="s_mf" min="0" max="1000" value="0"></label>
-    <label>Game mode <select id="s_mode"><option value="rotw" selected>RotW (Reign of the Warlock)</option><option value="lod">LoD (Lord of Destruction)</option></select></label>
-    <label class="chk" title="Use act bosses' quest drop table (first kill while the killer's quest is open: not completed before, no reward pending; Mephisto/Diablo/Baal checkpoint 0). Andariel always uses it in D2R."><input type="checkbox" id="s_quest"> Quest drop</label>
-    <label class="chk"><input type="checkbox" id="s_tz"> Terror zone</label>
-    <label>Character level <input type="number" id="s_clvl" min="1" max="99" value="85"></label>
-    <label id="l_tier" hidden title="Herald tier. The herald drops from the monster's monstats TreasureClassHerald(H) TC, group-upgraded at mlvl + tier boost (0/3/6/9/12). All tiers lists one row per tier.">Herald tier <select id="s_tier"><option value="0">All tiers</option><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option></select></label>
-    <label>Ladder <select id="s_ladder"><option value="1" selected>Ladder</option><option value="0">Non-ladder</option></select></label>
-    <label>Act <select id="s_act"><option value="0">All</option><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option></select></label>
-    <label>Theme <select id="s_theme"><option value="">System</option><option value="light">Light</option><option value="dark">Dark</option></select></label>
+  <div class="hrow">
+    <h1>D2R Drop Calculator <span class="note" id="dataInfo"></span></h1>
+    <label class="theme">Theme <select id="s_theme"><option value="">System</option><option value="light">Light</option><option value="dark">Dark</option></select></label>
   </div>
+  <details id="game" class="game">
+    <summary id="gsum" title="Your game: the settings every calculation uses. Click to change them.">Your game</summary>
+    <div class="sel">
+      <label>Players in game <input type="number" id="s_players" min="1" max="8" value="1"></label>
+      <label>Partied nearby (incl. you) <input type="number" id="s_party" min="1" max="8" value="1"></label>
+      <label>Magic Find % <input type="number" id="s_mf" min="0" max="1000" value="0"></label>
+      <label>Game mode <select id="s_mode"><option value="rotw" selected>RotW (Reign of the Warlock)</option><option value="lod">LoD (Lord of Destruction)</option></select></label>
+      <label>Ladder <select id="s_ladder"><option value="1" selected>Ladder</option><option value="0">Non-ladder</option></select></label>
+      <!-- room for a future "Season" number input next to Ladder -->
+      <label>Character level <input type="number" id="s_clvl" min="1" max="99" value="85"></label>
+      <label class="chk" title="Use act bosses' quest drop table (first kill while the killer's quest is open: not completed before, no reward pending; Mephisto/Diablo/Baal checkpoint 0). Andariel always uses it in D2R."><input type="checkbox" id="s_quest"> Quest drop</label>
+      <label class="chk"><input type="checkbox" id="s_tz"> Terror zone</label>
+      <label id="l_tier" hidden title="Herald tier. The herald drops from the monster's monstats TreasureClassHerald(H) TC, group-upgraded at mlvl + tier boost (0/3/6/9/12). All tiers lists one row per tier.">Herald tier <select id="s_tier"><option value="0">All tiers</option><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option></select></label>
+    </div>
+  </details>
 </header>
 <nav>
   <button id="t1" class="on">1. Item search</button>
@@ -105,45 +126,68 @@
       </label>
       <label>Source filter <input id="f1" placeholder="monster or area text" style="width:200px"></label>
       <label>Rank <select id="r1"><option value="">All</option><option>regular</option><option>champion</option><option>unique</option><option>minion</option><option>super</option><option>boss</option><option>herald</option></select></label>
-      <label title="Add columns with the kills (or runs) needed to have found the item with 25/50/75/90/95/99% probability">Percentiles <select id="s_pct"><option value="off" selected>Off</option><option value="kills">Kills</option><option value="runs">Runs</option></select></label>
+      <span class="wh" id="wh">
+        <label>Difficulty
+          <select id="s_diff"><option value="-1">All</option><option value="0">Normal</option><option value="1">Nightmare</option><option value="2" selected>Hell</option></select></label>
+        <label>Act <select id="s_act"><option value="0">All</option><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option></select></label>
+      </span>
+      <label title="Monster: one row per monster type. Area: one row per area and difficulty, adding up the chance per run of all its sources (herald rows have no per-run chance and are left out)">Group by <select id="g1"><option value="mon">Monster</option><option value="area">Area</option></select></label>
+      <label class="chk" title="Add the quality columns (base, magic, rare, set, unique), act and monster level"><input type="checkbox" id="qb1"> Show quality breakdown</label>
       <label id="l_bq1" title="Restrict a weapon/armor base target to white-quality drops (low quality, normal, superior)" hidden>Base quality <select id="bq1"><option value="" selected>Any</option><option value="white">White (low + normal + superior)</option><option value="normsup">Normal + Superior</option><option value="sup">Superior only</option></select></label>
       <label>Rows <select id="n1"><option>100</option><option selected>300</option><option>1000</option><option>5000</option></select></label>
     </div>
-    <div class="note" id="info1">Choose an item. Results use the global selectors above. Probabilities are per kill; the per-run columns multiply by the estimated number of such kills per area clear (rough).</div>
+    <div class="head" id="head1" hidden>
+      <div id="hl1"></div>
+      <div class="note" id="low1"></div>
+      <button id="bld1" hidden title="Open the item builder with this base selected">Build an item on this base</button>
+    </div>
+    <div class="box" id="why1" hidden></div>
+    <div class="note" id="info1">Choose an item. Results use the "Your game" settings above. Probabilities are per kill; the per-run columns multiply by the estimated number of such kills per area clear (rough).</div>
     <div class="tbl"><table id="tb1"></table></div>
   </section>
 
   <section id="tab2" class="tab">
     <div class="row">
-      <label>Item type (or one specific base)
+      <label>1. Item type (or one specific base)
         <div class="ac"><input id="q2" placeholder="e.g. Boots, Circlet, Wand, Sword, Monarch" autocomplete="off"><ul id="ac2" hidden></ul></div>
       </label>
       <label title="Only the bases of this tier (armor and weapons); jewelry, charms and jewels have no tiers">Tier <select id="tr2"><option value="-1">All</option><option value="0">Normal</option><option value="1">Exceptional</option><option value="2">Elite</option></select></label>
-      <label title="The item level the affix table below is evaluated at (which affixes can roll, their odds). The results panel does not depend on it: it tells you the item levels that work.">Item level (affix table)
-        <span class="il"><input type="number" id="il2" min="1" max="99" value="85"><input type="range" id="ilr2" min="1" max="99" value="85"></span></label>
       <label title="Auto: every quality the selection allows (low, normal, superior, magic, rare). A magic item has at most 1 prefix and 1 suffix; normal, superior and low quality items have no prefixes or suffixes (only sockets, ethereal, the superior bonus, the automagic row and staff skills)">Quality <select id="ql2"><option value="">Auto (all that fit)</option><option value="low">Low quality</option><option value="normal">Normal (white)</option><option value="sup">Superior</option><option value="magic">Magic only</option><option value="rare">Rare only</option></select></label>
-      <label title="Rare odds are Monte Carlo (magic is exact). Applies to the farm search; the affix table uses a similar number of rolls per base.">Monte Carlo rolls (rare) <select id="mc2"><option>20000</option><option selected>50000</option><option>200000</option></select></label>
-      <label title="Choosing an area weights the affix-table odds by how often each base drops there (and limits the farm search to it)">Area <select id="ar2"><option value="">All areas</option></select></label>
-      <label title="Optional: one monster / source in the chosen area (weights the affix-table odds and limits the farm search to it)">Monster <select id="mo2" disabled><option value="">All sources</option></select></label>
-      <label>Rows <select id="n2"><option>50</option><option selected>200</option><option>1000</option></select></label>
     </div>
-    <div class="note" id="info2">Pick an item type (Boots, Circlet, Sword, ...) or a single base, click the affixes you want, set the minimum values with the sliders, and read off the item levels and the best places to farm it.</div>
+    <details id="adv2">
+      <summary>Advanced: affix odds and farm search</summary>
+      <div class="row">
+        <label title="The item level the affix odds in the table are evaluated at (and which affixes count as available). The results panel does not depend on it: it tells you the item levels that work.">Item level for the affix odds
+          <span class="il"><input type="number" id="il2" min="1" max="99" value="85"><input type="range" id="ilr2" min="1" max="99" value="85"></span></label>
+        <label title="Rare odds are Monte Carlo (magic is exact). Applies to the farm search; the affix table uses a similar number of rolls per base.">Monte Carlo rolls (rare) <select id="mc2"><option>20000</option><option selected>50000</option><option>200000</option></select></label>
+        <label title="Choosing an area weights the affix-table odds by how often each base drops there (and limits the farm search to it)">Area <select id="ar2"><option value="">All areas</option></select></label>
+        <label title="Optional: one monster / source in the chosen area (weights the affix-table odds and limits the farm search to it)">Monster <select id="mo2" disabled><option value="">All sources</option></select></label>
+        <label>Rows <select id="n2"><option>50</option><option selected>200</option><option>1000</option></select></label>
+      </div>
+    </details>
+    <ol class="note steps" id="info2">
+      <li><b>Pick a base</b>: an item type (Boots, Circlet, Sword, ...) or one specific base.</li>
+      <li><b>Pick affixes</b>: click the ones you want in the table, then set the minimum values with the sliders in the card.</li>
+      <li><b>Read the result</b>: whether it is possible, from which item level, and where to farm it.</li>
+    </ol>
     <div class="b2grid">
       <div class="box">
         <div class="row">
           <label>Filter affixes <input id="f2" placeholder="name, stat or class text" style="width:200px"></label>
           <label>Side <select id="sd2"><option value="">All</option><option>prefix</option><option>suffix</option><option>auto</option><option>staff</option><option>socket</option><option>ethereal</option><option>superior</option></select></label>
           <label class="chk"><input type="checkbox" id="av2"> available at this item level</label>
+          <label class="chk" title="Affixes that cannot be added to your current picks (slot full, same exclusion group, no common item level) are hidden"><input type="checkbox" id="hf2" checked> hide affixes that don't fit</label>
+          <label class="chk" title="Add the odds columns (chance that an item of the type carries the affix)"><input type="checkbox" id="odds2"> show odds</label>
         </div>
         <div class="note" id="tinfo2"></div>
+        <div class="note" id="why2"></div>
         <div class="tbl small"><table id="tb2a"></table></div>
       </div>
       <div class="box" id="selbox">
         <b>Your item</b>
-        <div id="sel2" class="note">Click an affix in the table to add its stat. Each stat gets a minimum value you can move with the slider.</div>
-        <div id="conf2"></div>
+        <div id="sel2" class="note">Pick an item type or base first.</div>
         <div class="row" style="margin-top:8px">
-          <button id="go2" class="primary">Find farm sources</button>
+          <button id="go2" title="Re-run the farm search (it also runs by itself after every change)">Refresh</button>
           <button id="clr2">Clear</button>
           <progress id="prog2" value="0" max="1" hidden></progress>
         </div>
