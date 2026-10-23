@@ -4,8 +4,11 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>D2R Drop Calculator</title>
+<script>try { const t = localStorage.getItem('d2dc-theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch (e) {}</script>
 <style>
-  :root { --bg:#14161a; --panel:#1d2026; --panel2:#262a32; --text:#e4e1d8; --dim:#9a968a; --accent:#c8a45a; --good:#7fcf7f; --bad:#e07a6a; --line:#343944; }
+  :root { color-scheme:dark; --bg:#14161a; --panel:#1d2026; --panel2:#262a32; --text:#e4e1d8; --dim:#9a968a; --accent:#c8a45a; --good:#7fcf7f; --bad:#e07a6a; --line:#343944; --hover:#20242c; --primary-bg:#3a3220; --on-accent:#111111; --tag-champion:#8ab4ff; --tag-unique:#e6c34d; --tag-minion:#b79ad8; --tag-super:#7fe0c0; --tag-boss:#ff8f6a; --tag-herald:#ff6ad5; --tz:#e07a6a; --err:#e07a6a; --side-prefix:#8ab4ff; --side-suffix:#7fe0c0; --side-auto:#e6c34d; --side-staff:#ff8f6a; --side-socket:#c9a0ff; --side-ethereal:#9ad7ff; --side-superior:#d9d9d9; }
+  :root[data-theme="light"] { color-scheme:light; --bg:#f6f4ef; --panel:#ffffff; --panel2:#ece9e1; --text:#1e1d1a; --dim:#6b675d; --accent:#7a5a0e; --good:#2a722e; --bad:#b3261e; --line:#d6d1c4; --hover:#efe9da; --primary-bg:#f1e6c8; --on-accent:#ffffff; --tag-champion:#2d5fb8; --tag-unique:#7a5f00; --tag-minion:#6b4ea0; --tag-super:#1a6e52; --tag-boss:#a53f1a; --tag-herald:#b0287f; --tz:#b3261e; --err:#b3261e; --side-prefix:#2d5fb8; --side-suffix:#1a6e52; --side-auto:#7a5f00; --side-staff:#a53f1a; --side-socket:#7a3fc0; --side-ethereal:#1f6b94; --side-superior:#555555; }
+  @media (prefers-color-scheme: light) { :root:not([data-theme]) { color-scheme:light; --bg:#f6f4ef; --panel:#ffffff; --panel2:#ece9e1; --text:#1e1d1a; --dim:#6b675d; --accent:#7a5a0e; --good:#2a722e; --bad:#b3261e; --line:#d6d1c4; --hover:#efe9da; --primary-bg:#f1e6c8; --on-accent:#ffffff; --tag-champion:#2d5fb8; --tag-unique:#7a5f00; --tag-minion:#6b4ea0; --tag-super:#1a6e52; --tag-boss:#a53f1a; --tag-herald:#b0287f; --tz:#b3261e; --err:#b3261e; --side-prefix:#2d5fb8; --side-suffix:#1a6e52; --side-auto:#7a5f00; --side-staff:#a53f1a; --side-socket:#7a3fc0; --side-ethereal:#1f6b94; --side-superior:#555555; } }
   * { box-sizing: border-box; }
   body { margin:0; font:14px/1.4 "Segoe UI", system-ui, sans-serif; background:var(--bg); color:var(--text); }
   header { background:var(--panel); border-bottom:1px solid var(--line); padding:8px 14px; }
@@ -16,10 +19,10 @@
   input, select, button { background:var(--panel2); color:var(--text); border:1px solid var(--line); border-radius:4px; padding:4px 6px; font:inherit; }
   input[type=number] { width:70px; }
   button { cursor:pointer; } button:hover { border-color:var(--accent); }
-  button.primary { background:#3a3220; border-color:var(--accent); }
+  button.primary { background:var(--primary-bg); border-color:var(--accent); }
   nav { display:flex; gap:2px; padding:8px 14px 0; border-bottom:1px solid var(--line); }
   nav button { border-radius:4px 4px 0 0; border-bottom:none; padding:6px 14px; }
-  nav button.on { background:var(--accent); color:#111; border-color:var(--accent); }
+  nav button.on { background:var(--accent); color:var(--on-accent); border-color:var(--accent); }
   main { padding:12px 14px 40px; }
   .tab { display:none; } .tab.on { display:block; }
   .row { display:flex; flex-wrap:wrap; gap:8px 14px; align-items:flex-end; margin-bottom:10px; }
@@ -37,14 +40,14 @@
   th { position:sticky; top:0; background:var(--panel2); cursor:pointer; user-select:none; color:var(--accent); font-weight:600; }
   th:hover { text-decoration:underline; }
   td.l, th.l { text-align:left; }
-  tr:hover td { background:#20242c; }
+  tr:hover td { background:var(--hover); }
   .tbl { max-height:68vh; overflow:auto; border:1px solid var(--line); border-radius:6px; }
   .tag { display:inline-block; padding:0 6px; border-radius:8px; font-size:11px; background:var(--panel2); color:var(--dim); }
-  .tag.champion { color:#8ab4ff; } .tag.unique { color:#e6c34d; } .tag.minion { color:#b79ad8; } .tag.super { color:#7fe0c0; } .tag.boss { color:#ff8f6a; } .tag.herald { color:#ff6ad5; cursor:help; }
+  .tag.champion { color:var(--tag-champion); } .tag.unique { color:var(--tag-unique); } .tag.minion { color:var(--tag-minion); } .tag.super { color:var(--tag-super); } .tag.boss { color:var(--tag-boss); } .tag.herald { color:var(--tag-herald); cursor:help; }
   .cond { display:flex; gap:6px; align-items:center; margin:3px 0; }
   .cond input[list] { width:340px; max-width:60vw; }
   progress { width:240px; }
-  .tz { color:#e07a6a; font-size:11px; }
+  .tz { color:var(--tz); font-size:11px; }
   a { color:var(--accent); }
   [hidden] { display:none !important; }
   .il { display:flex; gap:6px; align-items:center; } .il input[type=range] { width:110px; padding:0; }
@@ -65,7 +68,7 @@
   .bad { color:var(--bad); } .good { color:var(--good); }
   .lnk { display:flex; flex-direction:column; font-size:11px; color:var(--dim); gap:2px; margin-top:6px; } .lnk input { width:100%; }
   details summary { cursor:pointer; color:var(--accent); margin:6px 0; }
-  .side { font-size:11px; padding:0 5px; border-radius:8px; background:var(--panel2); } .side.prefix { color:#8ab4ff; } .side.suffix { color:#7fe0c0; } .side.auto { color:#e6c34d; } .side.staff { color:#ff8f6a; } .side.socket { color:#c9a0ff; } .side.ethereal { color:#9ad7ff; } .side.superior { color:#d9d9d9; }
+  .side { font-size:11px; padding:0 5px; border-radius:8px; background:var(--panel2); } .side.prefix { color:var(--side-prefix); } .side.suffix { color:var(--side-suffix); } .side.auto { color:var(--side-auto); } .side.staff { color:var(--side-staff); } .side.socket { color:var(--side-socket); } .side.ethereal { color:var(--side-ethereal); } .side.superior { color:var(--side-superior); }
   @media (max-width:860px) { .b2grid { grid-template-columns:minmax(0,1fr); } #selbox { position:static; } }
   @media (max-width:600px) { header, nav, main { padding-left:16px; padding-right:16px; } nav { flex-wrap:wrap; } nav button { padding:6px 9px; } .ac input { width:100%; } .row > label { min-width:0; } .row .ac { max-width:100%; } }
 </style>
@@ -86,6 +89,7 @@
     <label id="l_tier" hidden title="Herald tier. The herald drops from the monster's monstats TreasureClassHerald(H) TC, group-upgraded at mlvl + tier boost (0/3/6/9/12). All tiers lists one row per tier.">Herald tier <select id="s_tier"><option value="0">All tiers</option><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option></select></label>
     <label>Ladder <select id="s_ladder"><option value="1" selected>Ladder</option><option value="0">Non-ladder</option></select></label>
     <label>Act <select id="s_act"><option value="0">All</option><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option></select></label>
+    <label>Theme <select id="s_theme"><option value="">System</option><option value="light">Light</option><option value="dark">Dark</option></select></label>
   </div>
 </header>
 <nav>

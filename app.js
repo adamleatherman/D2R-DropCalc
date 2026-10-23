@@ -637,6 +637,13 @@
       if (bd.type && $('ar2').value) { fillMonsters(); requestTable(); }
     });
     $('s_act').addEventListener('change', () => { if (target1) runTab1(); });
+    // theme: personal preference, kept out of KEYS / share links
+    try { $('s_theme').value = localStorage.getItem('d2dc-theme') || ''; } catch (e) {}
+    $('s_theme').addEventListener('change', () => {
+      const v = $('s_theme').value;
+      if (v) document.documentElement.dataset.theme = v; else delete document.documentElement.dataset.theme;
+      try { if (v) localStorage.setItem('d2dc-theme', v); else localStorage.removeItem('d2dc-theme'); } catch (e) {}
+    });
 
     // tab 1
     T1 = makeTable($('tb1'), cols1, 'ptar', -1);
@@ -673,5 +680,5 @@
       '<p>See README.md for formulas, research sources and limitations.</p>';
   }
 
-  init().catch((e) => { document.body.insertAdjacentHTML('afterbegin', '<pre style="color:#e07a6a;padding:10px">' + esc(e.stack || e) + '</pre>'); });
+  init().catch((e) => { document.body.insertAdjacentHTML('afterbegin', '<pre style="color:var(--err);padding:10px">' + esc(e.stack || e) + '</pre>'); });
 })();
