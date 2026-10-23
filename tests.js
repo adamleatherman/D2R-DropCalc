@@ -332,7 +332,7 @@
       for (const [lid, d] of [[8, 0], [2, 0], [3, 2], [12, 2], [39, 2], [66, 2], [74, 1], [107, 2], [111, 2], [113, 2], [116, 2], [119, 2], [122, 2], [126, 2], [128, 2], [133, 2], [28, 2], [102, 2], [106, 2], [110, 0], [110, 2], [121, 2], [124, 2]]) {
         const r = E.areaRun(String(lid), d), kills = {}, share = {};
         for (const [id, k] of r.kills) kills[id] = k; for (const [id, x] of r.share) share[id] = x;
-        let srcSum = 0, runSum = 0; for (const x of S) if (x.area === lid && x.diff === d && x.rank !== 'super' && x.rank !== 'boss' && x.rank !== 'herald') srcSum += x.perRun;
+        let srcSum = 0, runSum = 0; for (const x of S) if (x.area === lid && x.diff === d && x.rank !== 'super' && x.rank !== 'boss' && x.rank !== 'herald') srcSum += x.perRun - (x.suMin || 0);
         for (const k of r.kills.values()) for (const rk in k) runSum += k[rk];
         run[lid + '|' + d] = { kills, share, packs: r.packs, bosses: r.bosses, rolls: r.rolls, rooms: r.rooms, srcSum, runSum }; }
       res.cap.run = run; }
@@ -596,6 +596,13 @@
         F.heraldTiers = { names, worst, p: all.map((g) => E.chanceFor(E.getCtx({ players: 1, party: 1, ladder: true, tz: true, clvl: 85, tier: 0, mf: 0 }), g, tg, 0).target) }; }
       { const cx = E.getCtx({ players: 1, party: 1, ladder: true, tz: false, mf: 0 }); const t = E.areaSources(cx).filter((s) => s.diff === 2 && s.areaName === "Tal Rasha's Tomb");
         F.talTombs = { dupOf: Object.keys(E.DUP_OF).sort((a, b) => a - b).map((k) => [+k, +E.DUP_OF[k]]), areas: Array.from(new Set(t.map((s) => s.area))), maxRowsPerMon: Math.max(...Object.values(t.filter((s) => s.rank === 'regular').reduce((o, s) => (o[s.mon] = (o[s.mon] || 0) + 1, o), {}))) }; }
+      // super unique minions (rows with suMin: the part of a minion row that comes from super uniques) and the Hell-only Pandemonium areas
+      { const cx = E.getCtx({ players: 1, party: 1, ladder: true, tz: false, mf: 0 }), S = E.sources(cx);
+        F.suMinions = S.filter((s) => s.suMin > 0).map((s) => [s.area, s.mon, s.diff, s.suMin, s.perRun, s.tc, s.mlvl]);
+        F.pandemonium = { low: S.filter((s) => s.area >= 133 && s.area <= 136 && s.diff < 2).length, hell: [133, 134, 135, 136].map((a) => S.filter((s) => s.area === a && s.diff === 2).length),
+          colossalLow: S.filter((s) => s.area === 137 && s.diff < 2).length, colossalHell: S.filter((s) => s.area === 137 && s.diff === 2).length };
+        const grp = E.areaSources(cx).filter((s) => s.rank === 'minion' && s.diff === 2 && (s.area === 83 || s.area === 102));
+        F.councilGroups = grp.map((s) => [s.area, s.mon, s.perRun, s.tc]); }
     }
     res.sourcesCount = E.sources(ctxFor(1, 1)).length;
     res.config = E.CONFIG;

@@ -116,7 +116,7 @@
                                    // of the preset rooms, tools/floor_share.py). NOT from the game code: calibrated on the one measured count found (Cow Level,
                                    // Hell: ~516 cows/run vs ~924 by the rules alone). The Cow Level is an open outdoor level with generated fill, so its pl is 1
                                    // (not modelled) and this factor is the whole 0.56 there.
-      mazeSpecialCells: 0.5,       // extra maze cells per entrance / exit / waypoint preset in caves of 3+ cells (each replaces a dead end or adds a cell; 0.5 = half add)
+      mazeSpecialCells: 0.5,       // fallback only (a maze level without geo.sim): extra maze cells per entrance / exit / waypoint preset in caves of 3+ cells (each replaces a dead end or adds a cell; 0.5 = half add)
       warpLossRooms: 1,            // rooms of spawn rolls lost per warp / waypoint (no spawns within WarpDist)
       champShare: 0.2,             // a champion-or-unique pack is a champion pack 20% of the time (monumod.txt constants row 0)
       champPackSize: 3,            // champions per champion pack: 1 + rand(3)+1 = 2-4 (PopulateRoom)
@@ -599,12 +599,14 @@
       let rolls, rooms;
       if (g.t === 'maze') {
         // lvlmaze cells; a cell up to 12x12 tiles is one room (DrlgMaze.cpp bSingleRoom), bigger cells are split into 8x8 rooms.
-        // Entrance / exit / waypoint presets (at least two: the way in and the way on, e.g. Act 1 caves place prev + down / Den preset) replace a free
+        // geo.sim: the populated cells (Populate 1 presets) the replayed generator makes on average (tools/maze_cells.py: entrance / exit / waypoint
+        // presets, staff tomb x3 rooms and the rest of DrlgMaze.cpp DRLGMAZE_GenerateLevel are in the count), used as is. Fallback when a maze level has
+        // no simulated value (geo.cells = lvlmaze Rooms): entrance / exit / waypoint presets (at least two: the way in and the way on, e.g. Act 1 caves place prev + down / Den preset) replace a free
         // dead-end cell of the right orientation or add a cell (DRLGMAZE_ScanReplaceSpecialPreset): a cave of 1-2 cells has none free, so each adds one;
         // bigger ones add mazeSpecialCells per special on average.
         const specials = Math.max(2, A.nw + A.wp);
         const big = g.w > 24 || g.h > 24;   // 32x32+ cells are whole preset pieces (ice pools, Nihlathak halls): no extra special cells
-        const cells = g.cells[d] + (g.fixed || big ? 0 : specials * (g.cells[d] <= 2 ? 1 : R.mazeSpecialCells));
+        const cells = g.sim ? g.cells[d] : g.cells[d] + (g.fixed || big ? 0 : specials * (g.cells[d] <= 2 ? 1 : R.mazeSpecialCells));
         const single = g.w <= 12 && g.h <= 12;
         rolls = cells * (single ? Math.floor(Math.floor(5 * g.w / 3) * 5 * g.h / 3) : g.w * g.h * ROLLS8 / 64);
         rooms = cells * (single ? 1 : Math.ceil(g.w / 8) * Math.ceil(g.h / 8));
@@ -750,6 +752,7 @@
         for (const lid in D.levels) {
           if (DUP_OF[lid]) continue;   // identical copy of an area already listed
           const A = D.levels[lid];
+          if (A.ho && d < 2) continue;   // Pandemonium areas (Matron's Den ... Uber Tristram) are only opened in Hell: levels.txt rows of Normal / Nightmare are never played
           const list = d === 0 ? A.mon : A.nmon;
           if ((!list.length || !A.den[d]) && !(A.pre && A.pre.length)) continue;   // preset monsters need no spawn list
           const inTz = tzOn && D.tz.levels[lid] !== undefined;
@@ -785,12 +788,37 @@
             }
           }
         }
+        // minions of super uniques (D2GAME_SpawnSuperUnique_6FC6F690 -> D2GAME_SpawnMinions_6FC6F440(..., 1, MinGrp, MaxGrp)): MinGrp / MaxGrp +1 per
+        // difficulty when both are non-zero, minion = the class's minion1 (else the class itself), count = MinGrp + rand(MaxGrp - MinGrp + 1); the few hard-coded
+        // extras of that function (data su.xm: Radament, Siege Boss, Nihlathak, Baal Subject 2) are added. Same rows as the minions of random uniques (merged
+        // into one when the area already has the monster type as a minion): +CONFIG.minionOffset on the area level, the monster's regular TC.
+        const minRow = new Map();
+        for (const r of out) if (r.diff === d && r.rank === 'minion') minRow.set(r.key, r);
+        const suMinions = (su, lid, inTz) => {
+          const A = D.levels[lid];
+          let [lo, hi] = su.mg || [0, 0];
+          if (lo && hi) { lo += d; hi += d; }
+          const list = (hi > 0 ? [[su.mn, hi >= lo ? (lo + hi) / 2 : lo]] : []).concat(su.xm || []);
+          for (const [id, n] of list) {
+            const m = D.monsters[id];
+            if (!m || !(n > 0)) continue;
+            const tcn = pickTC(m, d, 'minion', inTz);
+            if (!tcn || !TC[tcn]) continue;
+            const key = id + '|minion|' + lid + '|' + d, ex = minRow.get(key);
+            if (ex) { ex.perRun += n; ex.suMin = (ex.suMin || 0) + n; continue; }
+            const base = d === 0 ? m.lv[0] : A.lvl[d];
+            const row = { key, mon: id, name: m.n, rank: 'minion', diff: d, area: +lid, areaName: A.name, act: A.act,
+              mlvl: (inTz ? tzLevel(base, s.clvl, d) : base) + CONFIG.minionOffset, tc: tcn, boss: false, perRun: n, tz: inTz, share: 0, suMin: n };   // suMin = the part that comes from super uniques
+            out.push(row); minRow.set(key, row);
+          }
+        };
         // superuniques
         for (const su of D.su) {
-          if (D.boss_area[su.cls]) continue;   // Radament / Summoner / Nihlathak / Griswold are also act-boss rows below: keep that one
+          if (D.boss_area[su.cls]) continue;   // Radament / Summoner / Nihlathak / Griswold are also act-boss rows below: keep that one (their minions are added there)
           const lid = D.su_area[su.id];
           if (!lid || !D.levels[lid]) continue;
           const A = D.levels[lid];
+          if (A.ho && d < 2) continue;
           const cls = D.monsters[su.cls];
           if (!cls) continue;
           const inTz = tzOn && D.tz.levels[String(lid)] !== undefined;
@@ -800,6 +828,7 @@
           if (!tcn || !TC[tcn]) continue;
           out.push({ key: 'su|' + su.id + '|' + d, mon: su.cls, name: su.n, rank: 'super', diff: d, area: lid,
             areaName: A.name, act: A.act, mlvl, tc: tcn, boss: false, perRun: 1, tz: inTz });
+          suMinions(su, lid, inTz);
         }
         // act bosses
         for (const id in D.boss_area) {
@@ -807,6 +836,7 @@
           const m = D.monsters[id];
           const A = D.levels[lid];
           if (!m || !A) continue;
+          if (A.ho && d < 2) continue;
           const inTz = tzOn && D.tz.levels[String(lid)] !== undefined;
           const base = m.lv[d];
           const mlvl = inTz ? tzLevel(base, s.clvl, d) : base;
@@ -816,6 +846,7 @@
           if (!tcn || !TC[tcn]) continue;
           out.push({ key: 'boss|' + id + '|' + d, mon: id, name: m.n, rank: 'boss', diff: d, area: lid,
             areaName: A.name, act: A.act, mlvl, tc: tcn, boss: true, perRun: 1, tz: inTz, quest: !!qtc });
+          for (const su of D.su) if (su.cls === id && D.su_area[su.id] === lid) suMinions(su, lid, inTz);   // the super unique row of the same boss (Radament, Summoner, Nihlathak, Griswold)
         }
       }
       return out;

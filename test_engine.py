@@ -830,6 +830,8 @@ class RunRef:
         with open(os.path.join(HERE, "data.json"), encoding="utf-8") as f:
             lv_ = json.load(f)["levels"]
         self.pl = {int(k): v.get("pl", 1) for k, v in lv_.items()}
+        # cave cells: populated cells of the replayed maze generator (tools/maze_cells.py, checked separately below); lvlmaze Rooms rule as the fallback
+        self.sim = {int(k): v["geo"]["cells"] for k, v in lv_.items() if v.get("geo", {}).get("sim")}
         # preset monsters (tools/preset_monsters.py; the extraction from the .ds1 files is checked separately below): fixed monsters "pre", unique /
         # champion packs "pb", and "pk" = uniques already placed when the random packs roll
         self.pre = {int(k): v.get("pre", []) for k, v in lv_.items()}
@@ -843,7 +845,7 @@ class RunRef:
         if n(r["DrlgType"]) == 1 and mz:
             w, h = n(mz["SizeX"]), n(mz["SizeY"])
             base_ = n(mz["Rooms" + suf])
-            cells = base_ + (0 if lid in self.FIXED or w > 24 or h > 24 else max(2, specials) * (1 if base_ <= 2 else self.c["mazeSpecialCells"]))
+            cells = self.sim[lid][d] if lid in self.sim else base_ + (0 if lid in self.FIXED or w > 24 or h > 24 else max(2, specials) * (1 if base_ <= 2 else self.c["mazeSpecialCells"]))
             if w <= 12 and h <= 12:
                 rolls, rooms = cells * ((5 * w // 3) * 5 * h // 3), cells
             else:
@@ -1976,6 +1978,67 @@ def main():
     fact("All tiers: Blood Moor (Hell) lists Herald tier 1-5, each equal to that tier's per-monster herald (Flame Rift)", H_["names"] == ["Herald tier %d" % t for t in range(1, 6)] and H_["worst"] < 1e-9, " / ".join("%.3g" % x for x in H_["p"]))
     T_ = FA["talTombs"]
     fact("the seven identical Tal Rasha's Tombs (66-72) are listed once, as area 66; no other area is a copy (copies %s)" % T_["dupOf"], T_["dupOf"] == [[k, 66] for k in range(67, 73)] and T_["areas"] == [66] and T_["maxRowsPerMon"] == 1, "areas %s, rows per monster %s" % (T_["areas"], T_["maxRowsPerMon"]))
+    # ---- Pandemonium areas are Hell-only
+    P_ = FA["pandemonium"]
+    fact("Pandemonium areas 133-136 have no source rows in Normal / Nightmare, but do in Hell (rows %s); Colossal Summit unchanged (%d / %d)" % (P_["hell"], P_["colossalLow"], P_["colossalHell"]),
+         P_["low"] == 0 and all(x > 0 for x in P_["hell"][:3]) and P_["colossalLow"] == 0 and P_["colossalHell"] > 0)
+    # ---- super unique minions: independent expectation from superuniques.txt / monstats.txt (MonsterUnique.cpp D2GAME_SpawnSuperUnique_6FC6F690)
+    with open(os.path.join(HERE, "data.json"), encoding="utf-8") as f_:
+        dj_ = json.load(f_)
+    ms_ = {r["Id"]: r for r in rd("monstats") if r.get("Id")}
+    tc_names_ = {r["Treasure Class"] for r in rd("treasureclassex")}
+    sys.path.insert(0, os.path.join(HERE, "tools"))
+    import preset_monsters as PM_
+    nih_ = PM_.PresetMonsters(SRC, os.path.join(SRC, "tiles")).level_variant(124, "minion1")
+    extra_ = {"Radament": [("skeleton5", 4), ("skmage_pois3", 1), ("skmage_cold4", 1), ("skmage_fire3", 1), ("skmage_ltng3", 1)], "Siege Boss": [("minion1", 20)],
+              "Nihlathak Boss": [(nih_, 20)], "Baal Subject 2": [("skmage_cold3", 10)]}
+    exp_ = collections.Counter()
+    for r_ in rd("superuniques"):
+        nm_ = r_["Superunique"]
+        lid_ = dj_["su_area"].get(nm_)
+        if not lid_ or r_["Class"] not in ms_:
+            continue
+        for d_ in range(3):
+            suf_ = ["", "(N)", "(H)"][d_]
+            if lid_ in (133, 134, 135, 136) and d_ < 2:
+                continue
+            if r_["Class"] in dj_["boss_area"]:
+                if dj_["boss_area"][r_["Class"]] != lid_ or ms_[r_["Class"]].get("TreasureClass" + suf_) not in tc_names_:
+                    continue
+            elif r_.get("TC" + suf_) not in tc_names_:
+                continue
+            lo_, hi_ = n(r_["MinGrp"]), n(r_["MaxGrp"])
+            if lo_ and hi_:
+                lo_, hi_ = lo_ + d_, hi_ + d_
+            m1_ = ms_[r_["Class"]].get("minion1")
+            lst_ = ([(m1_ if m1_ in ms_ else r_["Class"], (lo_ + hi_) / 2 if hi_ >= lo_ else lo_)] if hi_ > 0 else []) + extra_.get(nm_, [])
+            for mon_, cnt_ in lst_:
+                if ms_[mon_].get("TreasureClass" + suf_) in tc_names_:
+                    exp_[(lid_, mon_, d_)] += cnt_
+    got_ = collections.Counter()
+    for a_, mon_, d_, sm_, pr_, tc_, ml_ in FA["suMinions"]:
+        got_[(a_, mon_, d_)] += sm_
+    bad_ = [(k_, exp_.get(k_), got_.get(k_)) for k_ in set(exp_) | set(got_) if abs(exp_.get(k_, 0) - got_.get(k_, 0)) > 1e-9]
+    fact("super unique minion rows == MinGrp / MaxGrp (+ difficulty) of superuniques.txt + the hard-coded extras, for all %d (area, monster, difficulty) rows" % len(exp_), not bad_ and len(exp_) > 100, str(bad_[:3]))
+    sm_ = {(a_, mon_, d_): (s_, tc_, ml_) for a_, mon_, d_, s_, pr_, tc_, ml_ in FA["suMinions"]}
+    fact("Travincal (83) and Durance 3 (102), Hell: Council members of Ismail / Geleb / Bremm (4 each = (2+2) per super unique) on the Council (H) TC; Toorc / Wyand / Maffer (MinGrp 0) add none",
+         [sm_.get((83, "councilmember1", 2)), sm_.get((83, "councilmember2", 2)), sm_.get((102, "councilmember3", 2))] == [(4, "Council (H)", sm_[(83, "councilmember1", 2)][2])] * 2 + [(4, "Council (H)", sm_[(102, "councilmember3", 2)][2])]
+         and (102, "councilmember2", 2) not in sm_ and (83, "councilmember3", 2) not in sm_, str([sm_.get((83, "councilmember1", d)) for d in range(3)]))
+    fact("Baal's five waves (Throne of Destruction 131) bring minions: Warped One, Unraveler, Baal Subject 2's 10 cold mages, Council Member, Venom Lord, Minion of Destruction; Chaos seal bosses (108): megademon3, doomknight1, fingermage3",
+         all((131, m_, 2) in sm_ for m_ in ("fallen5", "unraveler5", "skmage_cold3", "baalhighpriest", "venomlord", "baalminion1")) and all((108, m_, 2) in sm_ for m_ in ("megademon3", "doomknight1", "fingermage3")), "Hell 108: " + str([sm_.get((108, m_, 2), (0,))[0] for m_ in ("megademon3", "doomknight1", "fingermage3")]))
+    # ---- cave cells: tools/maze_cells.json is current, consistent and used by data.json
+    import maze_cells as MC_
+    mc_ = json.load(open(os.path.join(HERE, "tools", "maze_cells.json"), encoding="utf-8"))
+    fact("tools/maze_cells.json was made from the current levels / lvlmaze / lvlprest tables (digest; %d seeds)" % mc_["meta"]["seeds"], mc_["meta"]["digest"] == MC_.input_digest(SRC), "re-run: python -I tools/maze_cells.py")
+    pop_ = {r_["Name"]: n(r_["Populate"]) for r_ in reversed(rd("lvlprest"))}
+    worst_ = 0.0
+    for lid_, v_ in mc_["levels"].items():
+        for d_ in range(3):
+            worst_ = max(worst_, abs(sum(x[d_] for k_, x in v_["kinds_mean"].items() if pop_.get(k_)) - v_["populated_mean"][d_]), abs(dj_["levels"][lid_]["geo"]["cells"][d_] - round(v_["populated_mean"][d_], 3)))
+    fact("data.json geo.cells == populated_mean of maze_cells.json == populated rows of kinds_mean (worst abs diff %.2g)" % worst_, worst_ < 3e-3, "kinds_mean is rounded to 4 decimals")
+    tomb_ = [json.dumps(dj_["levels"][str(k_)], sort_keys=True) for k_ in range(66, 73)]
+    fact("Tal Rasha's Tomb (66-72): identical levels, the staff-tomb cell count (%s cells, plain tomb about 6.4, boss tomb 12.7)" % dj_["levels"]["66"]["geo"]["cells"], len(set(tomb_)) == 1 and 17.5 < dj_["levels"]["66"]["geo"]["cells"][2] < 19)
+    fact("the frozen lvlprest enum values of maze_cells.py match the lvlprest.txt row names (all %d)" % len(MC_.PRE), all(re.sub(r"[^A-Z0-9]", "", k_[9:]) == re.sub(r"[^A-Z0-9]", "", MC_.row_of(v_)["Name"].upper()) for k_, v_ in MC_.PRE.items()))
     fact("Mephisto (Hell) drops Harlequin Crest", FA["drops"]["hc"] > 0, "1 in %.0f" % (1 / FA["drops"]["hc"]))
     fact("Andariel (Hell) drops Talic's Anguish (ua1)", FA["drops"]["ua1"] > 0, "1 in %.1f" % (1 / FA["drops"]["ua1"]))
     fact("the Summoner (Hell) drops the Key of Hate (pk2)", FA["drops"]["pk2"] > 0, "1 in %.1f" % (1 / FA["drops"]["pk2"]))

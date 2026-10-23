@@ -29,8 +29,9 @@ count (MonsterUnique.cpp D2GAME_SpawnMonster_6FC6F220 / D2GAME_MONSTERS_Unk_6FC6
 compares with MonUMin / MonUMax; plain monsters (even act bosses) do not.  Level, drops: same as random monsters (Monster.cpp: monstats Level,
 Expansion NM / Hell the area's MonLvlEx unless the monster is a boss or noRatio).
 
-Which presets a level uses (expected count of each, per difficulty).  Preset levels (DrlgType 2): their lvlprest row.  Maze levels: lvlmaze Rooms
-cells (`Rooms` / `(N)` / `(H)`), a cell is the family preset of its direction mask (equal weights, as floor_share); the Act 1-3 types roll
+Which presets a level uses (expected count of each, per difficulty).  Preset levels (DrlgType 2): their lvlprest row.  Maze levels: the expected
+count of every lvlprest row in the replayed generator (tools/maze_cells.py -> maze_cells.json: cells, specials and themes included).  Without that file
+(fallback below): lvlmaze Rooms cells (`Rooms` / `(N)` / `(H)`), a cell is the family preset of its direction mask (equal weights); the Act 1-3 types roll
 max(2, rooms / 5 + 1) of them into theme presets (DrlgMaze.cpp DRLGMAZE_RollAct_1_2_3_BasicPresets: preset + 15, masks 1-14); special presets are
 placed once (DRLGMAZE_GenerateLevel and the PlaceAct* functions) and replace a cell; the SPECIAL table below lists the ones with monsters, each
 4-direction variant equally likely.  Outdoor levels: only those whose preset list is fixed by the code (Act 1 wilderness DrlgOutWild.cpp
@@ -101,8 +102,8 @@ def norm(s):
 
 
 class PresetMonsters:
-    def __init__(self, table_dir, tiles_dir):
-        self.lay = fs.Layouts(table_dir, tiles_dir)
+    def __init__(self, table_dir, tiles_dir, kinds=None):
+        self.lay = fs.Layouts(table_dir, tiles_dir, kinds)
         self.t = self.lay.t
         rd = lambda n: fs.read_table(os.path.join(table_dir, n))
         self.mp = collections.defaultdict(list)                     # 0-based act -> Place names (monpreset.txt rows)
@@ -252,6 +253,9 @@ class PresetMonsters:
         ltype, mz = fs.num(L["LevelType"]), lay.maze.get(lid)
         if not mz:
             return []
+        k = self.lay.kinds.get(lid)
+        if k:       # the replayed maze generator (tools/maze_cells.py): the expected count of every preset row, specials and themes included
+            return [(self.lay.byname[n], v[d]) for n, v in k.items() if n in self.lay.byname]
         cells = fs.num(mz[("Rooms", "Rooms(N)", "Rooms(H)")[d]])
         if lid in ONLY:
             return [x for name, w in ONLY[lid] for x in self.named(name, w)]
@@ -330,9 +334,9 @@ class PresetMonsters:
         return res
 
 
-def level_pre(table_dir, tiles_dir):
+def level_pre(table_dir, tiles_dir, kinds=None):
     """-> ({level id: level(...) result}, PresetMonsters) for every level of levels.txt"""
-    pm = PresetMonsters(table_dir, tiles_dir)
+    pm = PresetMonsters(table_dir, tiles_dir, kinds)
     return {lid: pm.level(lid) for lid in sorted(pm.lay.levels) if lid > 0}, pm
 
 

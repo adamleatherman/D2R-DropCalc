@@ -592,7 +592,7 @@
     const areas = Object.keys(E.data.levels).filter((id) => !E.DUP_OF[id] && (E.data.levels[id].mon.length || E.data.levels[id].nmon.length || E.data.levels[id].pre))
       .map((id) => ({ id, a: E.data.levels[id] })).sort((x, y) => x.a.act - y.a.act || x.id - y.id);
     const cur = $('ar2').value;
-    $('ar2').innerHTML = '<option value="">All areas</option>' + areas.map((x) => '<option value="' + x.id + '">Act ' + x.a.act + ' - ' + esc(x.a.name) + '</option>').join('');
+    $('ar2').innerHTML = '<option value="">All areas</option>' + areas.map((x) => '<option value="' + x.id + '">Act ' + x.a.act + ' - ' + esc(x.a.name) + (x.a.ho ? ' (Hell only)' : '') + '</option>').join('');
     if (areas.some((x) => x.id === cur)) $('ar2').value = cur;
     fillMonsters();
     $('info1').textContent = 'Ready. ' + INDEX.length + ' items indexed, ' + Object.keys(E.data.levels).length + ' areas, ' + Object.keys(E.data.monsters).length + ' monster types.';
@@ -665,10 +665,10 @@
     const C = E.CONFIG;
     return '<p><b>How to read the tables.</b> Probabilities are per kill unless the column says run, and are shown as odds ("1 in N")."P(target)" for a base item equals P(base); for a unique or set item it is the chance of that exact item. ' +
       'Rank tags: champion (+' + C.champOffset + ' mlvl), unique (+' + C.uniqueOffset + '), minion of a unique (+' + C.minionOffset + '), super = super unique, boss = act boss.</p>' +
-      '<p><b>Per-run numbers are an estimate of one full clear.</b> The game makes one spawn roll per 3x3 subtiles of every room (about 2.7 per tile; caves use the real lvlmaze size, not the levels.txt box) and spawns a pack with chance MonDen/100000. ' +
+      '<p><b>Per-run numbers are an estimate of one full clear.</b> The game makes one spawn roll per 3x3 subtiles of every room (about 2.7 per tile; caves: the average number of map cells their generator makes, entrances and exits included, at the real cell size) and spawns a pack with chance MonDen/100000. ' +
       'Not every pack places: each level gets a placement share from its real map layouts (walkable floor of the preset rooms, 20 tries per pack; 1 where the layout is not modelled), times a global factor of ' + C.run.placeFactor + ' (calibrated on a measured Cow Level count, not from the game code). Pack types follow how the game picks from the area monster list and their Rarity; ' +
       'packs include party minions (e.g. the Fallen with a Fallen Shaman, counted as their own monster). Champion/unique packs follow MonUMin/MonUMax (' + C.run.champShare * 100 + '% champion packs of 2-4, else a unique with ' + C.run.uniqueMinions.join('-') + ' minions). ' +
-      'Treat the numbers as about +/-50%; they rank areas against each other better than they count them. Bosses and super uniques count as one kill per run. Monsters the map files place at fixed spots (Fallen camps, unique and champion packs in treasure rooms, the Act 5 siege) are added where the level generator fixes which presets appear; they also use up unique slots, so such levels get fewer random champion/unique packs.</p>' +
+      'Treat the numbers as about +/-50%; they rank areas against each other better than they count them. Bosses and super uniques count as one kill per run. Monsters the map files place at fixed spots (Fallen camps, unique and champion packs in treasure rooms, the Act 5 siege) are added where the level generator fixes which presets appear; they also use up unique slots, so such levels get fewer random champion/unique packs. Super uniques bring their minions (Council members, Baal waves, ...) as minion rows of the same area. Tal Rasha Tomb = the true tomb with the orifice (the staff tomb, about 3x a plain tomb), shown once for all seven tombs. Matron Den, Forgotten Sands, Furnace of Pain and Uber Tristram only open in Hell and are not listed for Normal and Nightmare.</p>' +
       '<p><b>Config in use</b> (Engine.CONFIG in engine.js): <code>' + esc(JSON.stringify(C)) + '</code></p>' +
       '<p>See README.md for formulas, research sources and limitations.</p>';
   }

@@ -13,6 +13,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "tools"))
 import floor_share
+import maze_cells
 import preset_monsters
 SRC =sys.argv[1] if len(sys.argv) > 1 else os.path.join(HERE, "excel")
 OUT = sys.argv[2] if len(sys.argv) > 2 else os.path.join(HERE, "data.json")
@@ -263,15 +264,39 @@ def build(mode):
     maze = {num(r.get("Level")): r for r in rd("lvlmaze") if r.get("Level")}
     # "pl" = placement factor from the real map layouts (tools/floor_share.py: share of walkable subtiles of each populated preset room, 20 placement
     # tries per pack). 1 where the layout is not modelled (open outdoor levels with generated fill). Left out when excel/tiles was not extracted.
+    # Maze cell counts: tools/maze_cells.py replays the cave generator (DrlgMaze.cpp) and counts the cells and the lvlprest rows of every maze level;
+    # maze_cells.json holds the result. "cells" below = populated cells (Populate 1 rows of THIS mode's lvlprest.txt) per difficulty; floor_share /
+    # preset_monsters weight the cell presets by the same expected row counts. A stale file (tables changed since it was made) is not used.
+    sim = {}
+    mc_path = os.path.join(HERE, "tools", "maze_cells.json")
+    if os.path.isfile(mc_path):
+        with open(mc_path, encoding="utf-8") as f:
+            mc = json.load(f)
+        if mc["meta"]["digest"] == maze_cells.input_digest(TDIR):
+            sim = {int(k): v["kinds_mean"] for k, v in mc["levels"].items()}
+        else:
+            print("warning: %s: tools/maze_cells.json is stale (levels / lvlmaze / lvlprest changed): run python -I tools/maze_cells.py; "
+                  "cave cell counts fall back to the lvlmaze Rooms rule of thumb" % mode)
+    else:
+        print("warning: no tools/maze_cells.json (python -I tools/maze_cells.py); cave cell counts fall back to the lvlmaze Rooms rule of thumb")
+    populate = {}
+    for r in rd("lvlprest"):
+        populate.setdefault(r.get("Name"), num(r.get("Populate")))
     tiles_dir = os.path.join(SRC, "tiles")
-    pls = pres = None
+    pls = pres = pm = None
     if os.path.isdir(tiles_dir):
-        pls = floor_share.level_pl(TDIR, tiles_dir)
-        pres, pm = preset_monsters.level_pre(TDIR, tiles_dir)
+        pls = floor_share.level_pl(TDIR, tiles_dir, sim)
+        pres, pm = preset_monsters.level_pre(TDIR, tiles_dir, sim)
         if pm.unresolved:
             print("warning: %s: monplace classes without a spawn rule: %s" % (mode, dict(pm.unresolved)))
     else:
         print("warning: no %s (re-run tools/extract_tables.py --force); levels get no 'pl' placement factor" % tiles_dir)
+    # Pandemonium areas that can only be opened in Hell (`ho` 1: engine.js sources() skips them in Normal and Nightmare): Matron's Den, Forgotten Sands,
+    # Furnace of Pain, Uber Tristram. levels.txt has monsters and treasure classes for every difficulty, but the three keys (pk1-pk3) only drop from Hell
+    # treasure classes (Countess Item (H), Summoner (H), Nihlathak (H)) and the finale items (dhn / bey / mbr) from the Uber bosses. D2MOO parses the portal
+    # recipes (HoradricCube.cpp, "Pandemonium Portal" / "Pandemonium Finale Portal" -> CUBEOP_UBERDUNGEON / CUBEOP_UBERTRISTRAM) but has no code that opens
+    # them and no recipe "min diff" (the Colossal Summit recipe has min diff 2, enforced in PlrTrade.cpp), so this is game knowledge, not a decompiled check.
+    HELL_ONLY = {133, 134, 135, 136}
     ACT5_LINKED = {111: (64, 160), 112: (64, 160), 117: (64, 160)}
     FIXED_MAZE = {114, 116, 119, 125, 126, 127}
     levels = {}
@@ -306,12 +331,17 @@ def build(mode):
         }
         mz = maze.get(lid)
         L = levels[str(lid)]
+        if lid in HELL_ONLY:
+            L["ho"] = 1
         if pls is not None:
             p = pls.get(lid, {}).get("pl")
             L["pl"] = 1 if p is None else round(p, 4)
         if num(r.get("DrlgType")) == 1 and mz:
             L["geo"] = {"t": "maze", "cells": [num(mz.get("Rooms")), num(mz.get("Rooms(N)")), num(mz.get("Rooms(H)"))],
                         "w": num(mz.get("SizeX")), "h": num(mz.get("SizeY")), "fixed": 1 if lid in FIXED_MAZE else 0}
+            if lid in sim:     # replayed generator: expected populated cells per difficulty (the engine then adds no special-preset cells)
+                L["geo"]["cells"] = [round(sum(v[d] for n, v in sim[lid].items() if populate.get(n)), 3) for d in range(3)]
+                L["geo"]["sim"] = 1
         elif lid in ACT5_LINKED:
             L["geo"] = {"t": "area", "w": [ACT5_LINKED[lid][0]] * 3, "h": [ACT5_LINKED[lid][1]] * 3}
         else:
@@ -360,18 +390,35 @@ def build(mode):
         monsters[mid] = m
 
     # ---------------------------------------------------------------- superuniques
+    ms_rows = {r["Id"]: r for r in rd("monstats") if r.get("Id")}
+    # Minions that D2GAME_SpawnSuperUnique_6FC6F690 (MonsterUnique.cpp, the switch on dwHcIdx after the generic minions) spawns on top of MinGrp / MaxGrp, as
+    # [monster id, count]: Radament 2-6 skeleton5 (mean 4) + a poison / cold / fire / lightning skeleton mage, Siege Boss (Shenk) 20 x minion1, Nihlathak Boss 20 x the
+    # level's variant of minion1 (D2Common_11063, resolved below), Baal Subject 2 (Achmel) 10 x skmage_cold3 (sub_6FC6A230 spawns nCount copies as owned minions).
+    SU_EXTRA_MINIONS = {
+        "Radament": [["skeleton5", 4], ["skmage_pois3", 1], ["skmage_cold4", 1], ["skmage_fire3", 1], ["skmage_ltng3", 1]],
+        "Siege Boss": [["minion1", 20]], "Nihlathak Boss": [["minion1", 20]], "Baal Subject 2": [["skmage_cold3", 10]],
+    }
+    if pm is not None:      # Nihlathak: the Halls of Vaught variant of minion1 (preset_monsters.level_variant = D2Common_11063)
+        SU_EXTRA_MINIONS["Nihlathak Boss"] = [[pm.level_variant(124, "minion1"), 20]]
     su = []
     for r in rd("superuniques"):
         name = r.get("Superunique")
         if not name or not r.get("Class") or not r.get("TC(H)") and not r.get("TC"):
             continue
+        # Minions (MonsterUnique.cpp D2GAME_SpawnSuperUnique_6FC6F690): D2GAME_SpawnMinions_6FC6F440(..., 1, MinGrp, MaxGrp) after MinGrp / MaxGrp are
+        # raised by the difficulty when both are non-zero; the minion type is the class's monstats minion1 when valid, else the class itself ("mn")
+        m1 = (ms_rows.get(r["Class"]) or {}).get("minion1")
         su.append({
             "id": name,
             "n": name_of("monsters", r.get("Name"), r.get("Name", name)),   # id stays the table key
             "cls": r["Class"],
+            "mg": [num(r.get("MinGrp")), num(r.get("MaxGrp"))],
+            "mn": m1 if m1 in ms_rows else r["Class"],
             "tc": [r.get("TC", ""), r.get("TC(N)", ""), r.get("TC(H)", "")],
             "dtc": [r.get("TC Desecrated", ""), r.get("TC(N) Desecrated", ""), r.get("TC(H) Desecrated", "")],
         })
+        if name in SU_EXTRA_MINIONS:
+            su[-1]["xm"] = SU_EXTRA_MINIONS[name]
 
     # Where each boss / superunique lives (level Id from levels.txt). levels.txt has no such column,
     # so this table is hand-written from game knowledge: EDIT here if something is wrong.

@@ -33,6 +33,7 @@ Formats and rules, each checked against the D2MOO decompilation (https://github.
 """
 import csv
 import glob
+import json
 import math
 import os
 import struct
@@ -64,6 +65,16 @@ CHAOS = (108, 25, ["Act 4 - Diablo Arm N", "Act 4 - Diablo Arm W", "Act 4 - Diab
 # Act 3 jungles (DrlgOutJung.cpp): the whole level is covered by 32x32 river presets
 JUNGLE = {76, 77, 78}
 JUNGLE_BASE = "Act 3 - Jungle W"
+
+
+def load_maze_kinds(path=None):
+    """tools/maze_cells.json (tools/maze_cells.py, the replayed maze generator) -> {level id: {lvlprest row name: [N, NM, H expected count per generated level]}}
+    ({} when the file is missing: maze levels then fall back to equal weights over the family presets)"""
+    path = path or os.path.join(os.path.dirname(os.path.abspath(__file__)), "maze_cells.json")
+    if not os.path.isfile(path):
+        return {}
+    with open(path, encoding="utf-8") as f:
+        return {int(k): v["kinds_mean"] for k, v in json.load(f)["levels"].items()}
 
 
 def read_table(path):
@@ -301,8 +312,9 @@ def ds1_share(tiles, rel, libs, fill_blanks, arcane, single):
 
 
 class Layouts:
-    def __init__(self, table_dir, tiles_dir):
+    def __init__(self, table_dir, tiles_dir, kinds=None):
         self.t = Tiles(tiles_dir)
+        self.kinds = load_maze_kinds() if kinds is None else kinds       # simulated cell mix of the maze levels
         self.levels = {num(r["Id"], -1): r for r in read_table(os.path.join(table_dir, "levels.txt")) if r.get("Id")}
         self.rows = read_table(os.path.join(table_dir, "lvlprest.txt"))
         self.types = {num(r["Id"], -1): r for r in read_table(os.path.join(table_dir, "lvltypes.txt")) if r.get("Id")}
@@ -359,6 +371,23 @@ class Layouts:
         n = denominator or len(got)
         return (sum(g["f"] for g in got) / n, sum(g["pl"] for g in got) / n, len(got))
 
+    def cells(self, lid, ltype, idx):
+        """-> mean() of a maze level: weighted by the expected count of each lvlprest row in the replayed generator (tools/maze_cells.py, specials and
+        themes included, averaged over the three difficulties; Populate 0 rows drop out of mean()), else equal weights over `idx`"""
+        k = self.kinds.get(lid)
+        if not k:
+            return self.mean(idx, ltype, lid)
+        return self.wmean([(self.byname[n], sum(v) / 3) for n, v in k.items() if n in self.byname], ltype, lid)
+
+    def wmean(self, rows, ltype, lid=0):
+        """weighted mean over [(lvlprest row, weight)] of the populated rows -> (f, pl, used)"""
+        got = [(self.preset(i, ltype, lid), w) for i, w in rows]
+        got = [(g, w) for g, w in got if g and w > 0]
+        tot = sum(w for _, w in got)
+        if not tot:
+            return None
+        return (sum(g["f"] * w for g, w in got) / tot, sum(g["pl"] * w for g, w in got) / tot, len(got))
+
     def level(self, lid):
         """-> dict(pl, f, how) ; pl None when the level has no preset model (the engine then assumes 1)"""
         L = self.levels[lid]
@@ -372,18 +401,18 @@ class Layouts:
             mz = self.maze.get(lid)
             if lid in FIXED:
                 idx = [self.byname[n] for n in FIXED[lid]]
-                return {"how": "fixed " + "/".join(FIXED[lid]), "m": self.mean(idx, ltype, lid)}
+                return {"how": "fixed " + "/".join(FIXED[lid]), "m": self.cells(lid, ltype, idx)}
             if ltype in MAZE_NAMED:
                 idx = [self.byname[n] for n in MAZE_NAMED[ltype]]
-                return {"how": "cells " + ", ".join(n.rsplit(" ", 1)[-1] for n in MAZE_NAMED[ltype]), "m": self.mean(idx, ltype, lid)}
+                return {"how": "cells " + ", ".join(n.rsplit(" ", 1)[-1] for n in MAZE_NAMED[ltype]), "m": self.cells(lid, ltype, idx)}
             if ltype in MAZE_BASE and mz:
                 b = self.byname[MAZE_BASE[ltype]]
                 idx = list(range(b + 1, b + 16))
                 sz = (num(mz["SizeX"]), num(mz["SizeY"]))
-                m = self.mean(idx, ltype, lid)
+                m = self.cells(lid, ltype, idx)
                 if m and self.rows[b + 1]["SizeX"] and (num(self.rows[b + 1]["SizeX"]), num(self.rows[b + 1]["SizeY"])) != sz:
                     return {"how": "maze cells %s: lvlmaze cell %dx%d differs from the preset size" % (MAZE_BASE[ltype], sz[0], sz[1]), "m": None}
-                return {"how": "15 cells after '%s'" % MAZE_BASE[ltype], "m": m}
+                return {"how": ("simulated cell mix of '%s'" if self.kinds.get(lid) else "15 cells after '%s'") % MAZE_BASE[ltype], "m": m}
             return {"how": "maze, no preset family", "m": None}
         if lid in JUNGLE:
             b = self.byname[JUNGLE_BASE]
@@ -394,9 +423,9 @@ class Layouts:
         return {"how": "open outdoor (generated fill): not modelled", "m": None}
 
 
-def level_pl(table_dir, tiles_dir):
+def level_pl(table_dir, tiles_dir, kinds=None):
     """-> {level id: {"pl": placement factor or None, "f": walkable share, "how": text}} for every level of levels.txt"""
-    lay = Layouts(table_dir, tiles_dir)
+    lay = Layouts(table_dir, tiles_dir, kinds)
     out = {}
     for lid, r in sorted(lay.levels.items()):
         if lid <= 0:
