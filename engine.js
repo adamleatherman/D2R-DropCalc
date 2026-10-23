@@ -141,6 +141,10 @@
 
   function create(data) {
     const D = data;
+    // Areas that are exact copies of an earlier one (same name and every field, e.g. the seven Tal Rasha's Tombs 66-72): listed once, under the lowest id.
+    // kills/run stays per area (one tomb per run); DUP_OF[copy id] = kept id.
+    const DUP_OF = {};
+    { const seen = new Map(); for (const lid of Object.keys(D.levels).sort((a, b) => a - b)) { const k = JSON.stringify(D.levels[lid]); if (seen.has(k)) DUP_OF[lid] = seen.get(k); else seen.set(k, lid); } }
     const TC = D.tc;
     const items = D.items;
     const types = D.types;
@@ -590,6 +594,7 @@
       for (let d = 0; d < 3; d++) {
         // regular area monsters
         for (const lid in D.levels) {
+          if (DUP_OF[lid]) continue;   // identical copy of an area already listed
           const A = D.levels[lid];
           const list = d === 0 ? A.mon : A.nmon;
           if (!list.length || !A.den[d]) continue;
@@ -1753,7 +1758,7 @@
     }
 
     return {
-      CONFIG, data: D, DIFFS, items, types, getCtx, playersN, adjNoDrop, dist, upgradeTC, areaSources,
+      CONFIG, data: D, DIFFS, items, types, getCtx, playersN, adjNoDrop, dist, upgradeTC, areaSources, DUP_OF,
       mode, heraldsAvailable, sunderChance, sunderPaths, isSunder, adjQuality, heraldSpawnPct, quality, qualityTotals, sources, srcDist, chanceFor, baseQualityChance, affixLevel, minIlvlForAlvl, eligible, maxSockets, affixProb, minLevels, staffDist, staffBase,
       statList, describe, affixSearch, searchIndex, baseTypes, metaCache, uniqById, setById, uniqByCode, setByCode, prettyId, tzLevel,
       eligibleUniques, eligibleSets, condProb, trialsFor,

@@ -591,6 +591,8 @@
           const cx0 = E.getCtx({ players: 1, party: 1, ladder: true, tz: true, clvl: 85, tier: 0, mf: 0 }); const pg = E.chanceFor(cx0, g, tg, 0).target, pr = E.chanceFor(E.getCtx({ players: 1, party: 1, ladder: true, tz: true, clvl: 85, tier: g.tier, mf: 0 }), r, tg, 0).target;
           worst = Math.max(worst, Math.abs(pg - pr) / Math.max(pr, 1e-300)); }
         F.heraldTiers = { names, worst, p: all.map((g) => E.chanceFor(E.getCtx({ players: 1, party: 1, ladder: true, tz: true, clvl: 85, tier: 0, mf: 0 }), g, tg, 0).target) }; }
+      { const cx = E.getCtx({ players: 1, party: 1, ladder: true, tz: false, mf: 0 }); const t = E.areaSources(cx).filter((s) => s.diff === 2 && s.areaName === "Tal Rasha's Tomb");
+        F.talTombs = { dupOf: Object.keys(E.DUP_OF).sort((a, b) => a - b).map((k) => [+k, +E.DUP_OF[k]]), areas: Array.from(new Set(t.map((s) => s.area))), maxRowsPerMon: Math.max(...Object.values(t.filter((s) => s.rank === 'regular').reduce((o, s) => (o[s.mon] = (o[s.mon] || 0) + 1, o), {}))) }; }
     }
     res.sourcesCount = E.sources(ctxFor(1, 1)).length;
     res.config = E.CONFIG;

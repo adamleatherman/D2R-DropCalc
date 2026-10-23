@@ -1692,6 +1692,8 @@ def main():
     fact("terror zone Blood Moor (Hell): heralds merged into one row (was %d)" % G_["bloodMoorHeraldRaw"], G_["bloodMoorHerald"] == 1 and G_["bloodMoorHeraldRaw"] > 1)
     H_ = FA["heraldTiers"]
     fact("All tiers: Blood Moor (Hell) lists Herald tier 1-5, each equal to that tier's per-monster herald (Flame Rift)", H_["names"] == ["Herald tier %d" % t for t in range(1, 6)] and H_["worst"] < 1e-9, " / ".join("%.3g" % x for x in H_["p"]))
+    T_ = FA["talTombs"]
+    fact("the seven identical Tal Rasha's Tombs (66-72) are listed once, as area 66; no other area is a copy (copies %s)" % T_["dupOf"], T_["dupOf"] == [[k, 66] for k in range(67, 73)] and T_["areas"] == [66] and T_["maxRowsPerMon"] == 1, "areas %s, rows per monster %s" % (T_["areas"], T_["maxRowsPerMon"]))
     fact("Mephisto (Hell) drops Harlequin Crest", FA["drops"]["hc"] > 0, "1 in %.0f" % (1 / FA["drops"]["hc"]))
     fact("Andariel (Hell) drops Talic's Anguish (ua1)", FA["drops"]["ua1"] > 0, "1 in %.1f" % (1 / FA["drops"]["ua1"]))
     fact("the Summoner (Hell) drops the Key of Hate (pk2)", FA["drops"]["pk2"] > 0, "1 in %.1f" % (1 / FA["drops"]["pk2"]))
