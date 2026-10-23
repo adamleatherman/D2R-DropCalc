@@ -112,8 +112,10 @@
     heraldQualityAdj: { t12: { unique: 1, set: 1, rare: 1 }, t3plus: { rarePlus: 1 } },
     // --- per-run estimate (rough!) ---
     run: {
-      placeFactor: 0.56,           // share of successful spawn rolls that place a pack (walls, void, failed placement). NOT from the game code: calibrated on
-                                   // the one measured count found (Cow Level, Hell: ~516 cows/run vs ~924 by the rules alone)
+      placeFactor: 0.56,           // share of successful spawn rolls that place a pack, beyond what the map layout explains (the per-level 'pl' = walls / void
+                                   // of the preset rooms, tools/floor_share.py). NOT from the game code: calibrated on the one measured count found (Cow Level,
+                                   // Hell: ~516 cows/run vs ~924 by the rules alone). The Cow Level is an open outdoor level with generated fill, so its pl is 1
+                                   // (not modelled) and this factor is the whole 0.56 there.
       mazeSpecialCells: 0.5,       // extra maze cells per entrance / exit / waypoint preset in caves of 3+ cells (each replaces a dead end or adds a cell; 0.5 = half add)
       warpLossRooms: 1,            // rooms of spawn rolls lost per warp / waypoint (no spawns within WarpDist)
       champShare: 0.2,             // a champion-or-unique pack is a champion pack 20% of the time (monumod.txt constants row 0)
@@ -679,7 +681,7 @@
       if (runCache.has(key)) return runCache.get(key);
       const A = D.levels[lid], list = d === 0 ? A.mon : A.nmon;
       const { rolls, rooms } = areaRolls(A, d);
-      const packs = rolls * (Math.min(A.den[d], 10000) + 1) / 100000 * R.placeFactor;   // rand % 100000 <= MonDen per roll
+      const packs = rolls * (Math.min(A.den[d], 10000) + 1) / 100000 * (A.pl ?? 1) * R.placeFactor;   // rand % 100000 <= MonDen per roll; pl = map layout
       const bosses = Math.min(packs, bossPacks(packs, rooms, A.umin[d], A.umax[d]));
       const share = listShares(list, A.num, A.rs);
       const kills = new Map();

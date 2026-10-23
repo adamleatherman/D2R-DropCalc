@@ -824,6 +824,10 @@ class RunRef:
         self.lv = {n(r["Id"]): r for r in rd("levels") if n(r.get("Id"), -1) > 0}
         self.mz = {n(r["Level"]): r for r in rd("lvlmaze") if r.get("Level")}
         self.ms = {r["Id"]: r for r in rd("monstats") if r.get("Id")}
+        # per-level placement factor from the map layouts: read from the built data.json (the floor share itself is checked separately below, with
+        # the floor_share parser tests and the pl range check)
+        with open(os.path.join(HERE, "data.json"), encoding="utf-8") as f:
+            self.pl = {int(k): v.get("pl", 1) for k, v in json.load(f)["levels"].items()}
 
     def rolls(self, lid, d):
         r, suf = self.lv[lid], ["", "(N)", "(H)"][d]
@@ -901,7 +905,7 @@ class RunRef:
         pre = "" if d == 0 else "n"
         lst = [r["%smon%d" % (pre, i)] for i in range(1, 26) if r.get("%smon%d" % (pre, i))]
         rolls, rooms = self.rolls(lid, d)
-        packs = rolls * (min(n(r["MonDen" + suf]), 10000) + 1) / 100000 * self.c["placeFactor"]
+        packs = rolls * (min(n(r["MonDen" + suf]), 10000) + 1) / 100000 * self.pl.get(lid, 1) * self.c["placeFactor"]
         bosses = min(packs, self.bosses(packs, rooms, n(r["MonUMin" + suf]), n(r["MonUMax" + suf])))
         sh = self.shares(lst, n(r["NumMon"]), n(r.get("rangedspawn")))
         kills = {}
@@ -1124,6 +1128,36 @@ def main():
     cow_ = RUN["39|2"]
     check("Cow Level (Hell) regular cows per run near the measured ~516 (placement factor calibrated on it)", cow_["kills"]["hellbovine"]["regular"], 516, 0.05, "%.0f" % cow_["kills"]["hellbovine"]["regular"])
     check("Cow Level (Hell) champion+unique packs near the measured 6.3", cow_["bosses"], 6.3, 0.3, "%.2f" % cow_["bosses"])
+    # ---- placement factor from the map layouts (tools/floor_share.py): parser sanity on known files, range of pl in the built data
+    sys.path.insert(0, os.path.join(HERE, "tools"))
+    import floor_share as FS
+    lay_ = FS.Layouts(SRC, os.path.join(SRC, "tiles"))
+    sized_ = bad_ = 0
+    for r_ in lay_.rows:
+        if n(r_["SizeX"]) > 0 and r_["File1"] not in ("", "0"):
+            for i_ in range(1, max(1, n(r_["Files"])) + 1):
+                rel_ = lay_.t.resolve(r_["File%d" % i_]) if r_["File%d" % i_] not in ("", "0") else None
+                if rel_:
+                    d_ = lay_.t.ds1(rel_)
+                    sized_ += 1
+                    bad_ += (d_["w"], d_["h"]) != (n(r_["SizeX"]), n(r_["SizeY"]))
+    check("floor_share: ds1 width / height == lvlprest SizeX / SizeY for every cell preset file (%d files)" % sized_, bad_, 0)
+    arc_ = lay_.t.ds1(lay_.t.resolve("Act2/Arcane/SanctEW.ds1"))
+    raw_floor_ = sum(1 for v_ in arc_["floors"][0] if v_) / len(arc_["floors"][0])
+    arc_f_ = lay_.preset(lay_.byname["Act 2 - Arcane EW"], 19, 74)
+    cave_f_ = lay_.preset(lay_.byname["Act 1 - Cave EW"], 3, 8)
+    check("floor_share: Arcane Sanctuary cell (SanctEW) is mostly void: floor cells in the raw ds1 below 25%", 1 if raw_floor_ < 0.25 else 0, 1, 0, "%.1f%% of the cells have a floor tile" % (100 * raw_floor_))
+    check("floor_share: Arcane cell walkable share f is below the floor-cell share (the filler floor blocks)", 1 if 0 < arc_f_["f"] <= raw_floor_ else 0, 1, 0, "f %.3f" % arc_f_["f"])
+    check("floor_share: plain cave cell f well above the Arcane cell f (2x)", 1 if cave_f_["f"] > 2 * arc_f_["f"] else 0, 1, 0, "cave %.3f vs Arcane %.3f" % (cave_f_["f"], arc_f_["f"]))
+    check("floor_share: placing is near certain in a room with f of a cave (P = 1-(1-f)^20 above 0.99)", 1 if 1 - (1 - cave_f_["f"]) ** 20 > 0.99 else 0, 1, 0)
+    check("floor_share: no map tile is missing from the loaded tile libraries for these presets", arc_f_["nokey"] + cave_f_["nokey"], 0)
+    for fn_, tag_ in (("data.json", "RotW"), ("data-lod.json", "LoD")):
+        with open(os.path.join(HERE, fn_), encoding="utf-8") as f_:
+            lv_ = json.load(f_)["levels"]
+        pls_ = [v_.get("pl") for v_ in lv_.values()]
+        check("%s: every level has a placement factor pl in (0, 1] (%d levels)" % (tag_, len(pls_)), sum(1 for p_ in pls_ if p_ is not None and 0 < p_ <= 1), len(pls_))
+        check("%s: Cow Level (open outdoor, not modelled) has pl 1" % tag_, lv_["39"]["pl"], 1)
+        check("%s: Chaos Sanctuary pl is the populated 6 of 25 cells (below 0.3)" % tag_, 1 if lv_["108"]["pl"] < 0.3 else 0, 1, 0, "pl %.4f" % lv_["108"]["pl"])
     ROWS.append(("INFO", "all Hell sources srcDist, cold context (ms): cap off / cap on", "%d / %d" % (CP["perf"]["0"]["ms"], CP["perf"]["6"]["ms"]), "-", "%d sources" % CP["perf"]["6"]["n"]))
     # ---- published figures
     f = js["formula"]

@@ -11,6 +11,8 @@ import re
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(HERE, "tools"))
+import floor_share
 SRC = sys.argv[1] if len(sys.argv) > 1 else os.path.join(HERE, "excel")
 OUT = sys.argv[2] if len(sys.argv) > 2 else os.path.join(HERE, "data.json")
 OUT_LOD = sys.argv[3] if len(sys.argv) > 3 else os.path.join(os.path.dirname(OUT), "data-lod.json")
@@ -258,6 +260,14 @@ def build(mode):
     # tiles by the Act 5 level linker (DrlgOutRoom.cpp DRLGOUTROOM_LinkLevelsByLevelCoords / ...ByOffsetCoords / ...ByLevelDef; levels.txt: -1 / 128x80).
     # Fixed single-preset caves (Frozen River, Drifter Cavern, Icy Cellar) and the Hell1-3 lava layouts get no extra special-preset cells.
     maze = {num(r.get("Level")): r for r in rd("lvlmaze") if r.get("Level")}
+    # "pl" = placement factor from the real map layouts (tools/floor_share.py: share of walkable subtiles of each populated preset room, 20 placement
+    # tries per pack). 1 where the layout is not modelled (open outdoor levels with generated fill). Left out when excel/tiles was not extracted.
+    tiles_dir = os.path.join(SRC, "tiles")
+    pls = None
+    if os.path.isdir(tiles_dir):
+        pls = floor_share.level_pl(TDIR, tiles_dir)
+    else:
+        print("warning: no %s (re-run tools/extract_tables.py --force); levels get no 'pl' placement factor" % tiles_dir)
     ACT5_LINKED = {111: (64, 160), 112: (64, 160), 117: (64, 160)}
     FIXED_MAZE = {114, 116, 119, 125, 126, 127}
     levels = {}
@@ -292,6 +302,9 @@ def build(mode):
         }
         mz = maze.get(lid)
         L = levels[str(lid)]
+        if pls is not None:
+            p = pls.get(lid, {}).get("pl")
+            L["pl"] = 1 if p is None else round(p, 4)
         if num(r.get("DrlgType")) == 1 and mz:
             L["geo"] = {"t": "maze", "cells": [num(mz.get("Rooms")), num(mz.get("Rooms(N)")), num(mz.get("Rooms(H)"))],
                         "w": num(mz.get("SizeX")), "h": num(mz.get("SizeY")), "fixed": 1 if lid in FIXED_MAZE else 0}
