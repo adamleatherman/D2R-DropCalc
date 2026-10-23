@@ -1175,7 +1175,7 @@
     function affixSearch(ctx, o, progress) {
       const codes = new Set(o.codes);
       const qn = o.quality;
-      let srcs = sources(ctx).filter((s) => (o.diff < 0 || s.diff === o.diff) && (!o.act || s.act === o.act) && (!o.area || s.area === o.area));
+      let srcs = sources(ctx).filter((s) => (o.diff < 0 || s.diff === o.diff) && (!o.act || s.act === o.act) && (!o.area || s.area === o.area) && (!o.srcKey || s.key === o.srcKey));
       const recs = [];
       const need = new Map();
       for (const src of srcs) {
@@ -1371,18 +1371,46 @@
       return out;
     }
 
-    /** The builder's affix table for a set of bases at an item level: catalogue rows with availability at that level and appearance odds (mean over
-     *  the bases, a base that cannot roll the affix counting 0) for magic (exact) and rare (Monte Carlo, o.rolls per base). */
+    /** How often each base of `codes` drops from the chosen sources: Map code -> share (sums to 1; empty when no source drops any of them). The sources are
+     *  the engine's own (srcDist at the context's difficulty / players / terror zone / mode); o = {diff (-1 or undefined: all), act, area, srcKey (one monster
+     *  in one area; its key from sources()), tz (terror zone sources only)}. Several sources are weighted by their kills per run (the per-run model). */
+    function baseDropWeights(ctx, codes, o) {
+      o = o || {};
+      const set = new Set(codes), mass = new Map();
+      let tot = 0, n = 0;
+      for (const src of sources(ctx)) {
+        if (o.srcKey ? src.key !== o.srcKey : ((o.diff >= 0 && src.diff !== o.diff) || (o.act && src.act !== o.act) || (o.area && src.area !== o.area) || (o.tz && !src.tz))) continue;
+        const f = o.srcKey ? 1 : src.perRun;
+        if (!(f > 0)) continue;
+        let hit = false;
+        for (const [k, p] of srcDist(ctx, src)) {
+          const meta = metaCache.get(k);
+          if (meta.kind !== 'i' || !set.has(meta.id)) continue;
+          mass.set(meta.id, (mass.get(meta.id) || 0) + p * f); tot += p * f; hit = true;
+        }
+        if (hit) n++;
+      }
+      const out = new Map();
+      if (tot > 0) for (const [c, m] of mass) out.set(c, m / tot);
+      out.nSources = n;
+      return out;
+    }
+
+    /** The builder's affix table for a set of bases at an item level: catalogue rows with availability at that level and appearance odds for magic (exact)
+     *  and rare (Monte Carlo, o.rolls per base). Odds are the mean over the bases (a base that cannot roll the affix counting 0), every base counted equally,
+     *  or with o.weights (Map / object code -> weight, e.g. baseDropWeights) the weighted mean sum(w * p) / sum(w). Each row also carries the per-base odds
+     *  (pb.m / pb.r, in the order of `codes`) for the hover. */
     function builderAffixTable(codes, ilvl, o) {
       o = o || {};
       const cat = builderCatalog(codes, ilvl);
-      const sum = { magic: new Map(), rare: new Map() };
+      const per = { magic: new Map(), rare: new Map() };
       for (const code of codes) {
         const il = ilOf(code, ilvl);
-        for (const q of o.rare === false ? ['magic'] : ['magic', 'rare']) {
-          for (const [id, p] of affixAppearance(code, il, q, o.rolls, o.seed)) sum[q].set(id, (sum[q].get(id) || 0) + p);
-        }
+        for (const q of o.rare === false ? ['magic'] : ['magic', 'rare']) per[q].set(code, affixAppearance(code, il, q, o.rolls, o.seed));
       }
+      const wget = (c) => (o.weights ? (o.weights instanceof Map ? o.weights.get(c) : o.weights[c]) || 0 : 1);
+      const ws = codes.map(wget), W = ws.reduce((a, b) => a + b, 0);
+      const mean = (q, id) => { if (!(W > 0)) return 0; let t = 0; codes.forEach((c, i) => { const m = per[q].get(c); if (m && ws[i]) t += ws[i] * (m.get(id) || 0); }); return t / W; };
       const rows = [];
       for (const r of cat.values()) {
         let lo = null, hi = null, nOn = 0;
@@ -1391,9 +1419,11 @@
           const il = ilOf(code, ilvl);
           if (il >= a && il <= b) nOn++;
         }
+        const pbOf = (q) => codes.map((c) => { const m = per[q].get(c); return m ? m.get(r.id) || 0 : 0; });
         rows.push({ id: r.id, side: r.side, name: r.name, mods: r.mods, desc: r.mods.map((m) => describe(m.key, m.min, m.max)).join(' / '), lvl: r.lvl, lr: r.lr, cls: r.cls, rare: r.rare,
           g: r.g, groupName: r.groupName, maxLvl: r.maxLvl, tier: r.tier || 0, minIl: lo, maxIl: hi, nBases: r.per.size, nOn, avail: nOn > 0,
-          magic: (sum.magic.get(r.id) || 0) / codes.length, rareP: r.rare ? (sum.rare.get(r.id) || 0) / codes.length : 0 });
+          magic: mean('magic', r.id), rareP: r.rare ? mean('rare', r.id) : 0,
+          pb: { m: pbOf('magic'), r: r.rare && per.rare.size ? pbOf('rare') : null } });
       }
       return rows;
     }
@@ -1552,7 +1582,7 @@
       mode, heraldsAvailable, sunderChance, sunderPaths, isSunder, adjQuality, heraldSpawnPct, quality, qualityTotals, sources, srcDist, chanceFor, baseQualityChance, affixLevel, minIlvlForAlvl, eligible, maxSockets, affixProb, minLevels, staffDist, staffBase,
       statList, describe, affixSearch, searchIndex, baseTypes, metaCache, uniqById, setById, uniqByCode, setByCode, prettyId, tzLevel,
       eligibleUniques, eligibleSets, condProb, trialsFor,
-      builderTypes, builderBases, builderCatalog, builderStats, builderAffixTable, affixAppearance, planCombo, comboForBase, comboAnalysis, explainCombo, groupName,
+      builderTypes, builderBases, builderCatalog, builderStats, builderAffixTable, baseDropWeights, affixAppearance, planCombo, comboForBase, comboAnalysis, explainCombo, groupName,
     };
   }
 

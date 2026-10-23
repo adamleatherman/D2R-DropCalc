@@ -1421,6 +1421,28 @@ def main():
         check("type aggregation %s: sources with a result match (%d vs %d)" % (tag, a["rows"], a["sumRows"]), a["rows"], a["sumRows"], 0)
         check("type aggregation %s: pruning impossible pools changes nothing" % tag, a["maxRelPrune"], 0, 0)
         check("type aggregation %s: per-base contributions add up to the total" % tag, a["maxBB"], 0, 0)
+    # odds weighting: weighted table == sum of weight x per-base reference odds (independent Python reference of the magic split, 1e-9)
+    BW = B["weights"]
+    def wrows(rows):
+        d = {}
+        for side, lvl, nm, pm in rows:
+            k = ({"prefix": "p", "suffix": "s", "auto": "a"}[side], lvl, nm)
+            d[k] = d.get(k, 0.0) + pm
+        return d
+    refs = [RU.appear(c, BW["il"]) for c in BW["boots"]]
+    keys = set(k for r in refs for k in r)
+    def refmix(wts):
+        tot = sum(wts)
+        return {k: (sum(wi * r.get(k, 0.0) for wi, r in zip(wts, refs)) / tot if tot else 0.0) for k in keys}
+    def maxerr(eng, ref):
+        return max([abs(eng.get(k, 0.0) - ref.get(k, 0.0)) for k in set(eng) | set(ref)] or [0])
+    check("odds weighting (boots, Hell Chaos Sanctuary, %d sources): base drop weights == perRun x chanceFor reference (max abs diff)" % BW["n"], max(abs(a - b) for a, b in zip(BW["w"], BW["wChance"])), 0, 0)
+    check("odds weighting: weights sum to 1 (%d bases)" % len(BW["boots"]), sum(BW["w"]), 1, 1e-9)
+    check("odds weighting: equal-weight (default) table == plain average of the per-base reference (max abs err)", maxerr(wrows(BW["equal"]), refmix([1.0] * len(refs))), 0, 0)
+    check("odds weighting: area-weighted table == sum(weight x per-base reference odds) (max abs err)", maxerr(wrows(BW["weighted"]), refmix(BW["w"])), 0, 0)
+    check("odds weighting: one monster (%s) weighted table == hand-computed weighted sum (max abs err)" % BW["srcName"], maxerr(wrows(BW["one"]), refmix(BW["w1"])), 0, 0)
+    check("odds weighting: nobody drops there -> every odds figure is 0", max(BW["none"]), 0, 0)
+    check("odds weighting: per-base odds on each row average to the table figure in equal mode", 1 if BW["pbOk"] else 0, 1, 0)
     def cvt(key, mn):
         if key == B["staffKey"]:
             return ("staff", 1, mn)     # the staff list's idx 2 skill is tier 1

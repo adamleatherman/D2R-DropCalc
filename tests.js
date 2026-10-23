@@ -420,6 +420,18 @@
       { const rows = E.builderAffixTable(['cap'], 60, { rolls: 200000 }); let p = 0;
         for (const r of rows) if (r.mods.some((m) => m.key === 'Fire Resist +#%')) p += r.rareP;
         res.builder.rareFire = p; }
+      // odds weighting: plain average vs weighted by the drop rate of each base in an area (boots, Hell, Chaos Sanctuary) and for one monster
+      { const ctx = E.getCtx({ players: 1, party: 1, ladder: true, tz: false, mf: 0, clvl: 85, tier: 1 }), boots = E.builderBases('boot', -1).sort();
+        const srcs = E.sources(ctx).filter((x) => x.diff === 2 && /Chaos Sanctuary/.test(x.areaName));
+        const area = srcs[0].area, w = E.baseDropWeights(ctx, boots, { diff: 2, area });
+        const w1 = E.baseDropWeights(ctx, boots, { srcKey: srcs[0].key });
+        // independent weights through chanceFor: sum over the area's sources of perRun * P(base)
+        const raw = boots.map((c) => srcs.reduce((t, x) => t + x.perRun * E.chanceFor(ctx, x, { kind: 'base', code: c }, 0).base, 0)), rt = raw.reduce((a, b) => a + b, 0);
+        const rowsOf = (o) => E.builderAffixTable(boots, 85, Object.assign({ rare: false }, o)).filter((r) => r.side !== 'staff').map((r) => [r.side, r.lvl, r.mods.length, r.magic]);
+        res.builder.weights = { boots, il: 85, w: boots.map((c) => w.get(c) || 0), w1: boots.map((c) => w1.get(c) || 0), wChance: boots.map((c, i) => raw[i] / rt), n: w.nSources,
+          srcName: srcs[0].name, equal: rowsOf({}), weighted: rowsOf({ weights: w }), one: rowsOf({ weights: w1 }),
+          none: E.builderAffixTable(boots, 85, { rare: false, weights: new Map() }).filter((r) => r.side !== 'staff').map((r) => r.magic), pbOk: (() => { const r = E.builderAffixTable(boots, 85, { rolls: 2000 })[5]; return r.pb.m.length === boots.length && Math.abs(r.pb.m.reduce((a, b) => a + b, 0) / boots.length - r.magic) < 1e-12; })() };
+      }
       // type aggregation: affixSearch over all boots == sum of the single-base searches (magic exact and rare with the same seeds); prune does not change a result
       { const ctx = E.getCtx({ players: 1, party: 1, ladder: true, tz: false, mf: 0, clvl: 85, tier: 1 });
         const boots = E.builderBases('boot', -1), FRW = '+#% Faster Run/Walk';

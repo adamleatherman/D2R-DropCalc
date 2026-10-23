@@ -198,7 +198,7 @@
   const CLASSN = { ama: 'Amazon', bar: 'Barbarian', nec: 'Necromancer', pal: 'Paladin', sor: 'Sorceress', ass: 'Assassin', dru: 'Druid', war: 'Warlock' };
   const QN = { magic: 'Magic', rare: 'Rare' };
   let T2 = null, TA = null, TYPEOPTS = [];
-  let bd = { type: null, codes: [], stats: new Map(), sel: [], rows: [], an: null, farm: null, farmQ: [] };
+  let bd = { type: null, codes: [], stats: new Map(), sel: [], rows: [], an: null, farm: null, farmQ: [], wts: null, wlabel: '' };
   let tableWorker = null, farmWorker = null, tableId = 0, farmId = 0;
 
   const cols2 = srcCols.concat([
@@ -241,7 +241,7 @@
     w.onmessage = (ev) => {
       const m = ev.data; if (m.id !== id) return;
       if (m.type === 'progress') onProgress && onProgress(m.done / m.total);
-      else { w.busy = false; if (m.type === 'result') onDone(m.rows); else onDone(null, m.message); }
+      else { w.busy = false; if (m.type === 'result') onDone(m.rows, null, m); else onDone(null, m.message); }
     };
     w.postMessage(Object.assign({ id, file: DATAFILE[E.mode] }, msg));
     return id;
@@ -257,11 +257,28 @@
     { k: 'lr', label: 'Req lvl', note: 'Character level the affix requires (levelreq).', get: (r) => r.lr === null ? 0 : r.lr, fmt: (r) => r.lr === null ? '-' : r.lr },
     { k: 'il', label: 'Item level', note: 'Item levels at which some base of the type can roll it: "20+" or a window "24 to 35" (affix max level, staff skill tiers).', get: (r) => r.minIl === null ? 999 : r.minIl, fmt: lvWindow },
     { k: 'cls', label: 'Class', l: 1, get: (r) => r.cls, fmt: (r) => r.cls ? (CLASSN[r.cls] || r.cls) + ' only' : '' },
-    { k: 'grp', label: 'Excludes', l: 1, note: 'Affixes of the same group never appear together on one item. The group is named after its first stat.', get: (r) => r.groupName, fmt: (r) => r.g ? 'group: ' + r.groupName : '' },
+    { k: 'grp', label: 'Excludes', l: 1, note: 'Affixes of the same group never appear together on one item. The group is named after its first stat.', get: (r) => r.groupName, fmt: (r) => r.g ? r.groupName : '' },
     { k: 'qual', label: 'Quality', l: 1, get: (r) => r.rare ? 1 : 0, fmt: (r) => r.rare ? 'magic + rare' : 'magic only' },
-    { k: 'pm', label: 'Odds (magic)', note: 'Chance that a magic item of the type (mean over its bases, at the item level above) carries this affix. Exact.', get: (r) => r.magic, fmt: (r) => odds(r.magic) },
-    { k: 'pr', label: 'Odds (rare)', note: 'Same for a rare item. Monte Carlo (noise on rare affixes is a few percent of the value).', get: (r) => r.rareP, fmt: (r) => odds(r.rareP) },
+    { k: 'pm', get label() { return 'Odds (magic, ' + (bd.wts ? 'weighted' : 'avg') + ')'; }, get note() { return 'Chance that a magic item of the type carries this affix at the item level above. Exact. ' + avgNote() + ' Hover a cell for the per-base odds.'; }, get: (r) => r.magic, fmt: (r) => odds(r.magic), tip: (r) => oddsTip(r, 'm') },
+    { k: 'pr', get label() { return 'Odds (rare, ' + (bd.wts ? 'weighted' : 'avg') + ')'; }, get note() { return 'Same for a rare item. Monte Carlo (noise on rare affixes is a few percent of the value). ' + avgNote() + ' Hover a cell for the per-base odds.'; }, get: (r) => r.rareP, fmt: (r) => odds(r.rareP), tip: (r) => oddsTip(r, 'r') },
   ];
+  /** how the odds columns were averaged over the bases (plain average, or weighted by drop rate in the chosen area / monster) */
+  function avgNote() {
+    return bd.wts ? 'Weighted by drop rate in ' + bd.wlabel + ': each base counts with its share of the type\'s drops there (global difficulty, players, terror zone and mode apply); bases that cannot drop there count 0.'
+      : 'Average over the ' + bd.codes.length + ' base' + (bd.codes.length === 1 ? '' : 's') + ' of the selection (each base counted equally; a base that cannot roll the affix counts 0).';
+  }
+  /** hover text of an odds cell: the odds on each base (and its weight in weighted mode), best first */
+  function oddsTip(r, q) {
+    const arr = r.pb && (q === 'm' ? r.pb.m : r.pb.r);
+    if (!arr) return q === 'r' ? 'Magic-only affix: never on a rare item.' : '';
+    const L = bd.codes.map((c, i) => ({ n: baseName(c), p: arr[i], w: bd.wts ? bd.wts[i] : 0 }));
+    L.sort((a, b) => (b.p - a.p) || a.n.localeCompare(b.n));
+    const MAXL = 30;
+    const out = [bd.wts ? 'Per base: odds (weight = share of the type\'s drops in ' + bd.wlabel + ')' : 'Per base (each counted equally): odds'];
+    for (const x of L.slice(0, MAXL)) out.push(x.n + ': ' + odds(x.p) + (bd.wts ? '  (weight ' + (100 * x.w).toFixed(x.w > 0 && x.w < 0.01 ? 2 : 1) + '%)' : ''));
+    if (L.length > MAXL) out.push('... and ' + (L.length - MAXL) + ' more');
+    return out.join('\n');
+  }
 
   function filterRows() {
     const f = $('f2').value.trim().toLowerCase().split(/\s+/).filter(Boolean), sd = $('sd2').value, av = $('av2').checked;
@@ -271,17 +288,47 @@
   function renderTable() {
     TA.rows = filterRows();
     const r = TA.render();
-    $('tinfo2').textContent = bd.codes.length ? r.total + ' of ' + bd.rows.length + ' affixes (showing ' + r.shown + '); odds are for a random base of the selection (' + bd.codes.length + ' bases) at item level ' + effIlvl() + '. Click a row to add it. Dimmed rows cannot roll at this item level.' : '';
+    $('tinfo2').textContent = bd.codes.length ? r.total + ' of ' + bd.rows.length + ' affixes (showing ' + r.shown + '); odds at item level ' + effIlvl() + ', ' +
+      (bd.wts ? (bd.wts.some((w) => w > 0) ? 'weighted by drop rate in ' + bd.wlabel + ' (bases that cannot drop there count 0)' : 'no base of the selection drops in ' + bd.wlabel + ' with the current selectors, so every odds figure is "-"')
+        : 'average over the ' + bd.codes.length + ' base' + (bd.codes.length === 1 ? '' : 's') + ' of the selection (each base counted equally)') +
+      '. Hover an odds cell for the per-base odds. Click a row to add it. Dimmed rows cannot roll at this item level.' : '';
+  }
+  /** weighting request for the affix table: null (plain average) unless an area is chosen */
+  function weightOpts(sel) {
+    const area = parseInt($('ar2').value || '0', 10);
+    if (!area) return null;
+    return { diff: sel.diff, act: sel.act, area, srcKey: $('mo2').value || '', tz: sel.tz };
+  }
+  function weightLabel() {
+    const a = $('ar2'), m = $('mo2');
+    return (a.selectedOptions[0] ? a.selectedOptions[0].textContent.replace(/^Act \d+ - /, '') : 'the area') + (m.value ? ' (' + m.selectedOptions[0].textContent + ')' : '');
+  }
+  /** monsters / sources of the chosen area under the global selectors, for the Monster selector */
+  function fillMonsters() {
+    const mo = $('mo2'), area = parseInt($('ar2').value || '0', 10), cur = mo.value;
+    mo.disabled = !area;
+    if (!area) { mo.innerHTML = '<option value="">All sources</option>'; return; }
+    const sel = readSel(), { list } = getSources(sel);
+    const rows = list.filter((s) => s.area === area && (sel.diff < 0 || s.diff === sel.diff) && (!sel.act || s.act === sel.act) && (!sel.tz || s.tz) && !s.herald);
+    mo.innerHTML = '<option value="">All sources in the area</option>' + rows.map((s) => '<option value="' + esc(s.key) + '">' + esc(s.name) + (s.rank === 'regular' ? '' : ' (' + s.rank + ')') + (sel.diff < 0 ? ' - ' + DIFF[s.diff] : '') + '</option>').join('');
+    if (rows.some((s) => s.key === cur)) mo.value = cur;
   }
   function requestTable() {
     if (!bd.codes.length) { bd.rows = []; renderTable(); return; }
     const ilvl = effIlvl(), codes = bd.codes.slice();
     const rolls = Math.min(parseInt($('mc2').value, 10), Math.max(4000, Math.floor(1000000 / codes.length)));
     $('tinfo2').textContent = 'Computing affix odds...';
-    runJob('table', { type: 'table', codes, ilvl, rolls }, null, (rows, err) => {
+    const { sel, ctxS } = pctx(), wopts = weightOpts(sel), wlabel = wopts ? weightLabel() : '';
+    const local = () => {   // no worker: the same computation on the main thread
+      if (!wopts) return E.builderAffixTable(codes, ilvl, { rolls });
+      const w = E.baseDropWeights(E.getCtx(ctxS), codes, wopts), rows = E.builderAffixTable(codes, ilvl, { rolls, weights: w, rare: codes.some((c) => w.get(c) > 0) });
+      rows.wts = codes.map((c) => w.get(c) || 0); return rows;
+    };
+    runJob('table', { type: 'table', codes, ilvl, rolls, ctx: ctxS, wopts }, null, (rows, err, m) => {
       if (!rows) { $('tinfo2').textContent = 'Error: ' + err; return; }
-      bd.rows = rows; renderTable();
-    }, () => E.builderAffixTable(codes, ilvl, { rolls }));
+      bd.rows = rows; bd.wts = wopts ? (m ? m.wts : rows.wts) : null; bd.wlabel = wlabel;
+      renderTable();
+    }, local);
   }
 
   // ----- selected stats with sliders -----
@@ -372,7 +419,7 @@
     const { sel, ctxS } = pctx(); saveSel();
     const qs = bd.farmQ.slice(), an = bd.an;
     const codes = bd.codes.filter((c) => qs.some((q) => an[q].per.find((x) => x.code === c).ok));
-    const opts = { codes, conds: condsOf(), mf: sel.mf, diff: sel.diff, act: sel.act, area: parseInt($('ar2').value || '0', 10), rolls: parseInt($('mc2').value, 10) };
+    const opts = { codes, conds: condsOf(), mf: sel.mf, diff: sel.diff, act: sel.act, area: parseInt($('ar2').value || '0', 10), srcKey: $('mo2').value || '', rolls: parseInt($('mc2').value, 10) };
     $('prog2').hidden = false; $('prog2').value = 0;
     $('finfo2').textContent = 'Searching farm sources...';
     const t0 = performance.now();
@@ -466,7 +513,14 @@
     $('il2').addEventListener('change', () => { effIlvl(); syncUrl(); requestTable(); });
     $('ql2').addEventListener('change', () => { syncUrl(); updateAnalysis(); runFarm(); });
     $('mc2').addEventListener('change', () => { requestTable(); changed(); });
-    for (const id of ['ar2', 'n2']) $(id).addEventListener('change', () => changed());
+    $('ar2').addEventListener('change', () => { fillMonsters(); requestTable(); changed(); });
+    $('mo2').addEventListener('change', () => { requestTable(); changed(); });
+    $('n2').addEventListener('change', () => changed());
+    $('tb2a').addEventListener('mouseover', (ev) => {   // per-base odds, built on the first hover of a cell
+      const td = ev.target.closest('td'); if (!td || td.title) return;
+      const c = colsA[td.cellIndex], r = TA.shownRows[td.parentNode.sectionRowIndex];
+      if (c && c.tip && r) td.title = c.tip(r);
+    });
     $('f2').addEventListener('input', renderTable);
     $('sd2').addEventListener('change', renderTable);
     $('av2').addEventListener('change', renderTable);
@@ -529,6 +583,7 @@
     const cur = $('ar2').value;
     $('ar2').innerHTML = '<option value="">All areas</option>' + areas.map((x) => '<option value="' + x.id + '">Act ' + x.a.act + ' - ' + esc(x.a.name) + '</option>').join('');
     if (areas.some((x) => x.id === cur)) $('ar2').value = cur;
+    fillMonsters();
     $('info1').textContent = 'Ready. ' + INDEX.length + ' items indexed, ' + Object.keys(E.data.levels).length + ' areas, ' + Object.keys(E.data.monsters).length + ' monster types.';
     updTier();
   }
@@ -568,6 +623,7 @@
       saveSel();
       if (k === 's_mode') { switchMode($('s_mode').value).catch((e) => { $('info1').textContent = 'Could not load data: ' + e; }); return; }
       updTier(); if (target1) runTab1(); if (bd.an) { syncUrl(); runFarm(); }
+      if (bd.type && $('ar2').value) { fillMonsters(); requestTable(); }
     });
     $('s_act').addEventListener('change', () => { if (target1) runTab1(); });
 

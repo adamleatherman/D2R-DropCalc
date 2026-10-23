@@ -32,6 +32,8 @@
   .box { background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:8px 10px; margin-bottom:10px; }
   table { border-collapse:collapse; width:100%; font-size:13px; }
   th, td { padding:3px 8px; border-bottom:1px solid var(--line); text-align:right; white-space:nowrap; }
+  th { white-space:normal; vertical-align:bottom; }
+  td.l { white-space:normal; }   /* text columns wrap instead of widening the table (auto layout only wraps when the table would overflow) */
   th { position:sticky; top:0; background:var(--panel2); cursor:pointer; user-select:none; color:var(--accent); font-weight:600; }
   th:hover { text-decoration:underline; }
   td.l, th.l { text-align:left; }
@@ -46,8 +48,13 @@
   a { color:var(--accent); }
   [hidden] { display:none !important; }
   .il { display:flex; gap:6px; align-items:center; } .il input[type=range] { width:110px; padding:0; }
-  .b2grid { display:grid; grid-template-columns:minmax(0,2fr) minmax(0,1fr); gap:10px; align-items:start; }
+  .b2grid { display:grid; grid-template-columns:minmax(0,1fr) 340px; gap:10px; align-items:start; }
   .b2grid > .box { margin-bottom:0; min-width:0; }
+  #selbox { position:sticky; top:8px; }
+  .b2grid .tbl.small { max-height:max(420px, 64vh); }
+  #tb2a td.l:first-child { min-width:120px; } #tb2a td:nth-child(2) { min-width:200px; }   /* affix name and description */
+  #tb2a th, #tb2a td { padding:3px 6px; }
+  @media (max-width:1500px) { th, td { padding:3px 6px; } }
   .tbl.small { max-height:52vh; }
   tr.dim td { color:var(--dim); opacity:.6; } tr.pick { cursor:pointer; }
   .chk { flex-direction:row !important; align-items:center; gap:5px !important; font-size:12px !important; color:var(--text) !important; }
@@ -59,7 +66,7 @@
   .lnk { display:flex; flex-direction:column; font-size:11px; color:var(--dim); gap:2px; margin-top:6px; } .lnk input { width:100%; }
   details summary { cursor:pointer; color:var(--accent); margin:6px 0; }
   .side { font-size:11px; padding:0 5px; border-radius:8px; background:var(--panel2); } .side.prefix { color:#8ab4ff; } .side.suffix { color:#7fe0c0; } .side.auto { color:#e6c34d; } .side.staff { color:#ff8f6a; }
-  @media (max-width:860px) { .b2grid { grid-template-columns:minmax(0,1fr); } }
+  @media (max-width:860px) { .b2grid { grid-template-columns:minmax(0,1fr); } #selbox { position:static; } }
   @media (max-width:600px) { header, nav, main { padding-left:16px; padding-right:16px; } nav { flex-wrap:wrap; } nav button { padding:6px 9px; } .ac input { width:100%; } .row > label { min-width:0; } .row .ac { max-width:100%; } }
 </style>
 </head>
@@ -112,7 +119,8 @@
         <span class="il"><input type="number" id="il2" min="1" max="99" value="85"><input type="range" id="ilr2" min="1" max="99" value="85"></span></label>
       <label title="Auto: magic and/or rare, whatever the selection allows (a magic item has at most 1 prefix and 1 suffix)">Quality <select id="ql2"><option value="">Auto (magic and/or rare)</option><option value="magic">Magic only</option><option value="rare">Rare only</option></select></label>
       <label title="Rare odds are Monte Carlo (magic is exact). Applies to the farm search; the affix table uses a similar number of rolls per base.">Monte Carlo rolls (rare) <select id="mc2"><option>20000</option><option selected>50000</option><option>200000</option></select></label>
-      <label>Area <select id="ar2"><option value="">All areas</option></select></label>
+      <label title="Choosing an area weights the affix-table odds by how often each base drops there (and limits the farm search to it)">Area <select id="ar2"><option value="">All areas</option></select></label>
+      <label title="Optional: one monster / source in the chosen area (weights the affix-table odds and limits the farm search to it)">Monster <select id="mo2" disabled><option value="">All sources</option></select></label>
       <label>Rows <select id="n2"><option>50</option><option selected>200</option><option>1000</option></select></label>
     </div>
     <div class="note" id="info2">Pick an item type (Boots, Circlet, Sword, ...) or a single base, click the affixes you want, set the minimum values with the sliders, and read off the item levels and the best places to farm it.</div>
