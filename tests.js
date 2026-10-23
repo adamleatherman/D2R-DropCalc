@@ -415,7 +415,7 @@
       res.builder.tiers = { boot: [0, 1, 2].map((tr) => E.builderBases('boot', tr).length), amu: [E.builderBases('amul', 1).length, E.builderBases('amul', -1).length] };
       for (const [code, il] of [['lbt', 85], ['cap', 60], ['wnd', 20], ['ci0', 70], ['uit', 80]]) {
         const rows = E.builderAffixTable([code], il, { rolls: 20000 });
-        res.builder.appear.push({ code, ilvl: il, rows: rows.filter((r) => r.side !== 'staff').map((r) => [r.side, r.lvl, r.mods.map((m) => [m.min, m.max]), r.magic, r.rareP, r.nOn, r.id]) });
+        res.builder.appear.push({ code, ilvl: il, rows: rows.filter((r) => ['prefix', 'suffix', 'auto'].indexOf(r.side) >= 0).map((r) => [r.side, r.lvl, r.mods.map((m) => [m.min, m.max]), r.magic, r.rareP, r.nOn, r.id]) });
       }
       { const rows = E.builderAffixTable(['cap'], 60, { rolls: 200000 }); let p = 0;
         for (const r of rows) if (r.mods.some((m) => m.key === 'Fire Resist +#%')) p += r.rareP;
@@ -427,10 +427,10 @@
         const w1 = E.baseDropWeights(ctx, boots, { srcKey: srcs[0].key });
         // independent weights through chanceFor: sum over the area's sources of perRun * P(base)
         const raw = boots.map((c) => srcs.reduce((t, x) => t + x.perRun * E.chanceFor(ctx, x, { kind: 'base', code: c }, 0).base, 0)), rt = raw.reduce((a, b) => a + b, 0);
-        const rowsOf = (o) => E.builderAffixTable(boots, 85, Object.assign({ rare: false }, o)).filter((r) => r.side !== 'staff').map((r) => [r.side, r.lvl, r.mods.length, r.magic]);
+        const rowsOf = (o) => E.builderAffixTable(boots, 85, Object.assign({ rare: false }, o)).filter((r) => ['prefix', 'suffix', 'auto'].indexOf(r.side) >= 0).map((r) => [r.side, r.lvl, r.mods.length, r.magic]);
         res.builder.weights = { boots, il: 85, w: boots.map((c) => w.get(c) || 0), w1: boots.map((c) => w1.get(c) || 0), wChance: boots.map((c, i) => raw[i] / rt), n: w.nSources,
           srcName: srcs[0].name, equal: rowsOf({}), weighted: rowsOf({ weights: w }), one: rowsOf({ weights: w1 }),
-          none: E.builderAffixTable(boots, 85, { rare: false, weights: new Map() }).filter((r) => r.side !== 'staff').map((r) => r.magic), pbOk: (() => { const r = E.builderAffixTable(boots, 85, { rolls: 2000 })[5]; return r.pb.m.length === boots.length && Math.abs(r.pb.m.reduce((a, b) => a + b, 0) / boots.length - r.magic) < 1e-12; })() };
+          none: E.builderAffixTable(boots, 85, { rare: false, weights: new Map() }).filter((r) => ['prefix', 'suffix', 'auto'].indexOf(r.side) >= 0).map((r) => r.magic), pbOk: (() => { const r = E.builderAffixTable(boots, 85, { rolls: 2000 })[5]; return r.pb.m.length === boots.length && Math.abs(r.pb.m.reduce((a, b) => a + b, 0) / boots.length - r.magic) < 1e-12; })() };
       }
       // type aggregation: affixSearch over all boots == sum of the single-base searches (magic exact and rare with the same seeds); prune does not change a result
       { const ctx = E.getCtx({ players: 1, party: 1, ladder: true, tz: false, mf: 0, clvl: 85, tier: 1 });
@@ -477,6 +477,91 @@
       // lower-is-better direction: "Requirements +#%" <= -20 vs >= -20
       res.builder.le = { statLe: E.builderStats(E.builderBases('boot', -1)).filter((s) => s.le).map((s) => s.key),
         reqLe: E.condProb({ mods: [['x', '', -30, -30, 'R']] }, { key: 'R', min: -20, le: true }), reqGe: E.condProb({ mods: [['x', '', -30, -30, 'R']] }, { key: 'R', min: -20 }) };
+    }
+    // ---- low / normal / superior items: sockets, ethereal, superior bonus (CONFIG.nonMagic) ----
+    res.white = { cases: [], facts: {} };
+    { const W = res.white, SK = E.SOCK_KEY, ET = E.ETH_KEY, ED = '+#% Enhanced Defense', EDM = '+#% Enhanced Damage', AR = '+# to Attack Rating', DUR = 'Increase Maximum Durability #%';
+      const kinds = { sock: SK, eth: ET, ed: ED, dm: EDM, ar: AR, dur: DUR };
+      const add = (name, code, q, ilvl, diff, conds) => W.cases.push({ name, code, q, ilvl, diff, conds, p: E.affixProb(code, E.affixLevel(ilvl, E.items[code]), q, conds.map(([k, m]) => ({ key: kinds[k], min: m })), { ilvl, diff, rolls: 20000 }) });
+      for (const m of [1, 2, 3, 4, 5]) add('Monarch normal ilvl 60 Hell sockets >= ' + m, 'uit', 'normal', 60, 2, [['sock', m]]);
+      add('Monarch normal ilvl 85 Hell sockets >= 4', 'uit', 'normal', 85, 2, [['sock', 4]]);
+      for (const m of [1, 3, 4]) add('Monarch normal ilvl 30 Hell sockets >= ' + m, 'uit', 'normal', 30, 2, [['sock', m]]);
+      for (const m of [1, 4, 5]) add('Monarch normal ilvl 60 Nightmare sockets >= ' + m, 'uit', 'normal', 60, 1, [['sock', m]]);
+      for (const m of [3, 4]) add('Monarch normal ilvl 85 Normal sockets >= ' + m, 'uit', 'normal', 85, 0, [['sock', m]]);
+      add('Monarch superior ilvl 60 Hell sockets >= 4', 'uit', 'sup', 60, 2, [['sock', 4]]);
+      add('Monarch low ilvl 60 Hell sockets >= 1', 'uit', 'low', 60, 2, [['sock', 1]]);
+      for (const c of ['lbt', 'lgl', 'mbl', 'jav', 'tkf', 'amu', 'rin']) add(c + ' (no sockets possible) normal ilvl 85 Hell sockets >= 1', c, 'normal', 85, 2, [['sock', 1]]);
+      add('Amazon bow am1 normal ilvl 85 Hell sockets >= 5', 'am1', 'normal', 85, 2, [['sock', 5]]);
+      add('Monarch normal ilvl 60 Hell sockets >= 4 and ethereal', 'uit', 'normal', 60, 2, [['sock', 4], ['eth', 1]]);
+      for (const q of ['low', 'normal', 'sup', 'magic', 'rare']) { add('Monarch ' + q + ' ethereal', 'uit', q, 85, 2, [['eth', 1]]); add('Short Bow sbw ' + q + ' ethereal', 'sbw', q, 85, 2, [['eth', 1]]); }
+      for (const c of ['lxb', 'am1', '7cr', 'jav', 'amu', 'lsd', 'lbt']) add(c + ' normal ethereal', c, 'normal', 85, 2, [['eth', 1]]);
+      const tpot = Object.keys(E.items).filter((c) => E.items[c].t === 'tpot' && E.items[c].sp)[0];
+      if (tpot) add(tpot + ' (throwing potion) normal ethereal', tpot, 'normal', 85, 2, [['eth', 1]]);
+      for (const [c, nm] of [['uit', 'Monarch (armor)'], ['lsd', 'Long Sword'], ['sbw', 'Short Bow'], ['7cr', 'Phase Blade'], ['jav', 'Javelin'], ['lbt', 'Boots']]) {
+        add(nm + ' superior +% enhanced defense >= 1', c, 'sup', 70, 2, [['ed', 1]]);
+        add(nm + ' superior +% enhanced damage >= 1', c, 'sup', 70, 2, [['dm', 1]]);
+        add(nm + ' superior +# attack rating >= 1', c, 'sup', 70, 2, [['ar', 1]]);
+        add(nm + ' superior max durability >= 10', c, 'sup', 70, 2, [['dur', 10]]);
+      }
+      add('Monarch superior enhanced defense >= 15', 'uit', 'sup', 70, 2, [['ed', 15]]);
+      add('Monarch superior enhanced defense >= 10', 'uit', 'sup', 70, 2, [['ed', 10]]);
+      add('Monarch superior enhanced defense >= 5 and durability >= 10', 'uit', 'sup', 70, 2, [['ed', 5], ['dur', 10]]);
+      add('Long Sword superior attack rating >= 1 and enhanced damage >= 5', 'lsd', 'sup', 70, 2, [['ar', 1], ['dm', 5]]);
+      add('Long Sword superior attack rating >= 3 and enhanced damage >= 15', 'lsd', 'sup', 70, 2, [['ar', 3], ['dm', 15]]);
+      add('Short Bow superior attack rating >= 1 and enhanced damage >= 1', 'sbw', 'sup', 70, 2, [['ar', 1], ['dm', 1]]);
+      add('Monarch superior ED >= 5, 4 sockets, ethereal', 'uit', 'sup', 70, 2, [['ed', 5], ['sock', 4], ['eth', 1]]);
+      // automagic on non-magic items (Paladin shield group 304: Chromatic res-all 35-45 | Knight's +AR and +Enhanced Damage) and low-quality staff mods
+      const RA = 'All Resistances +#', amp = data.staff.nec[20].k;
+      for (const q of ['low', 'normal', 'sup']) {
+        const al = E.affixLevel(85, E.items.pa5);
+        W.cases.push({ name: 'pa5 ' + q + ' All Resistances >= 35 (automagic)', code: 'pa5', q, ilvl: 85, diff: 2, conds: [['auto', 'res-all', 35]], p: E.affixProb('pa5', al, q, [{ key: RA, min: 35 }], { ilvl: 85, diff: 2 }) });
+        W.cases.push({ name: 'pa5 ' + q + " Knight's AR >= 110 and Enhanced Damage >= 55", code: 'pa5', q, ilvl: 85, diff: 2, conds: [['auto2', 'att', 110, 'dmg%', 55]], p: E.affixProb('pa5', al, q, [{ key: AR, min: 110 }, { key: EDM, min: 55 }], { ilvl: 85, diff: 2 }) });
+      }
+      W.cases.push({ name: 'pa5 superior ED >= 15 and All Resistances >= 35', code: 'pa5', q: 'sup', ilvl: 85, diff: 2, conds: [['ed', 15], ['auto', 'res-all', 35]], p: E.affixProb('pa5', E.affixLevel(85, E.items.pa5), 'sup', [{ key: ED, min: 15 }, { key: RA, min: 35 }], { ilvl: 85, diff: 2 }) });
+      const wal = E.affixLevel(40, E.items.wnd);
+      W.staffLow = { key: amp, ilvl: 40, idx: 20, one: E.affixProb('wnd', wal, 'low', [{ key: amp, min: 1 }], { ilvl: 40 }), two: E.affixProb('wnd', wal, 'low', [{ key: amp, min: 2 }], { ilvl: 40 }),
+        magicOne: E.affixProb('wnd', wal, 'magic', [{ key: amp, min: 1 }], { ilvl: 40 }), magicTwo: E.affixProb('wnd', wal, 'magic', [{ key: amp, min: 2 }], { ilvl: 40 }), normalTwo: E.affixProb('wnd', wal, 'normal', [{ key: amp, min: 2 }], { ilvl: 40 }) };
+      // per kill: the engine's search result for a source == P(base normal / superior) x the socket rule
+      { const ctx = E.getCtx({ players: 1, party: 1, ladder: true, tz: false, mf: 0, clvl: 85, tier: 1 });
+        const src = E.sources(ctx).find((s) => s.name === 'Hell Bovine' && s.diff === 2 && s.rank === 'regular');
+        const c = E.chanceFor(ctx, src, { kind: 'base', code: 'uit' }, 0);
+        const row = (q, conds) => { const r = E.affixSearch(ctx, { codes: ['uit'], quality: q, conds, mf: 0, diff: 2, act: src.act, area: src.area, srcKey: src.key, rolls: 1000 }, null).rows.find((x) => x.src.key === src.key); return r ? r.pTotal : 0; };
+        W.perKill = { tc: src.tc, mlvl: src.mlvl, name: src.name, base: c.base, normal: c.normal, sup: c.hq, low: c.low, magic: c.magic, n4: row('normal', [{ key: SK, min: 4 }]), s4: row('sup', [{ key: SK, min: 4 }]),
+          n4e: row('normal', [{ key: SK, min: 4 }, { key: ET, min: 1 }]), l1: row('low', [{ key: SK, min: 1 }]), me: row('magic', [{ key: ET, min: 1 }]) };
+      }
+      // levels / feasibility (structure)
+      { const an = (codes, cs, o) => E.comboAnalysis(codes, cs.map(([k, m]) => ({ key: kinds[k] || k, min: m })), o);
+        const pickOk = (r) => Object.fromEntries(E.QUALS.map((q) => [q, r[q].ok]));
+        const sock4 = an(['uit'], [['sock', 4]], { diff: 2 });
+        W.levels = { sock4: pickOk(sock4), sock4Il: Object.fromEntries(E.QUALS.map((q) => [q, sock4[q].ok ? [sock4[q].minIl, sock4[q].reqLv] : null])), sock4Normal: pickOk(an(['uit'], [['sock', 4]], { diff: 0 })), sock3Normal: pickOk(an(['uit'], [['sock', 3]], { diff: 0 })),
+          ethBow: pickOk(an(E.builderBases('bow', -1), [['eth', 1]], { diff: 2 })), ethMonarch: pickOk(an(['uit'], [['eth', 1]], {})), ringSock: pickOk(an(['rin'], [['sock', 1]], {})), edDur: pickOk(an(['uit'], [['ed', 5], ['dur', 10]], {})), threeRows: pickOk(an(['lsd'], [['ar', 1], ['dm', 5], ['dur', 10]], {})) };
+      }
+      // item-kind facts
+      const codesOf = (pred) => Object.keys(E.items).filter((c) => E.items[c].sp && pred(E.items[c]));
+      W.ethList = Object.fromEntries(Object.keys(E.items).filter((c) => E.items[c].k !== 'm').map((c) => [c, E.ethItem(c) ? 1 : 0]));
+      W.ethChance = { low: E.ethChance('uit', 'low'), set: E.ethChance('uit', 'set'), unique: E.ethChance('uit', 'unique'), normal: E.ethChance('uit', 'normal'), sup: E.ethChance('uit', 'sup'), magic: E.ethChance('uit', 'magic'), rare: E.ethChance('uit', 'rare') };
+      const F = W.facts;
+      F.jewelerMagic4 = E.affixProb('uit', E.affixLevel(85, E.items.uit), 'magic', [{ key: SK, min: 4 }], { ilvl: 85 });
+      F.rareSock1 = E.affixProb('uit', E.affixLevel(85, E.items.uit), 'rare', [{ key: SK, min: 1 }], { ilvl: 85, rolls: 40000 });
+      F.rareSock3 = E.affixProb('uit', E.affixLevel(85, E.items.uit), 'rare', [{ key: SK, min: 3 }], { ilvl: 85, rolls: 40000 });
+      const nms = (L) => L.map((a) => a.n);
+      const names = (code, rare) => nms(E.eligible(code, 99, rare).auto);   // the facts below are about automagic rows
+      const cnt = (pred, rare, wanted) => codesOf(pred).filter((c) => names(c, rare).some((x) => wanted.indexOf(x) >= 0)).length;
+      const ama = (i) => i.cs && (i.t === 'abow' || i.t === 'ajav' || i.t === 'aspe');
+      F.chromatic = { rare: cnt((i) => i.t === 'ashd', true, ['Chromatic']), magic: cnt((i) => i.t === 'ashd', false, ['Chromatic']), bases: codesOf((i) => i.t === 'ashd').length };
+      F.archer = { rare: cnt(ama, true, ["Archer's", "Lancer's"]), magic: cnt(ama, false, ["Archer's", "Lancer's"]), bases: codesOf(ama).length };
+      F.anthrax = { rare: cnt((i) => i.t === 'head', true, ['of Anthrax']), magic: cnt((i) => i.t === 'head', false, ['of Anthrax']), bases: codesOf((i) => i.t === 'head').length };
+      F.orbs = { rare: cnt((i) => i.t === 'orb', true, ["Great Wyrm's", 'of the Colossus']), magic: cnt((i) => i.t === 'orb', false, ["Great Wyrm's", 'of the Colossus']), wyrmRare: cnt((i) => i.t === 'orb', true, ["Wyrm's"]), bases: codesOf((i) => i.t === 'orb').length };
+      { const ob = 'ob1', al = E.affixLevel(85, E.items[ob]), LM = [{ key: '+# to Life', min: 1 }, { key: '+# to Mana', min: 1 }];
+        F.orbLifeMana = { life: E.affixProb(ob, al, 'normal', [LM[0]], { ilvl: 85 }), mana: E.affixProb(ob, al, 'normal', [LM[1]], { ilvl: 85 }), both: E.affixProb(ob, al, 'normal', LM, { ilvl: 85 }), bothRare: E.affixProb(ob, al, 'rare', LM, { ilvl: 85, rolls: 3000 }), bothMagic: E.affixProb(ob, al, 'magic', LM, { ilvl: 85 }) }; }
+      F.knight = { rareRow: E.eligible('pa5', 99, true).auto.filter((a) => a.n === "Knight's").map((a) => a.mods.map((m) => m[4])), normalBoth: E.affixProb('pa5', E.affixLevel(85, E.items.pa5), 'normal', [{ key: AR, min: 101 }, { key: EDM, min: 51 }], { ilvl: 85 }),
+        rareBoth: E.affixProb('pa5', E.affixLevel(85, E.items.pa5), 'rare', [{ key: AR, min: 101 }, { key: EDM, min: 51 }], { ilvl: 85, rolls: 20000 }) };
+      { const ctx = E.getCtx({ players: 1, party: 1, ladder: true, tz: false, mf: 0, clvl: 85, tier: 1 });
+        const hs = (nmx, ranks) => E.sources(ctx).find((s) => s.name === nmx && s.diff === 2 && ranks.indexOf(s.rank) >= 0);
+        F.drops = { hc: E.chanceFor(ctx, hs('Mephisto', ['boss']), { kind: 'unique', id: 'Harlequin Crest' }, 0).target, ua1: E.chanceFor(ctx, hs('Andariel', ['boss']), { kind: 'base', code: 'ua1' }, 0).target, pk2: E.chanceFor(ctx, hs('The Summoner', ['boss']), { kind: 'base', code: 'pk2' }, 0).target };
+        F.whiteDrops = { normalSock: E.affixSearch(ctx, { codes: ['uit'], quality: 'normal', conds: [{ key: SK, min: 1 }], mf: 0, diff: 2, act: 0, area: 0, rolls: 1000 }, null).rows.length,
+          supSock: E.affixSearch(ctx, { codes: ['uit'], quality: 'sup', conds: [{ key: SK, min: 1 }], mf: 0, diff: 2, act: 0, area: 0, rolls: 1000 }, null).rows.length }; }
+      F.ethSetQuals = E.builderCatalog(['uit'], 85).get('xeth').quals;
     }
     res.sourcesCount = E.sources(ctxFor(1, 1)).length;
     res.config = E.CONFIG;

@@ -125,6 +125,7 @@ def build(mode):
             "tc": num(r.get("TreasureClass")),
             "rar": num(r.get("Rarity")),
             "cls": r.get("Class", ""),
+            "throw": num(r.get("Throwable"), 0),
             "sm": r.get("StaffMods", ""),   # class code of the class skill bonuses this item type rolls (D2MOO ITEMS_GetStaffMods)
             # max sockets by item level (ITEMS_GetMaxSockets): [MaxSockets1, threshold1, MaxSockets2, threshold2, MaxSockets3]; ilvl <= th1 -> 1, <= th2 -> 2, else 3
             "ms": [num(r.get("MaxSockets1"), 0), num(r.get("MaxSocketsLevelThreshold1"), 0), num(r.get("MaxSockets2"), 0),
@@ -194,6 +195,15 @@ def build(mode):
                 "gs": num(r.get("gemsockets"), 0) if num(r.get("hasinv"), 0) else 0,
                 "sz": num(r.get("invwidth"), 0) * num(r.get("invheight"), 0),
             }
+            # durability: ITEMS_HasDurability (D2Common Items.cpp) = !nodurability && durability != 0 -> only those can be made ethereal (ITEMS_MakeEthereal)
+            # and `nd` (the nodurability flag itself, not the durability value) limits the superior bonus to the first 4 qualityitems rows
+            if kind != "m":
+                nd_flag = num(r.get("nodurability"), 0)
+                it["nd"] = 1 if nd_flag else 0
+                it["hd"] = 1 if (not nd_flag and num(r.get("durability"), 0) > 0) else 0
+                if num(r.get("stackable"), 0):
+                    it["st"] = 1
+                it["th"] = 1 if num(own.get("throw"), 0) else 0   # first type is Throwable (ITEMS_CheckIfThrowable): javelins, throwing knives / axes, potions
             if r.get("type2"):
                 it["t2"] = r["type2"]
             # jewels hold at most 4 affixes (CONFIG in engine), nothing needed here
@@ -583,6 +593,36 @@ def build(mode):
     suffixes = affix_rows("magicsuffix", "s")
     automagic = affix_rows("automagic", "a")
 
+    # superior bonus (qualityitems.txt): one row per superior item, uniform among the rows ITEMMODS_CanItemBeHighQuality accepts, within the first
+    # 4 rows for throwable or nodurability items (D2Game ItemsMagic.cpp sub_6FC54690). Each item gets `sq` = its eligible row indices.
+    qi = []
+    for r in rd("qualityitems"):
+        mods = []
+        for i in (1, 2):
+            c = r.get("mod%dcode" % i)
+            if c:
+                par = r.get("mod%dparam" % i, "") or "0"
+                mods.append([c, par, num(r.get("mod%dmin" % i), 0), num(r.get("mod%dmax" % i), 0), label_for(c, par)])
+        qi.append({"m": mods, "f": {k: num(r.get(k), 0) for k in ("armor", "weapon", "shield", "scepter", "wand", "staff", "bow", "boots", "gloves", "belt")}})
+    SPECIAL = {"shie": "shield", "scep": "scepter", "wand": "wand", "staf": "staff", "bow": "bow", "xbow": "bow", "boot": "boots", "glov": "gloves", "belt": "belt"}
+
+    def can_hq(it, row):
+        """ITEMMODS_CanItemBeHighQuality (D2Common ItemMods.cpp): generic weapon / armor rows apply to every weapon / armor whose FIRST type is not one of
+        the special types; those use their own columns (matched on the first type only)."""
+        f, t = row["f"], it["t"]
+        is_w, is_a = "weap" in it["anc"], "armo" in it["anc"]
+        if f["weapon"] and is_w and t not in ("staf", "bow", "xbow", "scep", "wand"):
+            return True
+        if f["armor"] and is_a and t not in ("shie", "boot", "glov", "belt"):
+            return True
+        return bool(t in SPECIAL and f[SPECIAL[t]])
+
+    for it in items.values():
+        if it["k"] == "m":
+            continue
+        n_rows = 4 if (it["th"] or it["nd"]) else len(qi)
+        it["sq"] = [i for i in range(n_rows) if can_hq(it, qi[i])]
+
     # coverage report: run every property code that any affix, automagic, unique or set item uses through label_for (fallbacks are collected in FALLBACKS)
     used = set()
     for L in (prefixes, suffixes, automagic):
@@ -641,7 +681,7 @@ def build(mode):
         "types": types, "items": items, "tc": tcs, "groups": groups, "levels": levels,
         "monsters": monsters, "su": su, "su_area": SU_AREA, "su_unused": SU_UNUSED, "boss_area": BOSS_AREA,
         "uniques": uniques, "sets": setitems, "ratio": ratio,
-        "prefixes": prefixes, "suffixes": suffixes, "automagic": automagic, "staff": staff,
+        "prefixes": prefixes, "suffixes": suffixes, "automagic": automagic, "staff": staff, "qi": [r["m"] for r in qi],
         "tz": tz,
     }
 

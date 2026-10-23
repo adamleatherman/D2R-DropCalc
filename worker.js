@@ -24,7 +24,7 @@ self.onmessage = async (ev) => {
     } else if (m.type === 'table') {
       // plain average over the bases, or (an area chosen) weighted by how often each base drops there
       const w = m.wopts ? E.baseDropWeights(E.getCtx(m.ctx), m.codes, m.wopts) : null;
-      const rows = E.builderAffixTable(m.codes, m.ilvl, { rolls: m.rolls, weights: w, rare: w ? m.codes.some((c) => w.get(c) > 0) : true });
+      const rows = E.builderAffixTable(m.codes, m.ilvl, { rolls: m.rolls, qualities: m.qualities, diff: m.diff, weights: w, rare: w ? m.codes.some((c) => w.get(c) > 0) : true });
       self.postMessage({ type: 'result', id: m.id, rows, wts: w ? m.codes.map((c) => w.get(c) || 0) : null });
     } else if (m.type === 'stats') {
       self.postMessage({ type: 'stats', id: m.id, stats: E.statList(m.codes, m.quality) });

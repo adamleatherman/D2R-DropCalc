@@ -196,14 +196,21 @@
   // State: bd.type (type or single base option), bd.codes (bases in play), bd.stats (stat key -> range over all tiers), bd.sel (picked stats with thresholds).
   // All rules live in engine.js (builder*, comboAnalysis, affixSearch); this only presents them.
   const CLASSN = { ama: 'Amazon', bar: 'Barbarian', nec: 'Necromancer', pal: 'Paladin', sor: 'Sorceress', ass: 'Assassin', dru: 'Druid', war: 'Warlock' };
-  const QN = { magic: 'Magic', rare: 'Rare' };
+  const QN = { low: 'Low quality', normal: 'Normal', sup: 'Superior', magic: 'Magic', rare: 'Rare' };
+  const QS_ALL = ['low', 'normal', 'sup', 'magic', 'rare'], QAB = { low: 'L', normal: 'N', sup: 'S', magic: 'M', rare: 'R' };
+  const QCOLN = { low: 'low quality', normal: 'normal', sup: 'superior', magic: 'magic', rare: 'rare' };
+  /** qualities the builder considers: the forced one, else all five */
+  const wantQ = () => ($('ql2').value ? [$('ql2').value] : QS_ALL);
+  /** qualities that get an odds column in the affix table: the forced one, else normal / superior / magic / rare (low is the normal column minus sockets and ethereal) */
+  const oddsQ = () => ($('ql2').value ? [$('ql2').value] : ['normal', 'sup', 'magic', 'rare']);
+  /** difficulty for the structural checks (sockets of white items depend on it): the global selector, Hell when it says all */
+  const selDiff = () => { const d = parseInt($('s_diff').value, 10); return d >= 0 ? d : 2; };
   let T2 = null, TA = null, TYPEOPTS = [];
   let bd = { type: null, codes: [], stats: new Map(), sel: [], rows: [], an: null, farm: null, farmQ: [], wts: null, wlabel: '' };
   let tableWorker = null, farmWorker = null, tableId = 0, farmId = 0;
 
-  const cols2 = srcCols.concat([
-    { k: 'pm', label: 'P(magic)', show: () => bd.farmQ.indexOf('magic') >= 0, note: 'Chance per kill of a MAGIC item of the type with the combination (exact).', get: (r) => r.pm, fmt: (r) => odds(r.pm) },
-    { k: 'pr', label: 'P(rare)', show: () => bd.farmQ.indexOf('rare') >= 0, note: 'Chance per kill of a RARE item of the type with the combination (Monte Carlo).', get: (r) => r.pr, fmt: (r) => odds(r.pr) },
+  const cols2 = srcCols.concat(QS_ALL.map((q) => ({ k: 'p' + q, label: 'P(' + (q === 'sup' ? 'superior' : q === 'low' ? 'low' : q) + ')', show: () => bd.farmQ.indexOf(q) >= 0,
+    note: 'Chance per kill of a ' + QCOLN[q].toUpperCase() + ' item of the type with the combination (' + (q === 'rare' ? 'Monte Carlo' : 'exact') + ').', get: (r) => r.pq[q] || 0, fmt: (r) => odds(r.pq[q] || 0) })), [
     { k: 'ptot', label: 'P per kill', note: 'Chance that one kill drops a matching item (sum over every base of the type and the possible qualities; shown as odds, sorts by probability).', get: (r) => r.pTotal, fmt: (r) => odds(r.pTotal) },
     { k: 'runs', label: 'kills/run', get: (r) => r.src.perRun, fmt: (r) => r.src.herald ? 'n/a' : r.src.perRun < 10 ? r.src.perRun.toFixed(2) : r.src.perRun.toFixed(0) },
     { k: 'perrun', label: 'P per run', note: 'Chance of a matching item in one run (rough model; shown as odds).', get: (r) => r.perRun, fmt: (r) => odds(r.perRun) },
@@ -218,7 +225,7 @@
   const baseName = (c) => E.items[c].n;
   const tierName = (c) => ['', 'exceptional', 'elite'][E.items[c].tier] || '';
   const condsOf = () => bd.sel.map((s) => { const st = bd.stats.get(s.key); return st && st.le ? { key: s.key, min: s.thr, le: true } : { key: s.key, min: s.thr }; });
-  const statText = (s) => { const st = bd.stats.get(s.key); return E.describe(s.key, s.thr, s.thr) + (st && st.le ? '  (or lower)' : '  (or more)'); };
+  const statText = (s) => { const st = bd.stats.get(s.key); return E.describe(s.key, s.thr, s.thr) + (st && st.flag ? '' : st && st.le ? '  (or lower)' : '  (or more)'); };
 
   function pctx() {
     const sel = S = readSel();
@@ -253,15 +260,15 @@
   const colsA = [
     { k: 'name', label: 'Name', l: 1, get: (r) => r.name.toLowerCase(), html: (r) => esc(r.name) + ' ' + sideTag(r) },
     { k: 'desc', label: 'Description (all tiers)', l: 1, get: (r) => r.desc.toLowerCase(), html: (r) => esc(r.desc) },
-    { k: 'lvl', label: 'Affix lvl', note: 'Affix level. Staff skills have a tier instead.', get: (r) => r.lvl === null ? r.tier : r.lvl, fmt: (r) => r.lvl === null ? 'tier ' + r.tier : r.lvl },
+    { k: 'lvl', label: 'Affix lvl', note: 'Affix level. Staff skills have a tier instead.', get: (r) => r.lvl === null ? r.tier : r.lvl, fmt: (r) => r.lvl === null ? (r.tier ? 'tier ' + r.tier : '-') : r.lvl },
     { k: 'lr', label: 'Req lvl', note: 'Character level the affix requires (levelreq).', get: (r) => r.lr === null ? 0 : r.lr, fmt: (r) => r.lr === null ? '-' : r.lr },
     { k: 'il', label: 'Item level', note: 'Item levels at which some base of the type can roll it: "20+" or a window "24 to 35" (affix max level, staff skill tiers).', get: (r) => r.minIl === null ? 999 : r.minIl, fmt: lvWindow },
     { k: 'cls', label: 'Class', l: 1, get: (r) => r.cls, fmt: (r) => r.cls ? (CLASSN[r.cls] || r.cls) + ' only' : '' },
     { k: 'grp', label: 'Excludes', l: 1, note: 'Affixes of the same group never appear together on one item. The group is named after its first stat.', get: (r) => r.groupName, fmt: (r) => r.g ? r.groupName : '' },
-    { k: 'qual', label: 'Quality', l: 1, get: (r) => r.rare ? 1 : 0, fmt: (r) => r.rare ? 'magic + rare' : 'magic only' },
-    { k: 'pm', get label() { return 'Odds (magic, ' + (bd.wts ? 'weighted' : 'avg') + ')'; }, get note() { return 'Chance that a magic item of the type carries this affix at the item level above. Exact. ' + avgNote() + ' Hover a cell for the per-base odds.'; }, get: (r) => r.magic, fmt: (r) => odds(r.magic), tip: (r) => oddsTip(r, 'm') },
-    { k: 'pr', get label() { return 'Odds (rare, ' + (bd.wts ? 'weighted' : 'avg') + ')'; }, get note() { return 'Same for a rare item. Monte Carlo (noise on rare affixes is a few percent of the value). ' + avgNote() + ' Hover a cell for the per-base odds.'; }, get: (r) => r.rareP, fmt: (r) => odds(r.rareP), tip: (r) => oddsTip(r, 'r') },
-  ];
+    { k: 'qual', label: 'Quality', l: 1, note: 'Qualities the row can occur on: L low quality, N normal, S superior, M magic, R rare.', get: (r) => r.quals.length * 10 + (r.rare ? 1 : 0), fmt: (r) => r.quals.map((q) => QAB[q]).join(' ') },
+  ].concat(QS_ALL.map((q) => ({ k: 'o' + q, show: () => oddsQ().indexOf(q) >= 0, get label() { return 'Odds (' + QCOLN[q] + ', ' + (bd.wts ? 'weighted' : 'avg') + ')'; },
+    get note() { return 'Chance that a ' + QCOLN[q] + ' item of the type carries this ' + (q === 'rare' ? 'at the item level above. Monte Carlo (noise on rare affixes is a few percent of the value). ' : 'at the item level above. Exact. ') + avgNote() + ' Hover a cell for the per-base odds.'; },
+    get: (r) => (r.ap && r.ap[q]) || 0, fmt: (r) => odds((r.ap && r.ap[q]) || 0), tip: (r) => oddsTip(r, q) })));
   /** how the odds columns were averaged over the bases (plain average, or weighted by drop rate in the chosen area / monster) */
   function avgNote() {
     return bd.wts ? 'Weighted by drop rate in ' + bd.wlabel + ': each base counts with its share of the type\'s drops there (global difficulty, players, terror zone and mode apply); bases that cannot drop there count 0.'
@@ -269,8 +276,8 @@
   }
   /** hover text of an odds cell: the odds on each base (and its weight in weighted mode), best first */
   function oddsTip(r, q) {
-    const arr = r.pb && (q === 'm' ? r.pb.m : r.pb.r);
-    if (!arr) return q === 'r' ? 'Magic-only affix: never on a rare item.' : '';
+    const arr = r.pb && r.pb.q && r.pb.q[q];
+    if (!arr) return 'This row cannot occur on a ' + QCOLN[q] + ' item.';
     const L = bd.codes.map((c, i) => ({ n: baseName(c), p: arr[i], w: bd.wts ? bd.wts[i] : 0 }));
     L.sort((a, b) => (b.p - a.p) || a.n.localeCompare(b.n));
     const MAXL = 30;
@@ -282,7 +289,8 @@
 
   function filterRows() {
     const f = $('f2').value.trim().toLowerCase().split(/\s+/).filter(Boolean), sd = $('sd2').value, av = $('av2').checked;
-    return bd.rows.filter((r) => (!sd || r.side === sd) && (!av || r.avail) &&
+    const wq = wantQ();
+    return bd.rows.filter((r) => (!sd || r.side === sd) && (!av || r.avail) && r.quals.some((q) => wq.indexOf(q) >= 0) &&
       f.every((w) => (r.name + ' ' + r.desc + ' ' + r.side + ' ' + (r.cls ? (CLASSN[r.cls] || r.cls) + ' only' : '') + ' ' + r.groupName).toLowerCase().indexOf(w) >= 0));
   }
   function renderTable() {
@@ -315,16 +323,16 @@
   }
   function requestTable() {
     if (!bd.codes.length) { bd.rows = []; renderTable(); return; }
-    const ilvl = effIlvl(), codes = bd.codes.slice();
+    const ilvl = effIlvl(), codes = bd.codes.slice(), quals = oddsQ(), diff = selDiff();
     const rolls = Math.min(parseInt($('mc2').value, 10), Math.max(4000, Math.floor(1000000 / codes.length)));
     $('tinfo2').textContent = 'Computing affix odds...';
     const { sel, ctxS } = pctx(), wopts = weightOpts(sel), wlabel = wopts ? weightLabel() : '';
     const local = () => {   // no worker: the same computation on the main thread
-      if (!wopts) return E.builderAffixTable(codes, ilvl, { rolls });
-      const w = E.baseDropWeights(E.getCtx(ctxS), codes, wopts), rows = E.builderAffixTable(codes, ilvl, { rolls, weights: w, rare: codes.some((c) => w.get(c) > 0) });
+      if (!wopts) return E.builderAffixTable(codes, ilvl, { rolls, qualities: quals, diff });
+      const w = E.baseDropWeights(E.getCtx(ctxS), codes, wopts), rows = E.builderAffixTable(codes, ilvl, { rolls, qualities: quals, diff, weights: w, rare: codes.some((c) => w.get(c) > 0) });
       rows.wts = codes.map((c) => w.get(c) || 0); return rows;
     };
-    runJob('table', { type: 'table', codes, ilvl, rolls, ctx: ctxS, wopts }, null, (rows, err, m) => {
+    runJob('table', { type: 'table', codes, ilvl, rolls, ctx: ctxS, wopts, qualities: quals, diff }, null, (rows, err, m) => {
       if (!rows) { $('tinfo2').textContent = 'Error: ' + err; return; }
       bd.rows = rows; bd.wts = wopts ? (m ? m.wts : rows.wts) : null; bd.wlabel = wlabel;
       renderTable();
@@ -346,9 +354,9 @@
     box.className = '';
     box.innerHTML = bd.sel.map((s, i) => {
       const st = bd.stats.get(s.key);
-      return '<div class="selrow" data-i="' + i + '"><div class="nm"><span>' + esc(statText(s)) + '</span><button class="rm" title="remove">x</button></div>' +
+      return '<div class="selrow" data-i="' + i + '"><div class="nm"><span>' + esc(statText(s)) + '</span><button class="rm" title="remove">x</button></div>' + (st.flag ? '' :
         '<div class="ctl"><span>' + (st.le ? '&lt;=' : '&gt;=') + '</span><input type="number" class="thr" value="' + s.thr + '" min="' + st.min + '" max="' + st.max + '">' +
-        '<input type="range" class="thrr" min="' + st.min + '" max="' + st.max + '" step="1" value="' + s.thr + '"><small class="note">' + st.min + ' to ' + st.max + '</small></div></div>';
+        '<input type="range" class="thrr" min="' + st.min + '" max="' + st.max + '" step="1" value="' + s.thr + '"><small class="note">' + st.min + ' to ' + st.max + '</small></div>') + '</div>';
     }).join('');
   }
   let anTimer = null, farmTimer = null;
@@ -369,35 +377,38 @@
     bd.an = null; bd.farmQ = [];
     if (!bd.codes.length) { res.innerHTML = '<div class="note">No bases for this type / tier.</div>'; conf.innerHTML = ''; return; }
     if (!bd.sel.length) { res.innerHTML = '<div class="note">Select at least one affix to see the item levels and farm sources.</div>'; conf.innerHTML = ''; T2.rows = []; T2.render(); $('finfo2').textContent = ''; return; }
-    const an = bd.an = E.comboAnalysis(bd.codes, condsOf());
-    const forced = $('ql2').value, qs = forced ? [forced] : ['magic', 'rare'];
+    const an = bd.an = E.comboAnalysis(bd.codes, condsOf(), { diff: selDiff() });
+    const forced = $('ql2').value, qs = wantQ();
     bd.farmQ = qs.filter((q) => an[q].ok);
     // conflicts / quality decision
-    const msgs = [];
-    for (const q of ['magic', 'rare']) {
-      if (an[q].ok) continue;
-      msgs.push('<div class="bad"><b>' + QN[q] + ' not possible:</b> ' + an[q].why.map(esc).join(' ') + '</div>');
+    const msgs = [], feas = QS_ALL.filter((q) => an[q].ok);
+    const list = (qq) => qq.map((q) => QCOLN[q]).join(', ').replace(/, ([^,]*)$/, ' and $1');
+    if (!feas.length) for (const q of qs) msgs.push('<div class="bad"><b>' + QN[q] + ' not possible:</b> ' + an[q].why.map(esc).join(' ') + '</div>');
+    else {
+      for (const q of ['magic', 'rare']) if (!an[q].ok && (qs.indexOf(q) >= 0)) msgs.push('<div class="bad"><b>' + QN[q] + ' not possible:</b> ' + an[q].why.map(esc).join(' ') + '</div>');
+      msgs.push('<div class="good">Possible as ' + (feas.length === 1 ? 'a ' + QCOLN[feas[0]] + ' item only' : 'a ' + list(feas) + ' item') + '.</div>');
     }
-    if (an.magic.ok && an.rare.ok) msgs.push('<div class="good">Possible as a magic and as a rare item.</div>');
-    else if (an.magic.ok) msgs.push('<div class="good">Only a magic item can have this combination.</div>');
-    else if (an.rare.ok) msgs.push('<div class="good">Only a rare item can have this combination.</div>');
-    if (forced && !an[forced].ok && (forced === 'magic' ? an.rare.ok : an.magic.ok)) msgs.push('<div class="bad">Quality is restricted to ' + forced + '; set it to Auto to use the other quality.</div>');
+    if (forced && !an[forced].ok && feas.length) msgs.push('<div class="bad">Quality is restricted to ' + QCOLN[forced] + '; set it to Auto to use ' + list(feas) + '.</div>');
+    if (feas.some((q) => q === 'normal' || q === 'sup') && condsOf().some((c) => c.key === E.SOCK_KEY) && $('s_diff').value === '-1') msgs.push('<div class="note">Sockets of normal / superior items: levels shown for Hell (the difficulty selector says All); up to 3 sockets in Normal, 4 in Nightmare, 6 in Hell.</div>');
     conf.innerHTML = msgs.join('');
     // results panel
+    const mr = (q) => q === 'magic' || q === 'rare';
+    const shown = QS_ALL.filter((q) => forced ? (q === forced || (mr(forced) && mr(q))) : (an[q].ok || mr(q))), okq = shown.filter((q) => an[q].ok);
     const rows = [];
-    for (const q of ['magic', 'rare']) {
+    for (const q of shown) {
       const a = an[q];
       if (!a.ok) { rows.push('<tr><td class="l">' + QN[q] + '</td><td colspan="3" class="l bad">not possible</td></tr>'); continue; }
       rows.push('<tr><td class="l">' + QN[q] + '</td><td>' + a.minIl + ' <small>(' + esc(baseName(a.minIlCode)) + ')</small></td><td>' + (a.maxIl < 99 ? ilTxt(a.minIl, a.maxIl) : a.minIl + '+') + '</td><td>' + a.reqLv + ' <small>(' + esc(baseName(a.reqCode)) + ', item level ' + a.reqIl + ')</small></td></tr>');
     }
-    const first = (x) => (x.m.minIl || x.r.minIl || 999);
-    const perRows = bd.codes.map((c) => ({ c, m: an.magic.per.find((x) => x.code === c), r: an.rare.per.find((x) => x.code === c) }))
+    const pq = okq.length ? okq : ['magic', 'rare'];
+    const first = (x) => Math.min.apply(null, pq.map((q) => x[q].minIl || 999));
+    const perRows = bd.codes.map((c) => { const o = { c }; for (const q of pq) o[q] = an[q].per.find((x) => x.code === c); return o; })
       .sort((x, y) => (first(x) - first(y)) || E.items[x.c].q - E.items[y.c].q);
     const cell = (x) => x.ok ? ilTxt(x.minIl, x.maxIl) : '-';
     const rl = (x) => x.ok ? x.reqLv : '-';
     res.innerHTML = '<div class="tbl"><table><thead><tr><th class="l">Quality</th><th title="Lowest item level at which some base of the type can roll the whole combination">Lowest item level</th><th title="Item levels that work (a window with an upper bound exists when staff skills are involved: their tier depends on the item level)">Item level window</th><th class="l" title="max(base requirement, requirements of the cheapest affix tiers that satisfy the sliders)">Required character level</th></tr></thead><tbody>' + rows.join('') + '</tbody></table></div>' +
-      '<details><summary>Per base (' + bd.codes.length + ')</summary><div class="tbl small"><table id="tbbase"><thead><tr><th class="l">Base</th><th>qlvl</th><th class="l">Tier</th><th>Magic: item level</th><th>Magic: req lvl</th><th>Rare: item level</th><th>Rare: req lvl</th><th title="Share of the best farm source (per kill) that comes from this base">Best source: share</th></tr></thead><tbody>' +
-      perRows.map((x) => '<tr data-c="' + x.c + '"><td class="l">' + esc(baseName(x.c)) + '</td><td>' + E.items[x.c].q + '</td><td class="l">' + tierName(x.c) + '</td><td>' + cell(x.m) + '</td><td>' + rl(x.m) + '</td><td>' + cell(x.r) + '</td><td>' + rl(x.r) + '</td><td class="sh">-</td></tr>').join('') +
+      '<details><summary>Per base (' + bd.codes.length + ')</summary><div class="tbl small"><table id="tbbase"><thead><tr><th class="l">Base</th><th>qlvl</th><th class="l">Tier</th>' + pq.map((q) => '<th>' + QN[q] + ': item level</th><th>' + QN[q] + ': req lvl</th>').join('') + '<th title="Share of the best farm source (per kill) that comes from this base">Best source: share</th></tr></thead><tbody>' +
+      perRows.map((x) => '<tr data-c="' + x.c + '"><td class="l">' + esc(baseName(x.c)) + '</td><td>' + E.items[x.c].q + '</td><td class="l">' + tierName(x.c) + '</td>' + pq.map((q) => '<td>' + cell(x[q]) + '</td><td>' + rl(x[q]) + '</td>').join('') + '<td class="sh">-</td></tr>').join('') +
       '</tbody></table></div></details>';
     if (!bd.farmQ.length) { T2.rows = []; T2.render(); $('finfo2').textContent = ''; }
     showShares();
@@ -429,8 +440,8 @@
       const m = new Map();
       for (const q of qs) for (const r of rowsByQ[q]) {
         let x = m.get(r.src.key);
-        if (!x) { x = { src: r.src, pm: 0, pr: 0, pTotal: 0, perRun: 0, byBase: {} }; m.set(r.src.key, x); }
-        if (q === 'magic') x.pm = r.pTotal; else x.pr = r.pTotal;
+        if (!x) { x = { src: r.src, pq: {}, pTotal: 0, perRun: 0, byBase: {} }; m.set(r.src.key, x); }
+        x.pq[q] = r.pTotal;
         x.pTotal += r.pTotal; x.perRun += r.perRun;
         for (const c in r.byBase || {}) x.byBase[c] = (x.byBase[c] || 0) + r.byBase[c];
       }
@@ -502,7 +513,7 @@
   }
   function initTab2() {
     T2 = makeTable($('tb2'), cols2, 'ptot', -1);
-    TA = makeTable($('tb2a'), colsA, 'pm', -1);
+    TA = makeTable($('tb2a'), colsA, 'omagic', -1);
     TA.limit = 400;
     TA.rowCls = (r) => 'pick' + (r.avail ? '' : ' dim');
     TA.onRow = onPickRow;
@@ -511,7 +522,7 @@
     $('ilr2').addEventListener('input', () => { $('il2').value = $('ilr2').value; });
     $('ilr2').addEventListener('change', () => { syncUrl(); requestTable(); });
     $('il2').addEventListener('change', () => { effIlvl(); syncUrl(); requestTable(); });
-    $('ql2').addEventListener('change', () => { syncUrl(); updateAnalysis(); runFarm(); });
+    $('ql2').addEventListener('change', () => { TA.key = 'o' + ($('ql2').value || 'magic'); TA.dir = -1; syncUrl(); requestTable(); updateAnalysis(); runFarm(); });
     $('mc2').addEventListener('change', () => { requestTable(); changed(); });
     $('ar2').addEventListener('change', () => { fillMonsters(); requestTable(); changed(); });
     $('mo2').addEventListener('change', () => { requestTable(); changed(); });

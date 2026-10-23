@@ -1468,6 +1468,226 @@ def main():
     check("Chromatic-class automagic (auric shield, group 304): offered on magic, never on rare", 1 if (B["chromatic"]["magic"] > 0 and B["chromatic"]["rare"] == 0) else 0, 1, 0, str(B["chromatic"]))
     check("lower-is-better condition (le): -30 <= -20 holds, -30 >= -20 does not", B["le"]["reqLe"] + 10 * B["le"]["reqGe"], 1, 0)
     check("old deep link ?q2=Monarch&ql=magic&c=Socketed (#):4 resolves in the page: magic result, rare impossible", 1 if ("Magic" in js["deeplink"] and "77" in js["deeplink"] and "not possible" in js["deeplink"] and "sources" in js["deeplink"]) else 0, 1, 0, js["deeplink"][:160].replace(chr(10), " "))
+    # ---- low / normal / superior items: sockets, ethereal, superior bonus (independent reference from the raw tables and the D2MOO rules) ----
+    WH = js["white"]
+    class White:
+        """Written from the research notes (D2MOO Items.cpp sub_6FC4D6B0 / ITEMS_MakeEthereal, ItemsMagic.cpp sub_6FC54690, ItemMods.cpp ITEMMODS_CanItemBeHighQuality), reading the raw .txt tables."""
+        SOCK_CHANCE, ETH_CHANCE, DIFF_CAP = 0.33, 0.05, (3, 4, 6)
+        QI = rd("qualityitems")
+        OWN = {"shie": "shield", "scep": "scepter", "wand": "wand", "staf": "staff", "bow": "bow", "xbow": "bow", "boot": "boots", "glov": "gloves", "belt": "belt"}
+        PROP = {"ar": "att", "dm": "dmg%", "ed": "ac%", "dur": "dur%"}
+
+        def __init__(self, ref, rules):
+            self.ref, self.rules = ref, rules
+
+        def sock_dist(self, code, q, ilvl, diff):
+            r = self.ref.items[code]
+            N = 0
+            if q in ("normal", "sup") and not n(r.get("stackable")):
+                N = min(self.ref.max_sockets(code, ilvl), self.DIFF_CAP[diff])
+            if N <= 0:
+                return [1.0]
+            return [1 - self.SOCK_CHANCE] + [self.SOCK_CHANCE / N] * N
+
+        def eth_ok(self, code):
+            r = self.ref.items[code]
+            if r["_f"] == "misc":
+                return False
+            if n(r.get("durability")) > 0 and n(r.get("nodurability")) != 1:
+                return True
+            anc = self.ref.item_anc(code)
+            return "bow" in anc or "xbow" in anc            # the user's rule for bows / crossbows
+
+        def eth_p(self, code, q):
+            return self.ETH_CHANCE if q in ("normal", "sup", "magic", "rare", "unique", "crafted") and self.eth_ok(code) else 0.0
+
+        def sup_rows(self, code):
+            r = self.ref.items[code]
+            if r["_f"] == "misc":
+                return []
+            anc = self.ref.item_anc(code)
+            first = r["type"]
+            col = self.OWN.get(first)
+            thr = n(self.ref.types[first].get("Throwable"))
+            cnt = 4 if (thr or n(r.get("nodurability"))) else len(self.QI)
+            out = []
+            for i in range(cnt):
+                row = self.QI[i]
+                if col:
+                    ok = n(row[col]) == 1
+                elif "weap" in anc:
+                    ok = n(row["weapon"]) == 1
+                elif "armo" in anc:
+                    ok = n(row["armor"]) == 1
+                else:
+                    ok = False
+                if ok:
+                    out.append(i)
+            return out
+
+        @staticmethod
+        def ge(mn, mx, m):
+            return 1.0 if m <= mn else 0.0 if m > mx else (mx - m + 1) / (mx - mn + 1)
+
+        def prob(self, code, q, ilvl, diff, conds):
+            """conds: ('sock', m) ('eth', 1) ('ed'|'dm'|'ar'|'dur', m) ('auto', property, m) ('auto2', prop1, m1, prop2, m2); all sources independent"""
+            sd = self.sock_dist(code, q, ilvl, diff)
+            p = 1.0
+            sup = [c for c in conds if c[0] in self.PROP]
+            for c in conds:
+                if c[0] == "sock":
+                    p *= sum(sd[k] for k in range(len(sd)) if k >= c[1])
+                elif c[0] == "eth":
+                    p *= self.eth_p(code, q)
+            if sup:
+                rows = self.sup_rows(code) if q == "sup" else []
+                if not rows:
+                    return 0.0
+                tot = 0.0
+                for i in rows:
+                    row = self.QI[i]
+                    mods = [(row["mod%dcode" % k], n(row["mod%dmin" % k]), n(row["mod%dmax" % k])) for k in (1, 2) if row.get("mod%dcode" % k)]
+                    pr = 1.0
+                    for c in sup:
+                        best = 0.0
+                        for code_, mn, mx in mods:
+                            if code_ == self.PROP[c[0]]:
+                                best = max(best, self.ge(mn, mx, c[1]))
+                        pr *= best
+                    tot += pr / len(rows)
+                p *= tot
+            au = [c for c in conds if c[0] in ("auto", "auto2")]
+            if au:
+                pool = self.rules.pool(code, self.rules.alvl(code, ilvl), False, ilvl)["a"]
+                W = sum(a["w"] for a in pool)
+                tot = 0.0
+                for a in pool:
+                    pr = 1.0
+                    for c in au:
+                        pairs = [(c[1], c[2])] if c[0] == "auto" else [(c[1], c[2]), (c[3], c[4])]
+                        for pc, pm in pairs:
+                            pr *= self.rules.cond_p(a, [(pc, pm)])[0]
+                    tot += a["w"] / W * pr
+                p *= tot
+            return p
+
+    WHR = White(ref, RU)
+    for c in WH["cases"]:
+        conds = [tuple(x) for x in c["conds"]]
+        want = WHR.prob(c["code"], c["q"], c["ilvl"], c["diff"], conds)
+        check("white/superior: %s: engine == independent reference" % c["name"], c["p"], want, 1e-9)
+    CASE = {c["name"]: c["p"] for c in WH["cases"]}
+    # closed forms from the rules
+    check("white Monarch Hell ilvl 60: P(4 sockets) = 0.33 * 1/4", CASE["Monarch normal ilvl 60 Hell sockets >= 4"], 0.33 / 4, 1e-12)
+    check("white Monarch Hell ilvl 85: P(4 sockets) = 0.33 * 1/4 (same as ilvl 60)", CASE["Monarch normal ilvl 85 Hell sockets >= 4"], 0.33 / 4, 1e-12)
+    check("white Monarch Hell ilvl 30 (max 3): P(3 sockets) = 0.33 / 3", CASE["Monarch normal ilvl 30 Hell sockets >= 3"], 0.33 / 3, 1e-12)
+    check("white Monarch Hell ilvl 30: P(4 sockets) = 0", CASE["Monarch normal ilvl 30 Hell sockets >= 4"], 0)
+    check("white Monarch Nightmare ilvl 60 (cap 4): P(4 sockets) = 0.33 / 4", CASE["Monarch normal ilvl 60 Nightmare sockets >= 4"], 0.33 / 4, 1e-12)
+    check("white Monarch Normal difficulty (cap 3): P(3 sockets) = 0.33 / 3", CASE["Monarch normal ilvl 85 Normal sockets >= 3"], 0.33 / 3, 1e-12)
+    check("white Monarch Normal difficulty (cap 3): P(4 sockets) = 0", CASE["Monarch normal ilvl 85 Normal sockets >= 4"], 0)
+    check("white Monarch: P(socketed) = 0.33 flat", CASE["Monarch normal ilvl 60 Hell sockets >= 1"], 0.33, 1e-12)
+    check("low quality Monarch is never socketed", CASE["Monarch low ilvl 60 Hell sockets >= 1"], 0)
+    check("superior Monarch: P(4 sockets) = 0.33 / 4", CASE["Monarch superior ilvl 60 Hell sockets >= 4"], 0.33 / 4, 1e-12)
+    for cde in ("lbt", "lgl", "mbl", "jav", "tkf", "amu", "rin"):
+        check("%s (%s) is never socketed as a white item (no inventory / stackable / jewelry)" % (cde, ref.items[cde]["type"]), CASE["%s (no sockets possible) normal ilvl 85 Hell sockets >= 1" % cde], 0)
+    hi0 = [c_ for c_, r_ in ref.items.items() if r_["_f"] != "misc" and n(r_.get("hasinv")) and not n(r_.get("gemsockets")) and n(r_.get("spawnable"))]
+    info("bases with an inventory but gemsockets 0 (never socketed white / magic)", len(hi0), "-", ", ".join(hi0[:6]))
+    check("combined P(ethereal and 4 sockets | white Monarch ilvl 60 Hell) = 0.05 * 0.33 / 4", CASE["Monarch normal ilvl 60 Hell sockets >= 4 and ethereal"], 0.05 * 0.33 / 4, 1e-12)
+    for q in ("normal", "sup", "magic", "rare"):
+        check("ethereal 5%% on a %s Monarch" % q, CASE["Monarch %s ethereal" % q], 0.05, 1e-12)
+        check("ethereal 5%% on a %s Short Bow (bows can be ethereal)" % q, CASE["Short Bow sbw %s ethereal" % q], 0.05, 1e-12)
+    check("low quality Monarch is never ethereal", CASE["Monarch low ethereal"], 0)
+    check("low quality bow is never ethereal", CASE["Short Bow sbw low ethereal"], 0)
+    for cde in ("lxb", "am1"):
+        check("%s (crossbow / Amazon bow) can be ethereal: 5%%" % ref.items[cde]["type"], CASE["%s normal ethereal" % cde], 0.05, 1e-12)
+    check("Phase Blade (nodurability) is never ethereal", CASE["7cr normal ethereal"], 0)
+    check("amulet is never ethereal", CASE["amu normal ethereal"], 0)
+    check("javelin (durability, nodurability unset) follows the code rule: 5%", CASE["jav normal ethereal"], 0.05, 1e-12)
+    for k_, v_ in WH["ethChance"].items():
+        check("ethChance(Monarch, %s) = %s" % (k_, "5%" if k_ in ("normal", "sup", "magic", "rare", "unique") else "0 (never)"), v_, 0.05 if k_ in ("normal", "sup", "magic", "rare", "unique") else 0, 1e-12)
+    ethmis = [c_ for c_, e_ in WH["ethList"].items() if bool(e_) != WHR.eth_ok(c_)]
+    check("ethereal-eligible bases: engine == raw-table rule for all %d weapons and armor (mismatches)" % len(WH["ethList"]), len(ethmis), 0, 0, ", ".join(ethmis[:8]))
+    ethby = {}
+    for c_, e_ in WH["ethList"].items():
+        t_ = ref.items[c_]["type"]
+        ethby.setdefault(t_, [0, 0])[0 if e_ else 1] += 1
+    info("ethereal-eligible item types (bases eligible / not)", len([t_ for t_, v_ in ethby.items() if v_[0]]), "-", "; ".join("%s %d/%d" % (t_, v_[0], v_[1]) for t_, v_ in sorted(ethby.items()) if v_[0] or v_[1]))
+    # superior bonus rows
+    check("superior armor (Monarch): P(+% Enhanced Defense) = 2/3", CASE["Monarch (armor) superior +% enhanced defense >= 1"], 2 / 3, 1e-12)
+    check("superior weapon (Long Sword): P(+% Enhanced Damage) = 1/2", CASE["Long Sword superior +% enhanced damage >= 1"], 1 / 2, 1e-12)
+    check("superior bow (Short Bow): P(+% Enhanced Damage) = 2/3 (rows 1 and 3 of {0, 1, 3})", CASE["Short Bow superior +% enhanced damage >= 1"], 2 / 3, 1e-12)
+    check("superior armor: P(ED >= 15) = (2/3) * (1/11)", CASE["Monarch superior enhanced defense >= 15"], (2 / 3) / 11, 1e-12)
+    check("superior bow: no durability bonus (first 4 rows only)", CASE["Short Bow superior max durability >= 10"], 0)
+    check("superior Phase Blade (nodurability): no durability bonus", CASE["Phase Blade superior max durability >= 10"], 0)
+    check("superior javelin (throwable): no durability bonus", CASE["Javelin superior max durability >= 10"], 0)
+    check("superior Long Sword: attack rating AND enhanced damage together = row 3 = 1/6", CASE["Long Sword superior attack rating >= 1 and enhanced damage >= 5"], 1 / 6, 1e-12)
+    check("superior armor: ED >= 5 AND durability >= 10 = row 7 = 1/3", CASE["Monarch superior enhanced defense >= 5 and durability >= 10"], 1 / 3, 1e-12)
+    check("superior: three bonuses never come together (rows carry at most 2 mods): level check says not possible", 1 if WH["levels"]["threeRows"]["sup"] else 0, 0)
+    check("automagic on white / low / superior Paladin shields: same odds, equal to the reference pool", abs(CASE["pa5 low All Resistances >= 35 (automagic)"] - CASE["pa5 sup All Resistances >= 35 (automagic)"]) + abs(CASE["pa5 normal All Resistances >= 35 (automagic)"] - CASE["pa5 sup All Resistances >= 35 (automagic)"]), 0, 0)
+    # low quality staff mods are always +1
+    SL = WH["staffLow"]
+    sref1 = RU.staff("wnd", SL["ilvl"], SL["idx"], 1)
+    check("low quality wand: P(tier-5 staff skill) == reference (%s)" % SL["key"], SL["one"], sref1, 1e-9)
+    check("low quality wand: staff skill values are always +1: P(+2 or more) = 0", SL["two"], 0)
+    check("normal wand: P(staff skill >= +2) == reference", SL["normalTwo"], RU.staff("wnd", SL["ilvl"], SL["idx"], 2), 1e-9)
+    check("magic wand: P(staff skill >= +1) == reference (no automagic on wands interferes)", SL["magicOne"], RU.staff("wnd", SL["ilvl"], SL["idx"], 1), 1e-9)
+    check("magic wand: P(staff skill >= +2) == reference", SL["magicTwo"], RU.staff("wnd", SL["ilvl"], SL["idx"], 2), 1e-9)
+    ROWS.append(("PASS" if SL["one"] > 0 else "FAIL", "low quality wand gets staff skills at all (P > 0)", SL["one"], ">0", ""))
+    if not SL["one"] > 0: FAIL.append("low staff")
+    # per kill: the search result for a real source equals P(base quality) x the rule
+    PK = WH["perKill"]
+    def base_q(code, tc, mlvl):
+        tot = {"normal": 0.0, "sup": 0.0, "base": 0.0}
+        for (kind, cd, f), p in ref.dist(tc, mlvl, 1).items():
+            if kind != "i" or cd != code:
+                continue
+            qq = ref.quality(code, mlvl, 0, f)
+            rem = 1.0 - qq["unique"] - qq["set"] - qq["rare"] - qq["magic"]
+            row = ref.ratio_row(code)
+            q_ = n(ref.items[code]["level"])
+            ph = ref.succ(n(row["HiQuality"]), n(row["HiQualityDivisor"]), None, q_, mlvl, None, None, 0)
+            pn = ref.succ(n(row["Normal"]), n(row["NormalDivisor"]), None, q_, mlvl, None, None, 0)
+            hq = rem * ph
+            tot["sup"] += p * hq
+            tot["normal"] += p * (rem - hq) * pn
+            tot["base"] += p
+        return tot
+    bq = base_q("uit", PK["tc"], PK["mlvl"])
+    check("per kill (%s, %s): P(normal Monarch) engine == reference" % (PK["name"], PK["tc"]), PK["normal"], bq["normal"], 1e-9)
+    check("per kill: P(superior Monarch) engine == reference", PK["sup"], bq["sup"], 1e-9)
+    check("per kill: P(white Monarch with >= 4 sockets) = P(Monarch normal) * 0.33 / 4", PK["n4"], bq["normal"] * 0.33 / 4, 1e-9)
+    check("per kill: P(superior Monarch with >= 4 sockets) = P(Monarch superior) * 0.33 / 4", PK["s4"], bq["sup"] * 0.33 / 4, 1e-9)
+    check("per kill: P(white Monarch, 4 sockets, ethereal) = P(normal) * 0.33 / 4 * 0.05", PK["n4e"], bq["normal"] * 0.33 / 4 * 0.05, 1e-9)
+    check("per kill: low quality Monarch never socketed (search finds nothing)", PK["l1"], 0)
+    check("per kill: P(ethereal magic Monarch) = P(magic Monarch) * 0.05", PK["me"], PK["magic"] * 0.05, 1e-9)
+    # feasibility / levels
+    LV = WH["levels"]
+    check("Monarch with 4 sockets (Hell): possible as normal, superior, magic; not low, not rare", 1 if (LV["sock4"]["normal"] and LV["sock4"]["sup"] and LV["sock4"]["magic"] and not LV["sock4"]["low"] and not LV["sock4"]["rare"]) else 0, 1, 0, str(LV["sock4Il"]))
+    check("Monarch 4 sockets: white at item level 72 (elite base level), magic at 77 (Jeweler's affix level 55)", 1 if (LV["sock4Il"]["normal"][0] == 72 and LV["sock4Il"]["sup"][0] == 72 and LV["sock4Il"]["magic"][0] == 77) else 0, 1, 0)
+    check("Monarch 4 sockets in Normal difficulty: white impossible (cap 3), magic still possible", 1 if (not LV["sock4Normal"]["normal"] and not LV["sock4Normal"]["sup"] and LV["sock4Normal"]["magic"]) else 0, 1, 0)
+    check("Monarch 3 sockets in Normal difficulty: white possible", 1 if (LV["sock3Normal"]["normal"] and LV["sock3Normal"]["sup"]) else 0, 1, 0)
+    check("ethereal bow: possible as normal, superior, magic, rare; not low", 1 if (LV["ethBow"]["normal"] and LV["ethBow"]["sup"] and LV["ethBow"]["magic"] and LV["ethBow"]["rare"] and not LV["ethBow"]["low"]) else 0, 1, 0)
+    check("ethereal Monarch: not low quality", 1 if (not LV["ethMonarch"]["low"] and LV["ethMonarch"]["normal"]) else 0, 1, 0)
+    check("rings are never normal / superior / low: socket condition impossible in every quality", sum(1 for v_ in LV["ringSock"].values() if v_), 0)
+    check("ED >= 5 and max durability >= 10 on a Monarch: only a superior item (row 7)", 1 if (LV["edDur"]["sup"] and not LV["edDur"]["normal"] and not LV["edDur"]["magic"]) else 0, 1, 0)
+    # known facts
+    FA = WH["facts"]
+    def fact(name, ok, note=""):
+        ROWS.append(("PASS" if ok else "FAIL", "known fact: " + name, 1 if ok else 0, 1, note))
+        if not ok: FAIL.append("fact " + name)
+    fact("a magic Monarch with Jeweler's can have 4 sockets", FA["jewelerMagic4"] > 0, "P = %.5f at item level 85" % FA["jewelerMagic4"])
+    fact("a rare Monarch gets at most 2 sockets (from affixes): P(>= 1) > 0, P(>= 3) = 0", FA["rareSock1"] > 0 and FA["rareSock3"] == 0, "P(>= 1) = %.4f" % FA["rareSock1"])
+    fact("socketed white and superior bases drop (Monarch, sources found: %d / %d)" % (FA["whiteDrops"]["normalSock"], FA["whiteDrops"]["supSock"]), FA["whiteDrops"]["normalSock"] > 0 and FA["whiteDrops"]["supSock"] > 0)
+    fact("no ethereal set items (ethChance(set) = 0, 'Ethereal' row offers no set quality)", WH["ethChance"]["set"] == 0 and "set" not in FA["ethSetQuals"])
+    fact("Chromatic never on a rare Paladin shield (0 of %d bases), but on magic ones (%d)" % (FA["chromatic"]["bases"], FA["chromatic"]["magic"]), FA["chromatic"]["rare"] == 0 and FA["chromatic"]["magic"] == FA["chromatic"]["bases"])
+    fact("Archer's / Lancer's never on rare Amazon weapons (0 of %d), but on magic ones (%d)" % (FA["archer"]["bases"], FA["archer"]["magic"]), FA["archer"]["rare"] == 0 and FA["archer"]["magic"] == FA["archer"]["bases"])
+    fact("of Anthrax never on rare Necromancer heads (0 of %d), but on magic ones (%d)" % (FA["anthrax"]["bases"], FA["anthrax"]["magic"]), FA["anthrax"]["rare"] == 0 and FA["anthrax"]["magic"] == FA["anthrax"]["bases"])
+    fact("Great Wyrm's / of the Colossus never on rare orbs (0 of %d), but on magic ones (%d); Wyrm's is allowed on rares (%d)" % (FA["orbs"]["bases"], FA["orbs"]["magic"], FA["orbs"]["wyrmRare"]), FA["orbs"]["rare"] == 0 and FA["orbs"]["magic"] == FA["orbs"]["bases"] and FA["orbs"]["wyrmRare"] == FA["orbs"]["bases"])
+    fact("an orb cannot have both a life and a mana automagic (P both = 0; each alone > 0)", FA["orbLifeMana"]["both"] == 0 and FA["orbLifeMana"]["life"] > 0 and FA["orbLifeMana"]["mana"] > 0, "life %.3f, mana %.3f" % (FA["orbLifeMana"]["life"], FA["orbLifeMana"]["mana"]))
+    fact("Paladin shield automagic Knight's gives both +Attack Rating and +Enhanced Damage in one row, and is allowed on rares", FA["knight"]["rareRow"] == [["+# to Attack Rating", "+#% Enhanced Damage"]] and FA["knight"]["normalBoth"] > 0 and FA["knight"]["rareBoth"] > 0, "P(both | normal) = %.4f" % FA["knight"]["normalBoth"])
+    fact("Mephisto (Hell) drops Harlequin Crest", FA["drops"]["hc"] > 0, "1 in %.0f" % (1 / FA["drops"]["hc"]))
+    fact("Andariel (Hell) drops Talic's Anguish (ua1)", FA["drops"]["ua1"] > 0, "1 in %.1f" % (1 / FA["drops"]["ua1"]))
+    fact("the Summoner (Hell) drops the Key of Hate (pk2)", FA["drops"]["pk2"] > 0, "1 in %.1f" % (1 / FA["drops"]["pk2"]))
     # ---- print
     w = max(len(r[1]) for r in ROWS)
     for st, name, got, want, note in ROWS:

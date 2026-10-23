@@ -52,9 +52,9 @@
   .b2grid > .box { margin-bottom:0; min-width:0; }
   #selbox { position:sticky; top:8px; }
   .b2grid .tbl.small { max-height:max(420px, 64vh); }
-  #tb2a td.l:first-child { min-width:120px; } #tb2a td:nth-child(2) { min-width:200px; }   /* affix name and description */
+  #tb2a td.l:first-child { min-width:120px; } #tb2a td:nth-child(2) { min-width:200px; } #tb2a td:nth-child(8) { white-space:nowrap; }   /* affix name and description */
   #tb2a th, #tb2a td { padding:3px 6px; }
-  @media (max-width:1500px) { th, td { padding:3px 6px; } }
+  @media (max-width:1500px) { th, td { padding:3px 6px; } #tb2a td.l:first-child { min-width:100px; } #tb2a td:nth-child(2) { min-width:150px; } }
   .tbl.small { max-height:52vh; }
   tr.dim td { color:var(--dim); opacity:.6; } tr.pick { cursor:pointer; }
   .chk { flex-direction:row !important; align-items:center; gap:5px !important; font-size:12px !important; color:var(--text) !important; }
@@ -65,7 +65,7 @@
   .bad { color:var(--bad); } .good { color:var(--good); }
   .lnk { display:flex; flex-direction:column; font-size:11px; color:var(--dim); gap:2px; margin-top:6px; } .lnk input { width:100%; }
   details summary { cursor:pointer; color:var(--accent); margin:6px 0; }
-  .side { font-size:11px; padding:0 5px; border-radius:8px; background:var(--panel2); } .side.prefix { color:#8ab4ff; } .side.suffix { color:#7fe0c0; } .side.auto { color:#e6c34d; } .side.staff { color:#ff8f6a; }
+  .side { font-size:11px; padding:0 5px; border-radius:8px; background:var(--panel2); } .side.prefix { color:#8ab4ff; } .side.suffix { color:#7fe0c0; } .side.auto { color:#e6c34d; } .side.staff { color:#ff8f6a; } .side.socket { color:#c9a0ff; } .side.ethereal { color:#9ad7ff; } .side.superior { color:#d9d9d9; }
   @media (max-width:860px) { .b2grid { grid-template-columns:minmax(0,1fr); } #selbox { position:static; } }
   @media (max-width:600px) { header, nav, main { padding-left:16px; padding-right:16px; } nav { flex-wrap:wrap; } nav button { padding:6px 9px; } .ac input { width:100%; } .row > label { min-width:0; } .row .ac { max-width:100%; } }
 </style>
@@ -117,7 +117,7 @@
       <label title="Only the bases of this tier (armor and weapons); jewelry, charms and jewels have no tiers">Tier <select id="tr2"><option value="-1">All</option><option value="0">Normal</option><option value="1">Exceptional</option><option value="2">Elite</option></select></label>
       <label title="The item level the affix table below is evaluated at (which affixes can roll, their odds). The results panel does not depend on it: it tells you the item levels that work.">Item level (affix table)
         <span class="il"><input type="number" id="il2" min="1" max="99" value="85"><input type="range" id="ilr2" min="1" max="99" value="85"></span></label>
-      <label title="Auto: magic and/or rare, whatever the selection allows (a magic item has at most 1 prefix and 1 suffix)">Quality <select id="ql2"><option value="">Auto (magic and/or rare)</option><option value="magic">Magic only</option><option value="rare">Rare only</option></select></label>
+      <label title="Auto: every quality the selection allows (low, normal, superior, magic, rare). A magic item has at most 1 prefix and 1 suffix; normal, superior and low quality items have no prefixes or suffixes (only sockets, ethereal, the superior bonus, the automagic row and staff skills)">Quality <select id="ql2"><option value="">Auto (all that fit)</option><option value="low">Low quality</option><option value="normal">Normal (white)</option><option value="sup">Superior</option><option value="magic">Magic only</option><option value="rare">Rare only</option></select></label>
       <label title="Rare odds are Monte Carlo (magic is exact). Applies to the farm search; the affix table uses a similar number of rolls per base.">Monte Carlo rolls (rare) <select id="mc2"><option>20000</option><option selected>50000</option><option>200000</option></select></label>
       <label title="Choosing an area weights the affix-table odds by how often each base drops there (and limits the farm search to it)">Area <select id="ar2"><option value="">All areas</option></select></label>
       <label title="Optional: one monster / source in the chosen area (weights the affix-table odds and limits the farm search to it)">Monster <select id="mo2" disabled><option value="">All sources</option></select></label>
@@ -128,7 +128,7 @@
       <div class="box">
         <div class="row">
           <label>Filter affixes <input id="f2" placeholder="name, stat or class text" style="width:200px"></label>
-          <label>Side <select id="sd2"><option value="">All</option><option>prefix</option><option>suffix</option><option>auto</option><option>staff</option></select></label>
+          <label>Side <select id="sd2"><option value="">All</option><option>prefix</option><option>suffix</option><option>auto</option><option>staff</option><option>socket</option><option>ethereal</option><option>superior</option></select></label>
           <label class="chk"><input type="checkbox" id="av2"> available at this item level</label>
         </div>
         <div class="note" id="tinfo2"></div>

@@ -60,6 +60,28 @@
     //     after the regular affixes of an inferior/normal/superior/magic/rare/crafted item (not unique/set) ITEMS_RollMagicAffixes(pItem, 0, 1, 0,
     //     1, 0, wAutoPrefix) picks one row of the item's auto group: spawnable NOT required (bRequireSpawnableAffix = 0), forced roll, the usual
     //     level / maxlevel / itype / etype / class / frequency checks, and on a RARE item only rows with rare = 1.
+    // --- low / normal / superior items: sockets, ethereal, superior bonus (D2MOO D2Game/src/ITEMS/ItemMode.cpp sub_6FC4C5F0_End, ~line 6269) ---
+    //     order: quality + its bonus (superior row / low-quality penalties), then ITEMS_MakeEthereal, then sockets (sub_6FC4D6B0, quality 2..3 only), then automagic.
+    nonMagic: {
+      // sockets (Items.cpp sub_6FC4D6B0): quality normal (2) and superior (3) only; low (1) returns at the first line; magic and rare get sockets only through
+      // the socket affixes. The item needs hasinv (ITEMS_CheckIfSocketable) and may not be stackable (javelins, throwing weapons, quivers). Then
+      // nMaxSockets = ITEMS_GetMaxSockets (type MaxSockets by item level 25 / 40, min the base's gemsockets, and inventory size) capped by the game
+      // difficulty (Normal 3, Nightmare 4, Hell 6); chance `ITEMS_RollRandomNumber(seed) % 100 < 33` = 33% flat (no ALWAYSSOCKETS / NOSOCKETS flag is set by
+      // monster drops); count = StartSeed % nMaxSockets + 1 = uniform 1..nMaxSockets.
+      socketChance: 0.33, diffSocketCap: [3, 4, 6],
+      // ethereal (Items.cpp ITEMS_MakeEthereal): 5% flat (`% 100 < 5`), independent of the sockets (ethereal is applied first, sockets never look at the flag).
+      // Weapons and armor with ITEMS_HasDurability (!nodurability && durability != 0); not low quality, not set items; allowed on normal, superior, magic,
+      // rare, unique (and crafted, not modelled).
+      ethChance: 0.05, ethQualities: ['normal', 'sup', 'magic', 'rare', 'unique', 'crafted'],
+      // EXCEPTION (player knowledge, contrary to the D2MOO reading): D2R's tables mark every bow, crossbow and Amazon bow `nodurability` = 1, which by the
+      // 1.10 rule makes them unable to be ethereal, but ethereal bows and crossbows do drop in D2R. true = bows / crossbows (types bow, xbow, abow) can be
+      // ethereal. Other nodurability items (Phase Blade, throwing potions) follow the code rule and never are.
+      ethBowsAndCrossbows: true,
+      // superior bonus (ItemsMagic.cpp sub_6FC54690, ITEMMODS_CanItemBeHighQuality in D2Common ItemMods.cpp): exactly ONE qualityitems.txt row, uniform among
+      // the eligible rows; nodurability or throwable items only consider the first 4 rows (build.py exports each item's eligible rows as `sq` and the rows as
+      // data.qi). A row carries up to 2 mods, each a uniform integer min..max. Low quality (sub_6FC55270): never sockets, never ethereal, staff mods always +1.
+      lowStaffValue: 1,
+    },
     // --- monster rank level offsets (data guide: "The unique monster bonus can go over [the TZ max]") ---
     champOffset: 2, uniqueOffset: 3, minionOffset: 3,
     // --- ladder: current ladder season used for first/lastLadderSeason gating ---
@@ -882,21 +904,21 @@
     /** Exact distribution of the staff mod outcome as a bitmask of satisfied conditions: [{p, mask}] (bit i = conds[i] met by a staff skill
      *  with value >= min). Enumerates the game's draw sequence (sub_6FC52650) exactly, including skill repeats prevention and the
      *  all-tries-failed fallback, collapsing states that differ only in irrelevant skills' values. */
-    function staffDist(code, base, conds) {
+    function staffDist(code, base, conds, low) {
       const triv = [{ p: 1, mask: 0 }];
       const L = staffSkills(code);
       if (!L) return triv;
       const rel = new Map();   // skill idx -> [[cond index, min]]
       conds.forEach((c, i) => { for (const s of L) if (s.k === c.key) { if (!rel.has(s.idx)) rel.set(s.idx, []); rel.get(s.idx).push([i, c.min]); } });
       if (!rel.size) return triv;
-      const ck = code + '|' + base + '|' + JSON.stringify(conds.map((c) => [c.key, c.min]));
+      const ck = code + '|' + base + '|' + (low ? 'L' : '') + JSON.stringify(conds.map((c) => [c.key, c.min]));
       if (staffCache.has(ck)) return staffCache.get(ck);
       const SM = CONFIG.staffMods;
       const tiers = new Map();
       for (const [pc, sh] of SM.tierShift) { const t = Math.max(1, base + sh); tiers.set(t, (tiers.get(t) || 0) + pc / 100); }
       const stateKey = (st) => st.ids.join(',') + '|' + st.vals.map((v) => v[0] + ':' + v[1]).join(',');
       const post = (st, idx, p, out) => {   // the stat is set on the item: the value roll, overwriting an equal skill
-        const vals = rel.has(idx) ? SM.value : [[100, 0]];
+        const vals = rel.has(idx) ? (low ? [[100, CONFIG.nonMagic.lowStaffValue]] : SM.value) : [[100, 0]];
         for (const [pv, v] of vals) {
           let nv = st.vals;
           if (rel.has(idx)) nv = st.vals.filter((x) => x[0] !== idx).concat([[idx, v]]).sort((x, y) => x[0] - y[0]);
@@ -931,6 +953,86 @@
       return res;
     }
 
+    // ---------------- low / normal / superior items: sockets, ethereal, superior bonus (see CONFIG.nonMagic) ----------------
+    const SOCK_KEY = 'Socketed (#)', ETH_KEY = 'Ethereal';   // stat keys (the property descriptions of `sock` and `ethereal`)
+    const QUALS = ['low', 'normal', 'sup', 'magic', 'rare'];   // the qualities the builder knows
+    const QFIELD = { low: 'low', normal: 'normal', sup: 'hq', magic: 'magic', rare: 'rare' };   // quality() field of each
+    const QLABEL = { low: 'low quality', normal: 'normal', sup: 'superior', magic: 'magic', rare: 'rare' };
+    const isPlain = (q) => q === 'low' || q === 'normal' || q === 'sup';   // no prefixes / suffixes, only the base's own bonuses
+    const supRowsOf = (code) => items[code].sq || [];
+    /** can an item of this base be of the quality at all (structure, not odds) */
+    function qualityPossible(code, q) {
+      const it = items[code];
+      if (!it || it.nq || it.an) return false;
+      if (q === 'magic') return true;
+      if (q === 'rare') return !!it.cr;
+      if (it.am) return false;                       // rings, amulets, charms, jewels are never white
+      if (q === 'sup') return it.k !== 'm' && supRowsOf(code).length > 0;
+      return true;                                    // low / normal
+    }
+    /** weapons and armor with durability (ITEMS_HasDurability), plus bows / crossbows by the CONFIG exception */
+    function ethItem(code) {
+      const it = items[code];
+      if (it.k === 'm') return false;
+      if (it.hd) return true;
+      return !!CONFIG.nonMagic.ethBowsAndCrossbows && (it.anc.indexOf('bow') >= 0 || it.anc.indexOf('xbow') >= 0);
+    }
+    /** P(ethereal) of a base at a final quality (low and set never; CONFIG.nonMagic.ethQualities) */
+    function ethChance(code, q) {
+      return ethItem(code) && CONFIG.nonMagic.ethQualities.indexOf(q) >= 0 ? CONFIG.nonMagic.ethChance : 0;
+    }
+    /** most sockets a normal / superior drop of this base can get: ITEMS_GetMaxSockets (maxSockets) capped by the game difficulty; 0 = never socketed.
+     *  diff: 0 Normal / 1 Nightmare / 2 Hell (undefined or -1 = Hell, the most permissive). */
+    function plainSocketMax(code, ilvl, diff) {
+      const it = items[code];
+      if (it.st) return 0;   // stackable: javelins, throwing weapons, quivers
+      const d = diff === undefined || diff === null || diff < 0 ? 2 : diff;
+      return Math.min(maxSockets(code, ilvl === undefined || ilvl === null ? 99 : ilvl), CONFIG.nonMagic.diffSocketCap[d]);
+    }
+    /** P(k sockets), k = 0..max, of a normal or superior drop of this base (other qualities: no sockets from this rule) */
+    function plainSocketDist(code, q, ilvl, diff) {
+      const N = q === 'normal' || q === 'sup' ? plainSocketMax(code, ilvl, diff) : 0;
+      const out = [1];
+      if (N > 0) { const c = CONFIG.nonMagic.socketChance; out[0] = 1 - c; for (let k = 1; k <= N; k++) out.push(c / N); }
+      return out;
+    }
+    const orConv = (A, B) => {   // distribution of a bitmask that is the OR of two independent ones: [{p, mask}] x [{p, mask}]
+      const m = new Map();
+      for (const a of A) for (const b of B) { const k = a.mask | b.mask; m.set(k, (m.get(k) || 0) + a.p * b.p); }
+      return Array.from(m, ([mask, p]) => ({ p, mask }));
+    };
+    /** Distribution of which conditions the NON-affix sources meet, as [{p, mask}] (bit i = conds[i] met): the socket roll (normal / superior), the ethereal
+     *  roll, the superior bonus row. All independent. sig identifies the inputs for caching ('' when no condition concerns these sources). */
+    function extrasDist(code, q, ilvl, diff, conds) {
+      const it = items[code], nc = conds.length;
+      let dist = [{ p: 1, mask: 0 }], sig = '';
+      const bits = (pred) => { let m = 0; for (let i = 0; i < nc; i++) if (!conds[i].le && pred(conds[i])) m |= 1 << i; return m; };
+      const sockBits = bits((c) => c.key === SOCK_KEY), ethBits = bits((c) => c.key === ETH_KEY);
+      if (sockBits && (q === 'normal' || q === 'sup')) {
+        const sd = plainSocketDist(code, q, ilvl, diff), m = new Map();
+        sd.forEach((p, k) => { let mask = 0; for (let i = 0; i < nc; i++) if ((sockBits >> i) & 1 && conds[i].min <= k) mask |= 1 << i; m.set(mask, (m.get(mask) || 0) + p); });
+        dist = orConv(dist, Array.from(m, ([mask, p]) => ({ p, mask })));
+        sig += 's' + (sd.length - 1);
+      }
+      const pe = ethChance(code, q);
+      if (ethBits && pe > 0) { dist = orConv(dist, [{ p: pe, mask: ethBits }, { p: 1 - pe, mask: 0 }]); sig += 'e' + pe; }
+      if (q === 'sup' && supRowsOf(code).length) {
+        const rows = supRowsOf(code), parts = [];
+        const rowBits = rows.map((r) => conds.map((c) => (c.le ? 0 : condProb({ mods: D.qi[r] }, c))));
+        if (rowBits.some((b) => b.some((x) => x > 0))) {
+          const m = new Map();
+          rows.forEach((r, ri) => {
+            let states = [{ p: 1 / rows.length, mask: 0 }];
+            rowBits[ri].forEach((pb, i) => { if (pb > 0) states = orConv(states, pb >= 1 ? [{ p: 1, mask: 1 << i }] : [{ p: pb, mask: 1 << i }, { p: 1 - pb, mask: 0 }]); });
+            for (const st of states) m.set(st.mask, (m.get(st.mask) || 0) + st.p);
+          });
+          dist = orConv(dist, Array.from(m, ([mask, p]) => ({ p, mask })));
+          sig += 'u' + rows.join('');
+        }
+      }
+      return { dist, sig };
+    }
+
     function condProb(a, c) {
       // probability that affix a rolls the condition stat >= min
       let best = 0;
@@ -961,8 +1063,10 @@
       const el = eligible(code, alvl, quality_ === 'rare', ilvl);
       if (!el.sig) el.sig = el.p.map((a) => a.i + ':' + a.f + (a.mods[0] && a.mods[0][0] === 'sock' ? 's' + a.mods[0][3] : '')).join(',') + '/' + el.s.map((a) => a.i + ':' + a.f + (a.mods[0] && a.mods[0][0] === 'sock' ? 's' + a.mods[0][3] : '')).join(',') + '/' + el.auto.map((a) => a.g + a.n + ':' + a.f).join(',');
       const sbase = staffBase(ilvl === null ? 99 : ilvl);
-      const sd = staffDist(code, sbase, conds);
-      const sk = sd.length === 1 && sd[0].mask === 0 ? '' : code + sbase;
+      const sd0 = staffDist(code, sbase, conds, quality_ === 'low');
+      const ex = extrasDist(code, quality_, ilvl === null ? 99 : ilvl, opts && opts.diff, conds);   // sockets of white items, ethereal, superior bonus
+      const sd = ex.dist.length === 1 && ex.dist[0].mask === 0 ? sd0 : orConv(sd0, ex.dist);
+      const sk = (sd0.length === 1 && sd0[0].mask === 0 ? '' : code + sbase) + '|' + ex.sig;
       // identical affix pools (different alvl) share one result
       const ck = [items[code].t === 'jewl' ? 'J' : '', items[code].cs ? code : '', quality_, rolls, seed, JSON.stringify(conds), el.sig, sk].join('|');
       if (affCache.has(ck)) return affCache.get(ck);
@@ -975,7 +1079,18 @@
         let W = 0; for (const a of el.auto) W += a.f;
         autoList = el.auto.map((a) => ({ w: a.f / W, c: cp(a) }));
       } else autoList = [{ w: 1, c: new Array(nc).fill(0) }];
-      if (quality_ === 'magic') {
+      if (isPlain(quality_)) {
+        // low / normal / superior: no prefixes or suffixes; the conditions are met by the staff mods, the extras (sockets, ethereal, superior bonus) and the automagic row
+        let total = 0;
+        for (const st of sd) {
+          for (const au of autoList) {
+            let q = 1;
+            for (let i = 0; i < nc && q > 0; i++) if (!((st.mask >> i) & 1)) q *= au.c[i];
+            total += st.p * au.w * q;
+          }
+        }
+        res = total;
+      } else if (quality_ === 'magic') {
         const split = CONFIG.magicSplit;
         let both = split.both, po = split.prefixOnly, so = split.suffixOnly;
         if (!el.p.length && !el.s.length) { res = 0; affCache.set(ck, res); return res; }
@@ -1108,13 +1223,13 @@
     function minLevels(code, quality_, conds) {
       const it = items[code];
       const L = staffSkills(code);
-      const maxVal = Math.max.apply(null, CONFIG.staffMods.value.map((v) => v[1]));
+      const maxVal = quality_ === 'low' ? CONFIG.nonMagic.lowStaffValue : Math.max.apply(null, CONFIG.staffMods.value.map((v) => v[1]));
       const out = [];
       for (const c of conds) {
         let found = null, foundIl = null;
         for (let al = 1; al <= 99; al++) {
           const el = eligible(code, al, quality_ === 'rare');
-          const lists = [el.p, el.s, el.auto];
+          const lists = isPlain(quality_) ? [el.auto] : [el.p, el.s, el.auto];
           let ok = false;
           for (const Ls of lists) for (const a of Ls) if (condProb(a, c) > 0) { ok = true; break; }
           if (ok) { found = al; foundIl = minIlvlForAlvl(it, al); break; }
@@ -1147,7 +1262,7 @@
       const set = new Map();
       for (const code of codes) {
         const el = eligible(code, 99, quality_ === 'rare');
-        for (const L of [el.p, el.s, el.auto]) for (const a of L) for (const m of a.mods) {
+        for (const L of (isPlain(quality_) ? [el.auto] : [el.p, el.s, el.auto])) for (const a of L) for (const m of a.mods) {
           const cur = set.get(m[4]) || { key: m[4], min: m[2], max: m[3], text: describe(m[4], m[2], m[3]) };
           if (m[3] > cur.max) cur.max = m[3];
           if (m[2] < cur.min) cur.min = m[2];
@@ -1174,7 +1289,7 @@
      *  o = {codes, quality:'magic'|'rare', conds:[{key,min}], mf, diff(-1 all), act(0 all), area(0 all), rolls}  */
     function affixSearch(ctx, o, progress) {
       const codes = new Set(o.codes);
-      const qn = o.quality;
+      const qn = o.quality, qf = QFIELD[qn];
       let srcs = sources(ctx).filter((s) => (o.diff < 0 || s.diff === o.diff) && (!o.act || s.act === o.act) && (!o.area || s.area === o.area) && (!o.srcKey || s.key === o.srcKey));
       const recs = [];
       const need = new Map();
@@ -1187,21 +1302,21 @@
           if (meta.kind !== 'i' || !codes.has(meta.id)) continue;
           const code = meta.id;
           const q = adjQuality(quality(code, src.mlvl, o.mf, meta.f, ctx.ladder, src.diff), src);
-          const w = p * q[qn];
+          const w = p * q[qf];
           pbase += p;
           if (w <= 0) continue;
           pq += w;
           const alvl = affixLevel(src.mlvl, items[code]);
-          const pk = code + '|' + alvl + '|' + staffBase(src.mlvl) + '|' + maxSockets(code, src.mlvl);   // staff mods depend on the drop's item level, not the affix level
+          const pk = code + '|' + alvl + '|' + staffBase(src.mlvl) + '|' + maxSockets(code, src.mlvl) + '|' + (qn === 'normal' || qn === 'sup' ? plainSocketMax(code, src.mlvl, src.diff) : 0);   // staff mods depend on the drop's item level, not the affix level; sockets of white items on the difficulty
           parts.set(pk, (parts.get(pk) || 0) + w);
-          need.set(pk, [code, alvl, src.mlvl]);
+          need.set(pk, [code, alvl, src.mlvl, src.diff]);
         }
         if (pq > 0) recs.push({ src, parts, pbase, pq });
       }
       const probs = new Map();
       let done = 0;
-      for (const [pk, [code, alvl, ilvl]] of need) {
-        probs.set(pk, o.prune && !planCombo(code, ilvl, qn, o.conds).ok ? 0 : affixProb(code, alvl, qn, o.conds, { rolls: o.rolls, ilvl }));   // prune: structurally impossible pools are exactly 0
+      for (const [pk, [code, alvl, ilvl, diff]] of need) {
+        probs.set(pk, o.prune && !planCombo(code, ilvl, qn, o.conds, { diff }).ok ? 0 : affixProb(code, alvl, qn, o.conds, { rolls: o.rolls, ilvl, diff }));   // prune: structurally impossible pools are exactly 0
         done++;
         if (progress && (done % 3 === 0 || done === need.size)) progress(done, need.size);
       }
@@ -1289,6 +1404,7 @@
         const it = items[code], cls = itemClasses(it);
         const mk = (side, a) => () => ({
           side, name: a.dn || a.n, lvl: a.lvl, lr: a.lr, cls: a.cls || '', rare: !!a.rare, g: a.g, groupName: groupName(a.g), maxLvl: a.max || 0,
+          quals: side === 'auto' ? ['low', 'normal', 'sup', 'magic'].concat(a.rare ? ['rare'] : []) : a.rare ? ['magic', 'rare'] : ['magic'],
           mods: a.mods.map((m) => m[0] === 'sock' ? { key: m[4], min: Math.max(1, Math.min(m[2] || +m[1] || 0, socketHi)), max: Math.max(1, Math.min(m[3] || +m[1] || 0, socketHi)) } : { key: m[4], min: m[2], max: m[3] }),
         });
         const okAt = (a, il) => { const al = affixLevel(il, it); return a.lvl <= al && (!a.max || a.max >= al) && (!(a.mods.length && a.mods[0][0] === 'sock') || maxSockets(code, il) > 0); };
@@ -1307,10 +1423,15 @@
           const vs = CONFIG.staffMods.value.map((v) => v[1]);
           for (const s of L) {
             if (!s.ok) continue;
-            put('k' + s.k, () => ({ side: 'staff', name: 'Staff skill', lvl: null, lr: null, cls: '', rare: true, g: 0, groupName: '', maxLvl: 0, tier: tierOf(s.idx), mods: [{ key: s.k, min: Math.min.apply(null, vs), max: Math.max.apply(null, vs) }] }),
+            put('k' + s.k, () => ({ side: 'staff', name: 'Staff skill', lvl: null, lr: null, cls: '', rare: true, quals: QUALS, g: 0, groupName: '', maxLvl: 0, tier: tierOf(s.idx), mods: [{ key: s.k, min: Math.min.apply(null, vs), max: Math.max.apply(null, vs) }] }),
               code, ilRange(code, (il) => staffTiersAt(il).has(tierOf(s.idx))));
           }
         }
+        // sockets of white items, ethereal, superior bonus rows (CONFIG.nonMagic): no affix level, no slot, no group
+        const extra = (id, side, name, quals, mods, rng) => put(id, () => ({ side, name, lvl: null, lr: null, cls: '', rare: true, quals, g: 0, groupName: '', maxLvl: 0, tier: 0, mods }), code, rng);
+        if (qualityPossible(code, 'normal') && plainSocketMax(code, 99, 2) > 0) extra('xsock', 'socket', 'Sockets (normal / superior)', ['normal', 'sup'], [{ key: SOCK_KEY, min: 1, max: Math.max(1, socketHi) }], ilRange(code, (il) => plainSocketMax(code, il, 2) > 0));
+        if (ethItem(code)) extra('xeth', 'ethereal', 'Ethereal', CONFIG.nonMagic.ethQualities.filter((q) => QUALS.indexOf(q) >= 0), [{ key: ETH_KEY, min: 1, max: 1 }], ilRange(code, () => true));
+        if (qualityPossible(code, 'sup')) for (const r of supRowsOf(code)) extra('xsup' + r, 'superior', 'Superior bonus', ['sup'], D.qi[r].map((m) => ({ key: m[4], min: m[2], max: m[3] })), ilRange(code, () => true));
       }
       return rows;
     }
@@ -1322,13 +1443,13 @@
         cur.min = Math.min(cur.min, x.min); cur.max = Math.max(cur.max, x.max);
         m.set(x.key, cur);
       }
-      for (const s of m.values()) { s.le = s.max <= 0 && s.min < 0 && s.key.split('#').length === 2; s.text = describe(s.key, s.min, s.max); }
+      for (const s of m.values()) { s.le = s.max <= 0 && s.min < 0 && s.key.split('#').length === 2; s.flag = s.key === ETH_KEY; s.text = describe(s.key, s.min, s.max); }
       return Array.from(m.values()).sort((a, b) => a.text.localeCompare(b.text));
     }
 
     /** P(each affix row appears) on one base of a given item level and quality: Map id -> p. Magic: exact (the magic split + group exclusion,
      *  same model as affixProb); rare: the rare loop Monte Carlo (rareMC) counting picks; automagic rows and staff mod skills as in affixProb. */
-    function affixAppearance(code, ilvl, quality_, rolls, seed) {
+    function affixAppearance(code, ilvl, quality_, rolls, seed, diff) {
       const it = items[code], rare = quality_ === 'rare';
       const el = eligible(code, affixLevel(ilvl, it), rare, ilvl);
       const out = new Map();
@@ -1342,7 +1463,15 @@
           if (p > 0) out.set('k' + s.k, p);
         }
       }
-      if (!el.p.length && !el.s.length) return out;
+      // sockets of white items, ethereal, superior bonus rows
+      if (qualityPossible(code, quality_)) {
+        const sock = 1 - plainSocketDist(code, quality_, ilvl, diff)[0];
+        if (sock > 0) out.set('xsock', sock);
+        const pe = ethChance(code, quality_);
+        if (pe > 0) out.set('xeth', pe);
+        if (quality_ === 'sup') for (const r of supRowsOf(code)) out.set('xsup' + r, 1 / supRowsOf(code).length);
+      }
+      if (isPlain(quality_) || (!el.p.length && !el.s.length)) return out;
       if (rare) {
         const hits = { p: new Float64Array(el.p.length), s: new Float64Array(el.s.length) }, n = rolls || 50000;
         rareMC(code, el, [], [{ w: 1, c: [] }], n, seed || 12345, [{ p: 1, mask: 0 }], hits);
@@ -1403,10 +1532,12 @@
     function builderAffixTable(codes, ilvl, o) {
       o = o || {};
       const cat = builderCatalog(codes, ilvl);
-      const per = { magic: new Map(), rare: new Map() };
+      const quals = (o.qualities || ['magic', 'rare']).filter((q) => q !== 'rare' || o.rare !== false);
+      const per = {};
+      for (const q of QUALS) per[q] = new Map();
       for (const code of codes) {
         const il = ilOf(code, ilvl);
-        for (const q of o.rare === false ? ['magic'] : ['magic', 'rare']) per[q].set(code, affixAppearance(code, il, q, o.rolls, o.seed));
+        for (const q of quals) per[q].set(code, affixAppearance(code, il, q, o.rolls, o.seed, o.diff));
       }
       const wget = (c) => (o.weights ? (o.weights instanceof Map ? o.weights.get(c) : o.weights[c]) || 0 : 1);
       const ws = codes.map(wget), W = ws.reduce((a, b) => a + b, 0);
@@ -1422,14 +1553,15 @@
         const pbOf = (q) => codes.map((c) => { const m = per[q].get(c); return m ? m.get(r.id) || 0 : 0; });
         rows.push({ id: r.id, side: r.side, name: r.name, mods: r.mods, desc: r.mods.map((m) => describe(m.key, m.min, m.max)).join(' / '), lvl: r.lvl, lr: r.lr, cls: r.cls, rare: r.rare,
           g: r.g, groupName: r.groupName, maxLvl: r.maxLvl, tier: r.tier || 0, minIl: lo, maxIl: hi, nBases: r.per.size, nOn, avail: nOn > 0,
-          magic: mean('magic', r.id), rareP: r.rare ? mean('rare', r.id) : 0,
-          pb: { m: pbOf('magic'), r: r.rare && per.rare.size ? pbOf('rare') : null } });
+          magic: mean('magic', r.id), rareP: r.rare ? mean('rare', r.id) : 0, quals: r.quals,
+          ap: Object.fromEntries(quals.map((q) => [q, r.quals.indexOf(q) >= 0 ? mean(q, r.id) : 0])),
+          pb: { m: pbOf('magic'), r: r.rare && per.rare.size ? pbOf('rare') : null, q: Object.fromEntries(quals.map((q) => [q, r.quals.indexOf(q) >= 0 ? pbOf(q) : null])) } });
       }
       return rows;
     }
 
     /** Candidate sources for the conditions on a base at item level il: one entry per distinct (side, group, level requirement, covered conditions). */
-    function comboSources(code, il, quality_, conds) {
+    function comboSources(code, il, quality_, conds, diff) {
       const it = items[code], nc = conds.length;
       const el = eligible(code, affixLevel(il, it), quality_ === 'rare', il);
       const out = new Map();
@@ -1439,12 +1571,17 @@
         const g = side === 'a' ? 0 : a.g, key = side + '|' + g + '|' + (a.lr || 0) + '|' + mask;
         if (!out.has(key)) out.set(key, { side, g, lr: a.lr || 0, mask });
       };
-      for (const a of el.p) add('p', a);
-      for (const a of el.s) add('s', a);
+      if (!isPlain(quality_)) { for (const a of el.p) add('p', a); for (const a of el.s) add('s', a); }
       for (const a of el.auto) add('a', a);
+      // sockets of white items, ethereal, superior bonus rows: no slot, no group, but an item has at most one of each (uniq)
+      const addX = (uniq, mask) => { if (mask) out.set('x|' + uniq + '|' + mask, { side: 'x', uniq, g: 0, lr: 0, mask }); };
+      const bitsOf = (pred) => { let m = 0; for (let i = 0; i < nc; i++) if (!conds[i].le && pred(conds[i])) m |= 1 << i; return m; };
+      if (quality_ === 'normal' || quality_ === 'sup') { const N = plainSocketMax(code, il, diff); addX('sock', bitsOf((c) => c.key === SOCK_KEY && c.min <= N)); }
+      if (ethChance(code, quality_) > 0) addX('eth', bitsOf((c) => c.key === ETH_KEY));
+      if (quality_ === 'sup') for (const r of supRowsOf(code)) addX('sup', bitsOf((c) => condProb({ mods: D.qi[r] }, c) > 0));
       const L = staffSkills(code);
       if (L) {
-        const tiers = staffTiersAt(il), mv = staffMaxVal();
+        const tiers = staffTiersAt(il), mv = quality_ === 'low' ? CONFIG.nonMagic.lowStaffValue : staffMaxVal();
         conds.forEach((c, i) => {
           if (c.le || c.min > mv) return;
           for (const s of L) if (s.ok && s.k === c.key && tiers.has(tierOf(s.idx))) out.set('k' + s.idx, { side: 'k', g: 0, lr: 0, mask: 1 << i });
@@ -1458,14 +1595,15 @@
     function planCombo(code, il, quality_, conds, relax) {
       relax = relax || {};
       const nc = conds.length;
+      if (!qualityPossible(code, quality_)) return { ok: false };
       if (!nc) return { ok: true, lr: 0, np: 0, ns: 0 };
-      const srcs = comboSources(code, il, quality_, conds);
+      const srcs = comboSources(code, il, quality_, conds, relax.diff);
       const full = (1 << nc) - 1, rare = quality_ === 'rare';
       const lim = relax.slots ? { p: 99, s: 99, tot: 99 } : rare ? { p: CONFIG.rareMaxPerSide, s: CONFIG.rareMaxPerSide, tot: Math.max.apply(null, items[code].t === 'jewl' ? CONFIG.rareJewelCounts : CONFIG.rareAffixCounts) } : { p: 1, s: 1, tot: 2 };
       const kmax = CONFIG.staffMods.count.length - 1;
       const byBit = conds.map((c, i) => srcs.filter((s) => (s.mask >> i) & 1));
       let best = null;
-      const groups = [];
+      const groups = [], usedX = [];
       const dfs = (cov, np, ns, na, nk, lr) => {
         const score = relax.slots ? np + ns : lr;
         if (best && score >= best.score) return;
@@ -1476,11 +1614,14 @@
           if (s.side === 'p') { if (np >= lim.p || np + ns >= lim.tot) continue; dp = 1; }
           else if (s.side === 's') { if (ns >= lim.s || np + ns >= lim.tot) continue; ds = 1; }
           else if (s.side === 'a') { if (na >= 1) continue; da = 1; }
+          else if (s.side === 'x') { if (!relax.groups && usedX.indexOf(s.uniq) >= 0) continue; }   // one socket roll, one ethereal roll, one superior bonus row
           else { if (nk >= kmax) continue; dk = 1; }
           if (s.g && !relax.groups && groups.indexOf(s.g) >= 0) continue;
           if (s.g) groups.push(s.g);
+          if (s.side === 'x') usedX.push(s.uniq);
           dfs(cov | s.mask, np + dp, ns + ds, na + da, nk + dk, Math.max(lr, s.lr));
           if (s.g) groups.pop();
+          if (s.side === 'x') usedX.pop();
         }
       };
       dfs(0, 0, 0, 0, 0, 0);
@@ -1492,7 +1633,7 @@
       const it = items[code], cache = new Map();
       let minIl = null, maxIl = null, req = null, reqIl = null, np = null, ns = null;
       for (let il = Math.max(1, it.q); il <= 99; il++) {
-        const ck = affixLevel(il, it) + '|' + staffBase(il) + '|' + maxSockets(code, il);
+        const ck = affixLevel(il, it) + '|' + staffBase(il) + '|' + maxSockets(code, il) + '|' + plainSocketMax(code, il, relax && relax.diff);
         let p = cache.get(ck);
         if (!p) { p = planCombo(code, il, quality_, conds, relax); cache.set(ck, p); }
         if (!p.ok) continue;
@@ -1504,29 +1645,34 @@
       return { code, ok: minIl !== null, minIl, maxIl, reqLv: req, reqIl, np, ns };
     }
     const anyOk = (codes, conds, q, relax) => codes.some((c) => comboForBase(c, conds, q, relax).ok);
-    /** why no base can carry the combination as a `quality_` item: list of sentences */
-    function explainCombo(codes, conds, quality_) {
+    /** why no base can carry the combination as a `quality_` item: list of sentences (relax.diff = difficulty for the sockets of white items) */
+    function explainCombo(codes, conds, quality_, diff) {
       const txt = (c) => describe(c.key, c.min, c.min);
-      const dead = conds.filter((c) => !anyOk(codes, [c], quality_, { groups: true, slots: true }));
-      if (dead.length) return dead.map((c) => txt(c) + ' cannot be rolled on a ' + quality_ + ' item of this type' + (quality_ === 'rare' && anyOk(codes, [c], 'magic', { groups: true, slots: true }) ? ' (only magic-only affixes give it)' : '') + '.');
-      if (!anyOk(codes, conds, quality_, { groups: true, slots: true })) return ['No single item level makes all of these stats available together (affix levels, or the item level window of staff skills).'];
-      if (!anyOk(codes, conds, quality_, { slots: true })) {
+      const ql = QLABEL[quality_] || quality_, plain = isPlain(quality_), dd = { diff };
+      if (!codes.some((c) => qualityPossible(c, quality_))) return ['A ' + ql + ' item is not possible for this type' + (plain ? ' (rings, amulets, charms and jewels are always magic or better' + (quality_ === 'sup' ? '; only weapons and armor can be superior' : '') + ').' : '.')];
+      const dead = conds.filter((c) => !anyOk(codes, [c], quality_, Object.assign({ groups: true, slots: true }, dd)));
+      if (dead.length) return dead.map((c) => txt(c) + ' cannot be rolled on a ' + ql + ' item of this type' + (quality_ === 'rare' && anyOk(codes, [c], 'magic', Object.assign({ groups: true, slots: true }, dd)) ? ' (only magic-only affixes give it)' : '') + '.');
+      if (!anyOk(codes, conds, quality_, Object.assign({ groups: true, slots: true }, dd))) return ['No single item level makes all of these stats available together (affix levels, or the item level window of staff skills).'];
+      if (!anyOk(codes, conds, quality_, Object.assign({ slots: true }, dd))) {
         const out = [];
-        for (let i = 0; i < conds.length; i++) for (let j = i + 1; j < conds.length; j++) if (!anyOk(codes, [conds[i], conds[j]], quality_, { slots: true })) out.push(txt(conds[i]) + ' and ' + txt(conds[j]) + ' are only available from affixes of the same group, which cannot appear together.');
-        return out.length ? out : ['Two or more of these stats are only available from affixes of the same group, which cannot appear together.'];
+        for (let i = 0; i < conds.length; i++) for (let j = i + 1; j < conds.length; j++) if (!anyOk(codes, [conds[i], conds[j]], quality_, Object.assign({ slots: true }, dd))) out.push(txt(conds[i]) + ' and ' + txt(conds[j]) + (plain ? ' only come from sources of which an item has just one (one superior bonus row, one automagic row, one socket roll).' : ' are only available from affixes of the same group, which cannot appear together.'));
+        return out.length ? out : [plain ? 'Two or more of these stats only come from sources of which an item has just one (superior bonus row, automagic row).' : 'Two or more of these stats are only available from affixes of the same group, which cannot appear together.'];
       }
+      if (plain) return ['These stats cannot be combined on one ' + ql + ' item.'];
       let best = null;
-      for (const c of codes) { const r = comboForBase(c, conds, quality_, { slots: true }); if (r.ok && (!best || r.np + r.ns < best.np + best.ns)) best = r; }
+      for (const c of codes) { const r = comboForBase(c, conds, quality_, Object.assign({ slots: true }, dd)); if (r.ok && (!best || r.np + r.ns < best.np + best.ns)) best = r; }
       return ['Needs at least ' + best.np + ' prefix' + (best.np === 1 ? '' : 'es') + ' and ' + best.ns + ' suffix' + (best.ns === 1 ? '' : 'es') + (quality_ === 'magic' ? ', a magic item has 1 prefix and 1 suffix.' : ', a rare item has at most ' + CONFIG.rareMaxPerSide + ' of each and ' + Math.max.apply(null, CONFIG.rareAffixCounts) + ' affixes in all.')];
     }
     /** The builder's answer for a combination on a set of bases: per quality {ok, why[], per[] (comboForBase of each base), minIl/minIlCode (lowest item level),
-     *  maxIl (latest item level any base still allows), reqLv/reqCode (lowest character level the finished item needs)} */
-    function comboAnalysis(codes, conds) {
-      const out = {};
-      for (const q of ['magic', 'rare']) {
-        const per = codes.map((c) => comboForBase(c, conds, q));
+     *  maxIl (latest item level any base still allows), reqLv/reqCode (lowest character level the finished item needs)}.
+     *  o = {diff (0..2, default Hell: the sockets of white items depend on the game difficulty), qualities (default all five)} */
+    function comboAnalysis(codes, conds, o) {
+      o = o || {};
+      const out = {}, dd = { diff: o.diff };
+      for (const q of o.qualities || QUALS) {
+        const per = codes.map((c) => comboForBase(c, conds, q, dd));
         const ok = per.filter((x) => x.ok);
-        const r = { ok: ok.length > 0, per, why: ok.length ? [] : explainCombo(codes, conds, q) };
+        const r = { ok: ok.length > 0, per, why: ok.length ? [] : explainCombo(codes, conds, q, o.diff) };
         if (ok.length) {
           const lo = ok.reduce((a, b) => (b.minIl < a.minIl ? b : a)), rq = ok.reduce((a, b) => (b.reqLv < a.reqLv ? b : a));
           r.minIl = lo.minIl; r.minIlCode = lo.code; r.maxIl = Math.max.apply(null, ok.map((x) => x.maxIl));
@@ -1583,6 +1729,7 @@
       statList, describe, affixSearch, searchIndex, baseTypes, metaCache, uniqById, setById, uniqByCode, setByCode, prettyId, tzLevel,
       eligibleUniques, eligibleSets, condProb, trialsFor,
       builderTypes, builderBases, builderCatalog, builderStats, builderAffixTable, baseDropWeights, affixAppearance, planCombo, comboForBase, comboAnalysis, explainCombo, groupName,
+      qualityPossible, ethItem, ethChance, plainSocketMax, plainSocketDist, extrasDist, QUALS, QLABEL, SOCK_KEY, ETH_KEY,
     };
   }
 
