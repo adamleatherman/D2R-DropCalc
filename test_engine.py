@@ -1493,10 +1493,7 @@ def main():
             r = self.ref.items[code]
             if r["_f"] == "misc":
                 return False
-            if n(r.get("durability")) > 0 and n(r.get("nodurability")) != 1:
-                return True
-            anc = self.ref.item_anc(code)
-            return "bow" in anc or "xbow" in anc            # the user's rule for bows / crossbows
+            return n(r.get("durability")) > 0 and n(r.get("nodurability")) != 1     # ITEMS_HasDurability; bows and crossbows are nodurability
 
         def eth_p(self, code, q):
             return self.ETH_CHANCE if q in ("normal", "sup", "magic", "rare", "unique", "crafted") and self.eth_ok(code) else 0.0
@@ -1595,11 +1592,11 @@ def main():
     check("combined P(ethereal and 4 sockets | white Monarch ilvl 60 Hell) = 0.05 * 0.33 / 4", CASE["Monarch normal ilvl 60 Hell sockets >= 4 and ethereal"], 0.05 * 0.33 / 4, 1e-12)
     for q in ("normal", "sup", "magic", "rare"):
         check("ethereal 5%% on a %s Monarch" % q, CASE["Monarch %s ethereal" % q], 0.05, 1e-12)
-        check("ethereal 5%% on a %s Short Bow (bows can be ethereal)" % q, CASE["Short Bow sbw %s ethereal" % q], 0.05, 1e-12)
+        check("ethereal 0 on a %s Short Bow (bows are never ethereal)" % q, CASE["Short Bow sbw %s ethereal" % q], 0)
     check("low quality Monarch is never ethereal", CASE["Monarch low ethereal"], 0)
     check("low quality bow is never ethereal", CASE["Short Bow sbw low ethereal"], 0)
     for cde in ("lxb", "am1"):
-        check("%s (crossbow / Amazon bow) can be ethereal: 5%%" % ref.items[cde]["type"], CASE["%s normal ethereal" % cde], 0.05, 1e-12)
+        check("%s (crossbow / Amazon bow) is never ethereal" % ref.items[cde]["type"], CASE["%s normal ethereal" % cde], 0)
     check("Phase Blade (nodurability) is never ethereal", CASE["7cr normal ethereal"], 0)
     check("amulet is never ethereal", CASE["amu normal ethereal"], 0)
     check("javelin (durability, nodurability unset) follows the code rule: 5%", CASE["jav normal ethereal"], 0.05, 1e-12)
@@ -1666,7 +1663,7 @@ def main():
     check("Monarch 4 sockets: white at item level 72 (elite base level), magic at 77 (Jeweler's affix level 55)", 1 if (LV["sock4Il"]["normal"][0] == 72 and LV["sock4Il"]["sup"][0] == 72 and LV["sock4Il"]["magic"][0] == 77) else 0, 1, 0)
     check("Monarch 4 sockets in Normal difficulty: white impossible (cap 3), magic still possible", 1 if (not LV["sock4Normal"]["normal"] and not LV["sock4Normal"]["sup"] and LV["sock4Normal"]["magic"]) else 0, 1, 0)
     check("Monarch 3 sockets in Normal difficulty: white possible", 1 if (LV["sock3Normal"]["normal"] and LV["sock3Normal"]["sup"]) else 0, 1, 0)
-    check("ethereal bow: possible as normal, superior, magic, rare; not low", 1 if (LV["ethBow"]["normal"] and LV["ethBow"]["sup"] and LV["ethBow"]["magic"] and LV["ethBow"]["rare"] and not LV["ethBow"]["low"]) else 0, 1, 0)
+    check("ethereal bow: impossible at every quality", sum(1 for v_ in LV["ethBow"].values() if v_), 0)
     check("ethereal Monarch: not low quality", 1 if (not LV["ethMonarch"]["low"] and LV["ethMonarch"]["normal"]) else 0, 1, 0)
     check("rings are never normal / superior / low: socket condition impossible in every quality", sum(1 for v_ in LV["ringSock"].values() if v_), 0)
     check("ED >= 5 and max durability >= 10 on a Monarch: only a superior item (row 7)", 1 if (LV["edDur"]["sup"] and not LV["edDur"]["normal"] and not LV["edDur"]["magic"]) else 0, 1, 0)
@@ -1679,6 +1676,7 @@ def main():
     fact("a rare Monarch gets at most 2 sockets (from affixes): P(>= 1) > 0, P(>= 3) = 0", FA["rareSock1"] > 0 and FA["rareSock3"] == 0, "P(>= 1) = %.4f" % FA["rareSock1"])
     fact("socketed white and superior bases drop (Monarch, sources found: %d / %d)" % (FA["whiteDrops"]["normalSock"], FA["whiteDrops"]["supSock"]), FA["whiteDrops"]["normalSock"] > 0 and FA["whiteDrops"]["supSock"] > 0)
     fact("no ethereal set items (ethChance(set) = 0, 'Ethereal' row offers no set quality)", WH["ethChance"]["set"] == 0 and "set" not in FA["ethSetQuals"])
+    fact("bows and crossbows (incl. Amazon bows) can never be ethereal (Stag Bow, Short Bow, Light Crossbow: P = 0 at every quality; the Bow type offers no Ethereal row)", all(FA["bowEth"][c_][q_] == 0 for c_ in FA["bowEth"] for q_ in FA["bowEth"][c_]) and not FA["bowEthRow"] and FA["monarchEthRow"], str(FA["bowEth"]["am1"]))
     fact("Chromatic never on a rare Paladin shield (0 of %d bases), but on magic ones (%d)" % (FA["chromatic"]["bases"], FA["chromatic"]["magic"]), FA["chromatic"]["rare"] == 0 and FA["chromatic"]["magic"] == FA["chromatic"]["bases"])
     fact("Archer's / Lancer's never on rare Amazon weapons (0 of %d), but on magic ones (%d)" % (FA["archer"]["bases"], FA["archer"]["magic"]), FA["archer"]["rare"] == 0 and FA["archer"]["magic"] == FA["archer"]["bases"])
     fact("of Anthrax never on rare Necromancer heads (0 of %d), but on magic ones (%d)" % (FA["anthrax"]["bases"], FA["anthrax"]["magic"]), FA["anthrax"]["rare"] == 0 and FA["anthrax"]["magic"] == FA["anthrax"]["bases"])

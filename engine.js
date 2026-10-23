@@ -73,10 +73,7 @@
       // Weapons and armor with ITEMS_HasDurability (!nodurability && durability != 0); not low quality, not set items; allowed on normal, superior, magic,
       // rare, unique (and crafted, not modelled).
       ethChance: 0.05, ethQualities: ['normal', 'sup', 'magic', 'rare', 'unique', 'crafted'],
-      // EXCEPTION (player knowledge, contrary to the D2MOO reading): D2R's tables mark every bow, crossbow and Amazon bow `nodurability` = 1, which by the
-      // 1.10 rule makes them unable to be ethereal, but ethereal bows and crossbows do drop in D2R. true = bows / crossbows (types bow, xbow, abow) can be
-      // ethereal. Other nodurability items (Phase Blade, throwing potions) follow the code rule and never are.
-      ethBowsAndCrossbows: true,
+      // D2R's tables mark every bow, crossbow and Amazon bow `nodurability` = 1, like the Phase Blade and the throwing potions: none of them is ever ethereal.
       // superior bonus (ItemsMagic.cpp sub_6FC54690, ITEMMODS_CanItemBeHighQuality in D2Common ItemMods.cpp): exactly ONE qualityitems.txt row, uniform among
       // the eligible rows; nodurability or throwable items only consider the first 4 rows (build.py exports each item's eligible rows as `sq` and the rows as
       // data.qi). A row carries up to 2 mods, each a uniform integer min..max. Low quality (sub_6FC55270): never sockets, never ethereal, staff mods always +1.
@@ -970,12 +967,11 @@
       if (q === 'sup') return it.k !== 'm' && supRowsOf(code).length > 0;
       return true;                                    // low / normal
     }
-    /** weapons and armor with durability (ITEMS_HasDurability), plus bows / crossbows by the CONFIG exception */
+    /** weapons and armor with durability (ITEMS_HasDurability: not nodurability, durability > 0); bows and crossbows are nodurability, so never */
     function ethItem(code) {
       const it = items[code];
       if (it.k === 'm') return false;
-      if (it.hd) return true;
-      return !!CONFIG.nonMagic.ethBowsAndCrossbows && (it.anc.indexOf('bow') >= 0 || it.anc.indexOf('xbow') >= 0);
+      return !!it.hd;
     }
     /** P(ethereal) of a base at a final quality (low and set never; CONFIG.nonMagic.ethQualities) */
     function ethChance(code, q) {

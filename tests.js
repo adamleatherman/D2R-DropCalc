@@ -561,6 +561,9 @@
         F.drops = { hc: E.chanceFor(ctx, hs('Mephisto', ['boss']), { kind: 'unique', id: 'Harlequin Crest' }, 0).target, ua1: E.chanceFor(ctx, hs('Andariel', ['boss']), { kind: 'base', code: 'ua1' }, 0).target, pk2: E.chanceFor(ctx, hs('The Summoner', ['boss']), { kind: 'base', code: 'pk2' }, 0).target };
         F.whiteDrops = { normalSock: E.affixSearch(ctx, { codes: ['uit'], quality: 'normal', conds: [{ key: SK, min: 1 }], mf: 0, diff: 2, act: 0, area: 0, rolls: 1000 }, null).rows.length,
           supSock: E.affixSearch(ctx, { codes: ['uit'], quality: 'sup', conds: [{ key: SK, min: 1 }], mf: 0, diff: 2, act: 0, area: 0, rolls: 1000 }, null).rows.length }; }
+      F.bowEth = Object.fromEntries(['am1', 'sbw', 'lxb'].map((c) => [c, Object.fromEntries(['low', 'normal', 'sup', 'magic', 'rare', 'unique'].map((q) => [q, E.ethChance(c, q)]))]));
+      F.bowEthRow = ['bow', 'xbow'].some((t) => E.builderBases(t, -1).some((c) => E.builderCatalog([c], 85).has('xeth')));
+      F.monarchEthRow = E.builderCatalog(['uit'], 85).has('xeth');
       F.ethSetQuals = E.builderCatalog(['uit'], 85).get('xeth').quals;
     }
     res.sourcesCount = E.sources(ctxFor(1, 1)).length;
