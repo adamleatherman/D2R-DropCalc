@@ -12,7 +12,8 @@ P_room = 1 - (1 - f)^20.  A level's placement factor pl is the roll-weighted mea
 
 Formats and rules, each checked against the D2MOO decompilation (https://github.com/ThePhrozenKeep/D2MOO):
   .ds1  DrlgPreset.cpp DRLGPRESET_ParseDS1File: version, width, height (the layers hold (w+1)*(h+1) cells; room size = w x h tiles), act (v>=8),
-        substitution method (v>=10), strings (v>=3), 2 ints (9<=v<14), wall layers (+ tile type layer each), floor layers (v>=16, else 1), shadow.
+        substitution method (v>=10), strings (v>=3), 2 ints (9<=v<14), wall layers (+ tile type layer each), floor layers (v>=16, else 1), shadow, substitution group tags (method 1-2),
+        unit list (v>1: type, id, x, y, flags for v>5; monsters = type 1, see preset_monsters.py).
   cell  D2DrlgRoomTile.h D2C_PackedTileInformation: style bits 20-25, sequence bits 8-15, bit 17 unwalkable, bit 27 shadow, bit 31 hidden.
         A floor / wall layer cell is a tile iff it is non-zero (bit 1 / bit 0 are always set on real cells).
   tiles DrlgRoomTile.cpp DRLGROOMTILE_LoadInitRoomTiles: floor tile = (orientation 0, style, sequence); wall tile = (tile type layer value, style,
@@ -172,8 +173,7 @@ def parse_ds1(b):
         p += 4
         return v
     ver, w, h = i32(), i32(), i32()
-    if ver >= 8:
-        i32()
+    act = min(i32(), 4) if ver >= 8 else 0      # 0-based act, capped at Act V (DRLGPRESET_ParseDS1File)
     sub = i32() if ver >= 10 else 0
     if ver >= 3:
         for _ in range(i32()):
@@ -205,7 +205,15 @@ def parse_ds1(b):
             floors.append(lay())
     if ver < 7:
         types = [tuple(OLD_TYPE[t] if 0 <= t < len(OLD_TYPE) else t for t in L) for L in types]
-    return {"version": ver, "w": w, "h": h, "walls": walls, "types": types, "floors": floors, "shadow": lay()}
+    shadow = lay()
+    if sub in (1, 2):                  # DRLGSUBST_FIXED / RANDOM: one more layer of substitution group tags
+        lay()
+    units = []                         # (unit type, id, x, y, flags): x / y in subtiles from the preset's corner (monsters: UNIT_MONSTER = 1)
+    if ver > 1:
+        for _ in range(i32()):
+            t, uid, x, y = i32(), i32(), i32(), i32()
+            units.append((t, uid, x, y, i32() if ver > 5 else 0))
+    return {"version": ver, "w": w, "h": h, "act": act, "walls": walls, "types": types, "floors": floors, "shadow": shadow, "units": units}
 
 
 def room_boxes(w, h, single):

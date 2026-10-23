@@ -8,6 +8,7 @@
 
 Usage:  python test_engine.py [path-to-excel-folder]
 """
+import collections
 import itertools
 import json
 import math
@@ -827,7 +828,13 @@ class RunRef:
         # per-level placement factor from the map layouts: read from the built data.json (the floor share itself is checked separately below, with
         # the floor_share parser tests and the pl range check)
         with open(os.path.join(HERE, "data.json"), encoding="utf-8") as f:
-            self.pl = {int(k): v.get("pl", 1) for k, v in json.load(f)["levels"].items()}
+            lv_ = json.load(f)["levels"]
+        self.pl = {int(k): v.get("pl", 1) for k, v in lv_.items()}
+        # preset monsters (tools/preset_monsters.py; the extraction from the .ds1 files is checked separately below): fixed monsters "pre", unique /
+        # champion packs "pb", and "pk" = uniques already placed when the random packs roll
+        self.pre = {int(k): v.get("pre", []) for k, v in lv_.items()}
+        self.pb = {int(k): v.get("pb", {}) for k, v in lv_.items()}
+        self.pk = {int(k): v.get("pk", [0, 0, 0]) for k, v in lv_.items()}
 
     def rolls(self, lid, d):
         r, suf = self.lv[lid], ["", "(N)", "(H)"][d]
@@ -875,13 +882,18 @@ class RunRef:
                     out[lst[i]] = out.get(lst[i], 0) + pf(f) / len(combos) * n(self.ms[lst[i]]["Rarity"]) / tot
         return out
 
-    @staticmethod
-    def bosses(packs, rooms, umin, umax):
+    @classmethod
+    def bosses(cls, packs, rooms, umin, umax, start=0):
         e = int(math.floor(packs + 0.5))   # JS Math.round
         top = max(umin, umax)
         if not e or not rooms or top <= 0:
             return 0.0
-        dist = [1.0] + [0.0] * top
+        if start != int(start):   # a fractional number of uniques already there: interpolate between the two integers
+            lo = int(start)
+            return (1 - (start - lo)) * cls.bosses(packs, rooms, umin, umax, lo) + (start - lo) * cls.bosses(packs, rooms, umin, umax, lo + 1)
+        s0 = min(int(start), top)
+        dist = [0.0] * (top + 1)
+        dist[s0] = 1.0
         for i in range(e):
             room = min(rooms, int((i + 0.5) * rooms / e) + 1)
             ramp = int(100 * room / rooms) / 100
@@ -898,7 +910,7 @@ class RunRef:
                     new[c + 1] += pc * pb
                 new[c] += pc * (1 - pb)
             dist = new
-        return sum(c * pc for c, pc in enumerate(dist))
+        return sum((c - s0) * pc for c, pc in enumerate(dist))
 
     def area(self, lid, d):
         r, suf = self.lv[lid], ["", "(N)", "(H)"][d]
@@ -906,7 +918,7 @@ class RunRef:
         lst = [r["%smon%d" % (pre, i)] for i in range(1, 26) if r.get("%smon%d" % (pre, i))]
         rolls, rooms = self.rolls(lid, d)
         packs = rolls * (min(n(r["MonDen" + suf]), 10000) + 1) / 100000 * self.pl.get(lid, 1) * self.c["placeFactor"]
-        bosses = min(packs, self.bosses(packs, rooms, n(r["MonUMin" + suf]), n(r["MonUMax" + suf])))
+        bosses = min(packs, self.bosses(packs, rooms, n(r["MonUMin" + suf]), n(r["MonUMax" + suf]), self.pk[lid][d]))
         sh = self.shares(lst, n(r["NumMon"]), n(r.get("rangedspawn")))
         kills = {}
 
@@ -920,6 +932,18 @@ class RunRef:
             if n(m.get("placespawn")) and m.get("spawn") in self.ms:
                 return [(mid, x * keep), (m["spawn"], x * (1 - keep))]
             return [(mid, x)]
+        def party(m, mem):   # PartyMin..PartyMax party minions of each member, alternating minion1 / minion2
+            m1, m2 = m.get("minion1"), m.get("minion2")
+            if m1 in self.ms:
+                a_, b_ = n(m["PartyMin"]), max(n(m["PartyMin"]), n(m["PartyMax"]))
+                cnt = [0, 0]
+                for z in range(a_, b_ + 1):
+                    one = (z + 1) // 2 if m2 in self.ms else z
+                    cnt[0] += one
+                    cnt[1] += z - one
+                add(m1, "regular", mem * cnt[0] / (b_ - a_ + 1))
+                if m2 in self.ms:
+                    add(m2, "regular", mem * cnt[1] / (b_ - a_ + 1))
         for mid, s_ in sh.items():
             for t, x in swapped(mid, (packs - bosses) * s_, 0.21):
                 m = self.ms[t]
@@ -933,17 +957,7 @@ class RunRef:
                 sp = n(m.get("sparsePopulate"))
                 mem = x * g * ((sp + 1) / 100 if sp > 0 else 1)
                 add(t, "regular", mem)
-                m1, m2 = m.get("minion1"), m.get("minion2")
-                if m1 in self.ms:
-                    a_, b_ = n(m["PartyMin"]), max(n(m["PartyMin"]), n(m["PartyMax"]))
-                    cnt = [0, 0]
-                    for z in range(a_, b_ + 1):
-                        one = (z + 1) // 2 if m2 in self.ms else z
-                        cnt[0] += one
-                        cnt[1] += z - one
-                    add(m1, "regular", mem * cnt[0] / (b_ - a_ + 1))
-                    if m2 in self.ms:
-                        add(m2, "regular", mem * cnt[1] / (b_ - a_ + 1))
+                party(m, mem)
         if d == 0:
             um = [r["umon%d" % i] for i in range(1, 26) if r.get("umon%d" % i)]
             bsh = {}
@@ -953,12 +967,21 @@ class RunRef:
         else:
             bsh = sh
         cs, cp, umn = self.c["champShare"], self.c["champPackSize"], self.c["uniqueMinions"]
-        for mid, s_ in bsh.items():
-            for t, x in swapped(mid, bosses * s_, 1 if d == 0 else 0.01):
-                add(t, "champion", x * cs * cp)
-                add(t, "unique", x * (1 - cs))
-                mm = self.ms[t].get("minion1")
-                add(mm if mm in self.ms else t, "minion", x * (1 - cs) * ((umn[0] + umn[1]) / 2 if umn[1] > umn[0] else umn[0]))
+
+        def boss_packs(count, champ):   # `count` packs picked like the random boss packs, `champ` = share that are champion packs
+            for mid, s_ in bsh.items():
+                for t, x in swapped(mid, count * s_, 1 if d == 0 else 0.01):
+                    add(t, "champion", x * champ * cp)
+                    add(t, "unique", x * (1 - champ))
+                    mm = self.ms[t].get("minion1")
+                    add(mm if mm in self.ms else t, "minion", x * (1 - champ) * ((umn[0] + umn[1]) / 2 if umn[1] > umn[0] else umn[0]))
+        boss_packs(bosses, cs)
+        # preset monsters from the map layouts (extraction checked separately): fixed monsters (+ party minions), preset unique / champion packs
+        for e_ in self.pre[lid]:
+            add(e_["m"], "regular", e_["n"][d])
+            party(self.ms[e_["m"]], e_["n"][d])
+        boss_packs(self.pb[lid].get("u", [0, 0, 0])[d], 0)
+        boss_packs(self.pb[lid].get("c", [0, 0, 0])[d], 1)
         return {"rolls": rolls, "rooms": rooms, "packs": packs, "bosses": bosses, "kills": kills}
 
 
@@ -1151,6 +1174,68 @@ def main():
     check("floor_share: plain cave cell f well above the Arcane cell f (2x)", 1 if cave_f_["f"] > 2 * arc_f_["f"] else 0, 1, 0, "cave %.3f vs Arcane %.3f" % (cave_f_["f"], arc_f_["f"]))
     check("floor_share: placing is near certain in a room with f of a cave (P = 1-(1-f)^20 above 0.99)", 1 if 1 - (1 - cave_f_["f"]) ** 20 > 0.99 else 0, 1, 0)
     check("floor_share: no map tile is missing from the loaded tile libraries for these presets", arc_f_["nokey"] + cave_f_["nokey"], 0)
+    # ---- preset monsters (tools/preset_monsters.py): ds1 unit lists, monpreset / monplace rules, no double count of super uniques and act bosses
+    import preset_monsters as PM
+    pm_ = PM.PresetMonsters(SRC, os.path.join(SRC, "tiles"))
+
+    def row_kinds_(name):   # one Counter of (kind, name) per file of the lvlprest row: monster units as the game decodes them
+        i_ = pm_.row(name)
+        out_ = []
+        for k_ in range(1, max(1, n(pm_.lay.rows[i_]["Files"])) + 1):
+            d_ = pm_.t.ds1(pm_.t.resolve(pm_.lay.rows[i_]["File%d" % k_]))
+            out_.append(collections.Counter(pm_.classify(d_["act"], u_[1]) for u_ in d_["units"] if u_[0] == 1))
+        return out_
+    cx_ = row_kinds_("Act 1 - Crypt Countess X")
+    check("preset ds1: Tower Cellar 5 preset (2 files) holds exactly one The Countess unit each (%s)" % "; ".join(str(dict(c_)) for c_ in cx_), [c_[("su", "The Countess")] for c_ in cx_] == [1, 1], True, 0)
+    me_ = row_kinds_("Act 3 - Mephisto Complex")[0]
+    check("preset ds1: Durance 3 preset: mephisto + 6 mephistospirit + the three council super uniques",
+          dict(me_) == {("mon", "mephisto"): 1, ("mon", "mephistospirit"): 6, ("su", "Bremm Sparkfist"): 1, ("su", "Wyand Voidfinger"): 1, ("su", "Maffer Dragonhand"): 1}, True, 0)
+    te_ = row_kinds_("Act 5 - Temple Entrance")[0]
+    check("preset ds1: Nihlathak's Temple entrance preset: 33 place_reanimateddead + Pindleskin", dict(te_) == {("place", "place_reanimateddead"): 33, ("su", "Pindleskin"): 1}, True, 0)
+    dia_ = [c_ for r_ in pm_.lay.rows if r_["Name"].startswith("Act 4 - Diablo") for c_ in row_kinds_(r_["Name"])]
+    check("preset ds1: the Chaos Sanctuary Diablo presets (%d files) hold no monster unit (seal bosses are spawned by quest scripts)" % len(dia_), sum(sum(c_.values()) for c_ in dia_), 0)
+    sg_ = row_kinds_("Act 5 - Siege Strip 1")[0]
+    check("preset ds1: Siege Strip 1 (Act 5 monpreset section) holds place_miniongroup / place_impgroup / dead units", all(k_ in sg_ for k_ in (("place", "place_miniongroup"), ("place", "place_impgroup"), ("place", "place_deadbarb"))), True, 0)
+    unk_ = nunit_ = 0
+    for i_ in range(len(pm_.lay.rows)):
+        for (k_, _), c_ in pm_.row_units(i_).items():
+            nunit_ += c_
+            unk_ += c_ if k_ == "unk" else 0
+    check("preset ds1: every monster unit of every lvlprest file resolves through monpreset (%d units)" % round(nunit_), unk_, 0)
+    allres_ = {}
+    for tag_, tdir_, dfile_ in (("RotW", SRC, "data.json"), ("LoD", os.path.join(SRC, "base"), "data-lod.json")):
+        res_, pmx_ = PM.level_pre(tdir_, os.path.join(SRC, "tiles"))
+        with open(os.path.join(HERE, dfile_), encoding="utf-8") as f_:
+            D_ = json.load(f_)
+        check("%s preset monsters: every monplace class of the used presets has a spawn rule (%s)" % (tag_, ",".join(sorted(pmx_.unresolved)) or "none unresolved"), len(pmx_.unresolved), 0)
+        bad_ = [(lid_, e_["m"]) for lid_, L_ in D_["levels"].items() for e_ in L_.get("pre", []) if e_["m"] in D_["boss_area"]]
+        check("%s preset monsters: no act boss (boss_area) is in a level's pre list (they are separate rows)" % tag_, len(bad_), 0, 0, str(bad_[:3]))
+        bad_ = [(lid_, e_["m"]) for lid_, L_ in D_["levels"].items() for e_ in L_.get("pre", []) if not any(D_["monsters"][e_["m"]]["tc"])]
+        check("%s preset monsters: every pre monster has a treasure class" % tag_, len(bad_), 0, 0, str(bad_[:3]))
+        su_by_ = {}
+        for lid_, r_ in res_.items():
+            for nm_, v_ in r_["su"].items():
+                su_by_.setdefault(nm_, set()).add(lid_)
+                check_ok_ = r_["k"][2] >= v_[2] - 1e-9
+                if not check_ok_:
+                    FAIL.append("pk < su %s" % lid_)
+        mism_ = {nm_: sorted(ls_) for nm_, ls_ in su_by_.items() if nm_ in D_["su_area"] and D_["su_area"][nm_] not in ls_}
+        check("%s preset monsters: every super unique found in the presets is also placed in its su_area level (placed once: separate row, only the unique count here)" % tag_, len(mism_), 0, 0, str(mism_))
+        extra_ = {nm_: sorted(ls_) for nm_, ls_ in su_by_.items() if nm_ in D_["su_area"] and set(ls_) != {D_["su_area"][nm_]}}
+        info("%s preset monsters: super uniques whose presets are in more than one level" % tag_, str(extra_), "-", "Griswold is also in the Pandemonium Finale (Uber Tristram) copy")
+        allres_[tag_] = (res_, D_)
+    res_, D_ = allres_["RotW"]
+    fh_ = {e_["m"]: e_["n"] for e_ in D_["levels"]["110"]["pre"]}
+    check("preset monsters: Bloody Foothills imp / minion groups (place_impgroup / miniongroup) exist in Normal only", fh_["deathmauler1"][1:] == [0, 0] and fh_["deathmauler1"][0] > 0 and fh_["minion1"][1:] == [0, 0], True, 0)
+    check("preset monsters: dead units (place_deadbarb / deadimp / deadminion) are never counted", sum(len(pm_.spawn(c_, 110, 0)) for c_ in ("place_deadbarb", "place_deadimp", "place_deadminion")), 0)
+    check("preset monsters: Act 2 vendors / spires / towers are kept with chance 1/3 per map copy", pm_.row_units(pm_.row("Act 2 - Desert Tomb 2"))[("mon", "firetower")], 2 / 3, 1e-9)
+    check("preset monsters: fallen / shaman of the level's own variant (Black Marsh fallen2, Tamoe Highland fallenshaman2, Cold Plains fallen1)",
+          [pm_.spawn("place_fallen", 6, 2)[0][1], pm_.spawn("place_fallenshaman", 7, 2)[0][1], pm_.spawn("place_fallen", 3, 2)[0][1]] == ["fallen2", "fallenshaman2", "fallen1"], True, 0)
+    check("preset monsters: Great Marsh tentacle chain steps once (tentaclehead2), Sewers 1 steps twice (tentaclehead3)",
+          [pm_.spawn("place_tentacle_ns", 77, 2)[0][1], pm_.spawn("place_tentacle_ns", 92, 2)[0][1]] == ["tentaclehead2", "tentaclehead3"], True, 0)
+    check("preset monsters: Chaos Sanctuary and Throne of Destruction hold no preset monster that drops (the seal bosses and Baal's waves are scripted)",
+          any(D_["levels"][l_].get("pre") or "pb" in D_["levels"][l_] for l_ in ("108", "131")), False, 0)
+    check("preset monsters: the super unique is in the unique count pk (Tower Cellar 5 Countess, Cold Plains Bishibosh)", [D_["levels"]["25"]["pk"][2], D_["levels"]["3"]["pk"][2]] == [1, 1], True, 0)
     for fn_, tag_ in (("data.json", "RotW"), ("data-lod.json", "LoD")):
         with open(os.path.join(HERE, fn_), encoding="utf-8") as f_:
             lv_ = json.load(f_)["levels"]

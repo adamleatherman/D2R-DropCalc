@@ -644,11 +644,18 @@
       return out;
     }
     /** Expected champion/unique packs among `packs` packs spread evenly over `rooms` rooms (MONSTERCHOOSE_GetBossSpawnType): while the count is below
-     *  MonUMin a pack in room r of R is one with chance floor(100 r / R)%, and below MonUMax with 6% more. Exact step-by-step expectation. */
-    function bossPacks(packs, rooms, umin, umax) {
+     *  MonUMin a pack in room r of R is one with chance floor(100 r / R)%, and below MonUMax with 6% more. Exact step-by-step expectation.
+     *  `start` = uniques already in the level when the random packs roll (preset unique / champion packs and super uniques are spawned with their room,
+     *  before its random population; MonsterUnique.cpp ++dwUniqueCount): the count begins there, so fewer random packs qualify. Fractions interpolate. */
+    function bossPacks(packs, rooms, umin, umax, start) {
       const n = Math.round(packs), top = Math.max(umin, umax);
       if (!n || !rooms || top <= 0) return 0;
-      let p = new Float64Array(top + 1); p[0] = 1;
+      if (start > 0 && start !== Math.floor(start)) {
+        const lo = Math.floor(start), f = start - lo;
+        return (1 - f) * bossPacks(packs, rooms, umin, umax, lo) + f * bossPacks(packs, rooms, umin, umax, lo + 1);
+      }
+      const s0 = Math.min(start || 0, top);
+      let p = new Float64Array(top + 1); p[s0] = 1;
       for (let e = 0; e < n; e++) {
         const r = Math.min(rooms, Math.floor((e + 0.5) * rooms / n) + 1), ramp = Math.floor(100 * r / rooms) / 100;
         const nx = new Float64Array(top + 1);
@@ -661,7 +668,7 @@
         }
         p = nx;
       }
-      let ex = 0; for (let c = 0; c <= top; c++) ex += c * p[c];
+      let ex = 0; for (let c = 0; c <= top; c++) ex += (c - s0) * p[c];
       return ex;
     }
     const avgRange = (a, b) => (b > a ? (a + b) / 2 : a);
@@ -682,7 +689,8 @@
       const A = D.levels[lid], list = d === 0 ? A.mon : A.nmon;
       const { rolls, rooms } = areaRolls(A, d);
       const packs = rolls * (Math.min(A.den[d], 10000) + 1) / 100000 * (A.pl ?? 1) * R.placeFactor;   // rand % 100000 <= MonDen per roll; pl = map layout
-      const bosses = Math.min(packs, bossPacks(packs, rooms, A.umin[d], A.umax[d]));
+      const pk = A.pk ? A.pk[d] : 0, pb = A.pb || {};   // preset monsters (tools/preset_monsters.py): units counting as uniques, unique / champion packs
+      const bosses = Math.min(packs, bossPacks(packs, rooms, A.umin[d], A.umax[d], pk));
       const share = listShares(list, A.num, A.rs);
       const kills = new Map();
       const add = (id, rank, x) => { if (!(x > 0) || !D.monsters[id]) return; const o = kills.get(id) || {}; o[rank] = (o[rank] || 0) + x; kills.set(id, o); };
@@ -703,12 +711,28 @@
       // champion / unique packs: Normal picks the type from umon uniformly, NM / Hell from the area's types by Rarity; 20% champion packs
       // (monumod constants row 0) of 1 + rand(3)+1 champions, else a unique with 3-6 minions (minion1, else its own type)
       const bossShare = d === 0 ? (() => { const o = new Map(); for (const id of A.umon) if (D.monsters[id]) o.set(id, (o.get(id) || 0) + 1 / A.umon.length); return o; })() : share;
-      for (const [id, sh] of bossShare) for (const [t, x] of swap(id, bosses * sh, d === 0 ? 1 : 0.01)) {
-        const m = D.monsters[t];
-        add(t, 'champion', x * R.champShare * R.champPackSize);
-        add(t, 'unique', x * (1 - R.champShare));
-        add(m.mn && m.mn.length && D.monsters[m.mn[0]] ? m.mn[0] : t, 'minion', x * (1 - R.champShare) * avgRange(R.uniqueMinions[0], R.uniqueMinions[1]));
+      const bossPack = (nPacks, champ) => {   // nPacks boss packs, champ = share of them that are champion packs
+        for (const [id, sh] of bossShare) for (const [t, x] of swap(id, nPacks * sh, d === 0 ? 1 : 0.01)) {
+          const m = D.monsters[t];
+          add(t, 'champion', x * champ * R.champPackSize);
+          add(t, 'unique', x * (1 - champ));
+          add(m.mn && m.mn.length && D.monsters[m.mn[0]] ? m.mn[0] : t, 'minion', x * (1 - champ) * avgRange(R.uniqueMinions[0], R.uniqueMinions[1]));
+        }
+      };
+      bossPack(bosses, R.champShare);
+      // preset monsters: placed by the map layout (no MonDen roll, no placement loss), spawned with their room before the random population. Fixed
+      // monsters are regular (+ party minions); place_unique_pack is a unique pack without the champion roll, place_champion a champion pack, both
+      // picked from the level like the random ones (MonsterRegion.cpp D2GAME_SpawnPresetMonster_6FC66560 cases 2 / 3). The unique count they raise
+      // (pk, with the super uniques placed) is already in `bosses` above. Extraction: tools/preset_monsters.py.
+      for (const e of A.pre || []) {
+        const m = D.monsters[e.m]; if (!m) continue;
+        const n = e.n[d], [p1, p2] = partyOf(m);
+        add(e.m, 'regular', n);
+        add(m.mn && m.mn[0], 'regular', n * p1);
+        add(m.mn && m.mn[1], 'regular', n * p2);
       }
+      bossPack(pb.u ? pb.u[d] : 0, 0);
+      bossPack(pb.c ? pb.c[d] : 0, 1);
       const res = { kills, share, packs, bosses, rolls, rooms };
       runCache.set(key, res);
       return res;
@@ -727,20 +751,20 @@
           if (DUP_OF[lid]) continue;   // identical copy of an area already listed
           const A = D.levels[lid];
           const list = d === 0 ? A.mon : A.nmon;
-          if (!list.length || !A.den[d]) continue;
+          if ((!list.length || !A.den[d]) && !(A.pre && A.pre.length)) continue;   // preset monsters need no spawn list
           const inTz = tzOn && D.tz.levels[lid] !== undefined;
           const run = areaRun(lid, d);
           const lvOf = (m) => { const base = d === 0 ? m.lv[0] : A.lvl[d]; return inTz ? tzLevel(base, s.clvl, d) : base; };
           const OFF = { regular: 0, champion: CONFIG.champOffset, unique: CONFIG.uniqueOffset, minion: CONFIG.minionOffset };
           const seen = {};
           // list monsters (every rank, also at 0 kills/run so their per-kill odds stay listed), then the minion types they bring
-          const ids = list.filter((id) => D.monsters[id] && D.monsters[id].rar > 0);
+          const ids = A.den[d] && list.length ? list.filter((id) => D.monsters[id] && D.monsters[id].rar > 0) : [];   // no spawn list: only the preset monsters
           for (const id of run.kills.keys()) if (ids.indexOf(id) < 0) ids.push(id);
           for (const id of ids) {
             const m = D.monsters[id];
             if (!m || seen[id]) continue;
             seen[id] = 1;
-            const inList = list.indexOf(id) >= 0 && m.rar > 0;
+            const inList = !!A.den[d] && list.indexOf(id) >= 0 && m.rar > 0;
             const k = run.kills.get(id) || {};
             const share = run.share.get(id) || 0;
             const lv0 = lvOf(m);

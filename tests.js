@@ -329,7 +329,7 @@
       res.cap.dups = { dup, dupName, bossNames: ['Nihlathak', 'Radament', 'The Summoner', 'Griswold'].map((n) => E.sources(ctx).filter((s) => s.name === n && s.diff === 2).map((s) => s.rank)) }; }
     // per-run model: engine areaRun for a spread of areas (independent Python reference in test_engine.py), and sources() perRun == areaRun
     { const ctx = ctxFor(1, 1); const S = E.sources(ctx); const run = {};
-      for (const [lid, d] of [[8, 0], [2, 0], [3, 2], [12, 2], [39, 2], [66, 2], [74, 1], [107, 2], [111, 2], [113, 2], [116, 2], [119, 2], [122, 2], [126, 2], [128, 2], [133, 2]]) {
+      for (const [lid, d] of [[8, 0], [2, 0], [3, 2], [12, 2], [39, 2], [66, 2], [74, 1], [107, 2], [111, 2], [113, 2], [116, 2], [119, 2], [122, 2], [126, 2], [128, 2], [133, 2], [28, 2], [102, 2], [106, 2], [110, 0], [110, 2], [121, 2], [124, 2]]) {
         const r = E.areaRun(String(lid), d), kills = {}, share = {};
         for (const [id, k] of r.kills) kills[id] = k; for (const [id, x] of r.share) share[id] = x;
         let srcSum = 0, runSum = 0; for (const x of S) if (x.area === lid && x.diff === d && x.rank !== 'super' && x.rank !== 'boss' && x.rank !== 'herald') srcSum += x.perRun;

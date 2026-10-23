@@ -13,7 +13,8 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "tools"))
 import floor_share
-SRC = sys.argv[1] if len(sys.argv) > 1 else os.path.join(HERE, "excel")
+import preset_monsters
+SRC =sys.argv[1] if len(sys.argv) > 1 else os.path.join(HERE, "excel")
 OUT = sys.argv[2] if len(sys.argv) > 2 else os.path.join(HERE, "data.json")
 OUT_LOD = sys.argv[3] if len(sys.argv) > 3 else os.path.join(os.path.dirname(OUT), "data-lod.json")
 TDIR = SRC   # table folder of the mode being built (set by build)
@@ -263,9 +264,12 @@ def build(mode):
     # "pl" = placement factor from the real map layouts (tools/floor_share.py: share of walkable subtiles of each populated preset room, 20 placement
     # tries per pack). 1 where the layout is not modelled (open outdoor levels with generated fill). Left out when excel/tiles was not extracted.
     tiles_dir = os.path.join(SRC, "tiles")
-    pls = None
+    pls = pres = None
     if os.path.isdir(tiles_dir):
         pls = floor_share.level_pl(TDIR, tiles_dir)
+        pres, pm = preset_monsters.level_pre(TDIR, tiles_dir)
+        if pm.unresolved:
+            print("warning: %s: monplace classes without a spawn rule: %s" % (mode, dict(pm.unresolved)))
     else:
         print("warning: no %s (re-run tools/extract_tables.py --force); levels get no 'pl' placement factor" % tiles_dir)
     ACT5_LINKED = {111: (64, 160), 112: (64, 160), 117: (64, 160)}
@@ -416,6 +420,27 @@ def build(mode):
         "colossal1": 137, "colossal2": 137, "colossal3": 137,   # Uber Talic / Madawc / Korlic (Colossal Summit, Hell TC only; ancientbarb1-3 have no TC and stay skipped)
     }
     # the three "Fighting Act 5 mini bosses" etc are intentionally skipped.
+
+    # Preset monsters (tools/preset_monsters.py: the .ds1 unit lists of the presets each level uses; expected per full clear [Normal, NM, Hell]):
+    #   "pre"  fixed monsters [{"m": id, "r": "regular", "n": [N, NM, H]}]: only ids with a treasure class, not act bosses (BOSS_AREA are separate rows)
+    #   "pb"   preset unique packs "u" and champion packs "c" ([N, NM, H] each): a monster picked like a random boss pack (engine areaRun)
+    #   "pk"   [N, NM, H] units that raise the level's unique count (unique / champion packs and the super uniques placed, which are separate rows)
+    # Left out when excel/tiles was not extracted (like "pl").
+    if pres is not None:
+        r3 = lambda v: [round(x, 3) for x in v]
+        for lid, res in pres.items():
+            L = levels.get(str(lid))
+            if L is None:
+                continue
+            pre = [{"m": k, "r": "regular", "n": r3(v)} for k, v in sorted(res["mon"].items())
+                   if any(v) and k in monsters and k not in BOSS_AREA and any(monsters[k]["tc"])]
+            if pre:
+                L["pre"] = pre
+            pb = {k: r3(res[k]) for k in ("u", "c") if any(res[k])}
+            if pb:
+                L["pb"] = pb
+            if any(res["k"]):
+                L["pk"] = r3(res["k"])
 
     # ------------------------------------------------------ uniques / sets / sets
     uniques = []
