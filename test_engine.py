@@ -103,7 +103,8 @@ class Ref:
     def affixes(self, code, alvl=99):
         """Eligible magic prefixes/suffixes ('name|class') for a base at an affix level, straight from the raw tables.
         Rule: type (or a parent) in itype, none in etype; a class tagged affix (classspecific) may appear on any matching base
-        except a class-specific base (type chain with a Class in itemtypes), which only takes its own class."""
+        except a class-specific base (type chain with a Class in itemtypes), which only takes its own class. Affixes whose first property is
+        `sock` (Mechanist's, Artificer's, Jeweler's) are never rolled (D2MOO ITEMMODS_CanItemHaveMagicAffix)."""
         anc = self.item_anc(code)
         cls = [self.types[t]["Class"] for t in anc if self.types[t].get("Class")]
         out = {}
@@ -119,6 +120,8 @@ class Ref:
                 if not any(t in anc for t in its) or any(t in anc for t in ets):
                     continue
                 if a.get("classspecific") and cls and a["classspecific"] not in cls:
+                    continue
+                if a.get("mod1code") == "sock":   # the socket affixes (Jeweler's ...) never roll: D2MOO ITEMMODS_CanItemHaveMagicAffix rejects item_numsockets
                     continue
                 res.append(a["Name"] + "|" + a.get("classspecific", ""))
             out[key] = sorted(res)
@@ -282,6 +285,255 @@ class Ref:
             else:
                 q = self.quality(code, mlvl, mf, f)
                 total += p * (q["u"] if kind == "unique" else q["s"]).get(ident, 0)
+        return total
+
+
+# ------------------------------------------------ item generation rules (independent re-implementation of D2MOO over the raw tables)
+class Rules:
+    """Staff mods, magic and rare affix rolls, written straight from the D2MOO sources (see README "Item generation rules"):
+    D2Game/src/ITEMS/Items.cpp (sub_6FC52410 / sub_6FC52650 staff mods, sub_6FC4D5E0 magic), D2Game/src/ITEMS/ItemsMagic.cpp
+    (ITEMS_RollMagicAffixesNew, D2GAME_RollRareItem_6FC53360), D2Common ItemMods.cpp (ITEMMODS_CanItemHaveMagicAffix).
+    It reads the raw .txt tables, not data.json, and shares no code with engine.js."""
+
+    def __init__(self, ref):
+        self.ref = ref
+        sub = ref.sub
+        self.aff = {k: [a for a in rd(f, sub) if a.get("Name")] for k, f in (("p", "magicprefix"), ("s", "magicsuffix"), ("a", "automagic"))}
+        self.skills = [r for r in rd("skills", sub) if r.get("*Id") and r.get("skill")]
+        self.pool_cache = {}
+
+    # --- item level -> affix level (ITEMS_ComputeCraftedMagicAffixLevel)
+    def alvl(self, code, ilvl):
+        it = self.ref.items[code]
+        q = n(it["level"]); ml = n(it.get("magic lvl"))
+        il = max(ilvl, q)
+        if ml:
+            r = ml + il
+        else:
+            half = q // 2
+            r = il - half if il < 99 - half else 2 * il - half - (99 - half)
+        return min(max(r, 1), 99)
+
+    @staticmethod
+    def mods(a):
+        out = []
+        for i in (1, 2, 3):
+            c = a.get("mod%dcode" % i)
+            if c:
+                mn = n(a.get("mod%dmin" % i)); mx = n(a.get("mod%dmax" % i), mn) if a.get("mod%dmax" % i) else mn
+                out.append((c, mn, mx))
+        return out
+
+    def pool(self, code, alvl, rare):
+        key = (code, alvl, rare)
+        if key in self.pool_cache:
+            return self.pool_cache[key]
+        ref = self.ref
+        it = ref.items[code]
+        anc = ref.item_anc(code)
+        cls = [ref.types[t]["Class"] for t in anc if ref.types[t].get("Class")]
+        ml = n(it.get("magic lvl"))
+        ap = n(it.get("auto prefix"))
+        res = {"p": [], "s": [], "a": []}
+        for kind in ("p", "s", "a"):
+            for a in self.aff[kind]:
+                if n(a.get("version")) < 1 or n(a.get("frequency")) <= 0:
+                    continue
+                if kind != "a" and not n(a.get("spawnable")):
+                    continue                                   # automagic: bRequireSpawnableAffix = 0
+                if rare and not n(a.get("rare")):
+                    continue
+                if n(a["level"]) > alvl or (a.get("maxlevel") and n(a["maxlevel"]) < alvl):
+                    continue
+                if kind == "a" and n(a.get("group")) != ap:
+                    continue
+                its = [a["itype%d" % i] for i in range(1, 8) if a.get("itype%d" % i)]
+                ets = [a["etype%d" % i] for i in range(1, 6) if a.get("etype%d" % i)]
+                if any(t in anc for t in ets) or not any(t in anc for t in its):
+                    continue
+                if a.get("classspecific") and cls and a["classspecific"] not in cls:
+                    continue
+                m = self.mods(a)
+                if kind != "a" and m and m[0][0] == "sock":     # ITEMMODS_CanItemHaveMagicAffix: first property's stat item_numsockets
+                    continue
+                w = n(a["frequency"]) * (n(a["level"]) if ml else 1)    # ComputeAffixFrequency
+                res[kind].append({"w": w, "g": n(a.get("group")), "m": m})
+        self.pool_cache[key] = res
+        return res
+
+    @staticmethod
+    def cond_p(a, conds):
+        """P(affix meets each condition (property code, min)): best mod of the affix with that code"""
+        out = []
+        for code, mn_req in conds:
+            best = 0.0
+            for c, mn, mx in a["m"]:
+                if c == code:
+                    p = 1.0 if mn_req <= mn else (0.0 if mn_req > mx else (mx - mn_req + 1) / (mx - mn + 1))
+                    best = max(best, p)
+            out.append(best)
+        return out
+
+    # --- magic items (sub_6FC4D5E0): prefix 1/2, suffix forced when no prefix else 1/2; exact over all affix pairs
+    def magic(self, code, ilvl, conds):
+        pl = self.pool(code, self.alvl(code, ilvl), False)
+        P, S, A = pl["p"], pl["s"], pl["a"]
+        if not P and not S:
+            return 0.0
+        forms = [(0.25, True, True), (0.25, True, False), (0.5, False, True)]
+        if not P:
+            forms = [(1.0, False, True)]
+        elif not S:
+            forms = [(1.0, True, False)]
+        nc = len(conds)
+        zero = [0.0] * nc
+        def side(L):
+            W = sum(a["w"] for a in L)
+            return [(a["w"] / W, a["g"], self.cond_p(a, conds)) for a in L]
+        PL, SL = side(P), side(S)
+        WA = sum(a["w"] for a in A)
+        AL = [(a["w"] / WA, self.cond_p(a, conds)) for a in A] or [(1.0, zero)]
+        total = 0.0
+        for fw, hp, hs in forms:
+            for pw, pg, pc in (PL if hp else [(1.0, None, zero)]):
+                sl = SL if hs else [(1.0, None, zero)]
+                if hp and hs:   # suffix drawn among the groups the prefix did not take
+                    sl = [x for x in SL if x[1] != pg]
+                    ws = sum(x[0] for x in sl)
+                    sl = [(x[0] / ws, x[1], x[2]) for x in sl]
+                for sw, sg, sc in sl:
+                    for aw, ac in AL:
+                        q = 1.0
+                        for i in range(nc):
+                            q *= 1 - (1 - pc[i]) * (1 - sc[i]) * (1 - ac[i])
+                        total += fw * pw * sw * aw * q
+        return total
+
+    # --- rare items (D2GAME_RollRareItem_6FC53360): literal Monte Carlo with real value rolls
+    def rare_mc(self, code, ilvl, conds, rolls, seed, counts=None):
+        import bisect, random
+        rng = random.Random(seed)
+        pl = self.pool(code, self.alvl(code, ilvl), True)
+        sides = {}
+        for k in ("p", "s"):
+            L = pl[k]
+            cum = []; t = 0
+            for a in L:
+                t += a["w"]; cum.append(t)
+            sides[k] = (L, cum, t)
+        A = pl["a"]
+        counts = counts or ([3, 4] if self.ref.items[code].get("type") == "jewl" else [3, 4, 4, 5, 5, 5, 6, 6])
+        def draw(k, used):
+            L, cum, t = sides[k]
+            if not L:
+                return None
+            for _ in range(40):
+                a = L[min(bisect.bisect_right(cum, rng.random() * t), len(L) - 1)]
+                if a["g"] not in used:
+                    return a
+            cand = [a for a in L if a["g"] not in used]
+            if not cand:
+                return None
+            r = rng.random() * sum(a["w"] for a in cand)
+            for a in cand:
+                r -= a["w"]
+                if r < 0:
+                    return a
+            return cand[-1]
+        hit = 0
+        wanted = {c for c, m in conds}
+        for _ in range(rolls):
+            count = counts[rng.randrange(len(counts))]
+            used = set(); stats = {}
+            np_ = ns = k = 0; pfull = sfull = False
+            while k < count and not (pfull and sfull):
+                suffix = (not sfull) and (pfull or rng.random() >= 0.5)
+                a = draw("s" if suffix else "p", used)
+                if a is None:
+                    if suffix: sfull = True
+                    else: pfull = True
+                    continue
+                used.add(a["g"])
+                for c, mn, mx in a["m"]:
+                    if c in wanted:
+                        stats[c] = max(stats.get(c, -10**9), rng.randint(mn, mx))
+                if suffix:
+                    ns += 1; sfull = ns >= 3
+                else:
+                    np_ += 1; pfull = np_ >= 3
+                k += 1
+            if A:
+                W = sum(a["w"] for a in A); r = rng.random() * W
+                au = A[-1]
+                for a in A:
+                    r -= a["w"]
+                    if r < 0:
+                        au = a; break
+                for c, mn, mx in au["m"]:
+                    if c in wanted:
+                        stats[c] = max(stats.get(c, -10**9), rng.randint(mn, mx))
+            if all(stats.get(c, -10**9) >= m for c, m in conds):
+                hit += 1
+        return hit / rolls
+
+    # --- staff mods (sub_6FC52650), drop item level, expansion format. Returns P(item has class skill index `idx` at value >= minv)
+    def staff(self, code, ilvl, idx, minv, magic_quality=True):
+        ref = self.ref
+        it = ref.items[code]
+        sm = ref.types[it["type"]].get("StaffMods", "")
+        if not sm:
+            return 0.0
+        cl = sorted((n(r["*Id"]), r.get("itypea1", "")) for r in self.skills if r.get("charclass") == sm)
+        first = cl[0][0]
+        anc = ref.item_anc(code)
+        itypea = dict(cl)
+        target = first + idx
+        base = 1
+        if ilvl > 36: base = 5
+        elif ilvl > 24: base = 4
+        elif ilvl > 18: base = 3
+        elif ilvl > 11: base = 2
+        # literal 0..99 rolls, grouped
+        def grp(f):
+            d = {}
+            for r in range(100):
+                d[f(r)] = d.get(f(r), 0) + 1
+            return {k: v / 100 for k, v in d.items()}
+        cnt = grp(lambda r: 3 if r > 90 else 2 if r > 70 else 1 if r > 30 else 0)
+        lay = grp(lambda r: max(base + 1 if r > 80 else base if r > 30 else base - 1 if r > 10 else base - 2, 1))
+        val = grp(lambda r: 3 if r >= 90 else 2 if r >= 60 else 1)
+        def one_draw(state_p):
+            """state: (skillIds tuple of 3, value of the target stat) -> distribution after one draw"""
+            out = {}
+            for (ids, tv), p in state_p.items():
+                for layer, pl_ in lay.items():
+                    lb = first + 5 * (layer - 1)
+                    mass = 1.0                                    # probability mass that no try has been accepted yet
+                    results = {}                                  # (skill id, recorded) -> prob
+                    for t in range(6):
+                        nxt = 0.0
+                        for off in range(5):
+                            sid = lb + off
+                            ok = (not itypea.get(sid)) or itypea[sid] in anc
+                            if ok and sid not in ids:
+                                results[(sid, True)] = results.get((sid, True), 0) + mass / 5
+                            elif t == 5:
+                                results[(sid, False)] = results.get((sid, False), 0) + mass / 5
+                            else:
+                                nxt += mass / 5
+                        mass = nxt
+                    for (sid, rec), pr in results.items():
+                        nids = tuple(sorted(ids + (sid,))) if rec else ids
+                        for v, pv in val.items():
+                            ntv = v if sid == target else tv
+                            k = (nids, ntv)
+                            out[k] = out.get(k, 0) + p * pl_ * pr * pv
+            return out
+        states = {((), 0): 1.0}
+        total = cnt.get(0, 0) * sum(p for (ids, tv), p in states.items() if tv >= minv)
+        for c in (1, 2, 3):
+            states = one_draw(states)
+            total += cnt.get(c, 0) * sum(p for (ids, tv), p in states.items() if tv >= minv)
         return total
 
 
@@ -943,6 +1195,46 @@ def main():
         tot = c["base"] or 1   # splits are shares of the base chance
         info("Hell Bovine (regular, 0%% MF) Archon Plate per kill", "1 in %.0f" % (1 / (c["base"] or 1e-12)), "online calc: 1:11,021",
              "split of base: low %.2f%% normal %.2f%% superior %.2f%% magic %.2f%% rare %.2f%% (online: 50.87/16.96/6.17/21.44/4.57)" % tuple(100 * c[k] / tot for k in ("low", "normal", "hq", "magic", "rare")))
+    # ---- item generation rules (staff mods, magic exact odds, rare affix loop): engine vs the independent D2MOO re-implementation
+    RU = Rules(ref); RUL = js["rules"]
+    FIRE = [("res-fire", 10)]; BOTH = [("res-fire", 10), ("res-cold", 10)]
+    check("staffMods config: P(0..3 skills) = 31/40/20/9 %", 1 if RUL["cfg"]["count"] == [31, 40, 20, 9] else 0, 1, 0)
+    for c in RUL["staff"]:
+        tag = "%s (%s idx %d, +%d, ilvl %d)" % (c["code"], c["cls"], c["idx"], c["min"], c["ilvl"])
+        ps = RU.staff(c["code"], c["ilvl"], c["idx"], c["min"])
+        pf = RU.magic(c["code"], c["ilvl"], FIRE)
+        check("staff mod %s: magic, staff only == reference" % tag, c["magicStaff"], ps, 1e-9)
+        check("staff mod %s: rare, staff only == reference" % tag, c["rareStaff"], ps, 1e-9)
+        check("staff mod %s: magic, staff + fire res >= 10 == staff x affix (reference)" % tag, c["magicBoth"], ps * pf, 1e-9)
+        check("staff mod %s: magic, fire res >= 10 alone == reference exact" % tag, c["magicFire"], pf, 1e-9)
+        check("staff mod %s: rare, staff + fire res == staff x engine rare fire" % tag, c["rareBoth"], ps * c["rareFire"], 1e-9)
+        info("staff mod %s: P(staff skill) per magic item" % tag, "%.6f%%" % (100 * ps), "-", "listed in statList: %s" % c["inList"])
+    L = RUL["lodNoStaff"]
+    check("LoD wand rolls the same staff mods as RotW (same tables)", L["wand"], L["wandRotw"], 1e-12)
+    ref_lod_rules = Rules(Ref("base"))
+    check("LoD wand staff mod == LoD reference", L["wand"], ref_lod_rules.staff("wnd", 20, 12, 1), 1e-9)
+    check("LoD knife has no StaffMods (RotW only: 'war')", 1 if (L["knifeSm"] == "" and L["knifeSmRotw"] == "war") else 0, 1, 0)
+    check("LoD data has no Warlock skill list; no Hex skill offered on a LoD knife", 1 if (not L["warStaff"] and L["listed"] == 0) else 0, 1, 0)
+    check("RotW knife offers Warlock staff mod skills in statList", 1 if L["listedRotw"] > 0 else 0, 1, 0)
+    for c in RUL["magic"]:
+        tag = "%s ilvl %d (alvl %d)" % (c["code"], c["ilvl"], c["alvl"])
+        check("magic exact %s: fire res >= 10 == reference" % tag, c["one"], RU.magic(c["code"], c["ilvl"], FIRE), 1e-9)
+        check("magic exact %s: fire res >= 10 and cold res >= 10 == reference" % tag, c["two"], RU.magic(c["code"], c["ilvl"], BOTH), 1e-9)
+    for c in RUL["rare"]:
+        tag = "%s ilvl %d" % (c["code"], c["ilvl"])
+        N = 150000
+        for key, conds in (("one", FIRE), ("two", BOTH)):
+            pm = RU.rare_mc(c["code"], c["ilvl"], conds, N, 4242)
+            sd = math.sqrt(max(pm * (1 - pm), 1e-12) / N)
+            z = (c[key] - pm) / sd
+            ROWS.append(("PASS" if abs(z) < 5 else "FAIL", "rare MC %s, %d condition(s): engine vs Python game-loop simulation (%dk rolls), |z| < 5" % (tag, len(conds), N // 1000), c[key], pm,
+                         "z = %.2f, sigma = %.2e" % (z, sd)))
+            if abs(z) >= 5:
+                FAIL.append("rare MC " + tag)
+        if c["code"] != "jew":   # power of the test: the old uniform 3-6 affix count assumption is clearly distinguishable
+            pu = RU.rare_mc(c["code"], c["ilvl"], FIRE, N, 4243, counts=[3, 4, 5, 6])
+            su = math.sqrt(max(pu * (1 - pu), 1e-12) / N)
+            info("rare MC %s: the OLD assumption (uniform 3-6 affixes) would give" % tag, pu, c["one"], "engine is %.1f sigma away from it" % ((c["one"] - pu) / su))
     # ---- print
     w = max(len(r[1]) for r in ROWS)
     for st, name, got, want, note in ROWS:

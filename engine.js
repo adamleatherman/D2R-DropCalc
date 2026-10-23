@@ -18,10 +18,48 @@
     itemRatioVersion: 1,           // itemratio.txt rows with Version=1 (expansion)
     // --- players (PureDiablo "Players X Overview", 1.11 formula) ---
     // N = nearbyParty + floor((total - nearbyParty)/2)  (== PureDiablo's int(1 + others/2 + nearbyOthers/2) for all 1-8 cases)
-    // --- magic items: share with both / prefix only / suffix only (Arreat Summit, via PureDiablo tutorial) ---
+    // --- magic items: share with both / prefix only / suffix only. VERIFIED, D2MOO D2Game/src/ITEMS/Items.cpp sub_6FC4D5E0 (magic affix roll):
+    //     the prefix roll succeeds with 1/2 (ITEMS_RollMagicAffixesNew: SEED_RollLimitedRandomNumber(2) must be odd unless forced); when it
+    //     fails, the suffix roll is forced (v5 = 1), otherwise it is again 1/2  =>  both 1/4, prefix only 1/4, suffix only 1/2.
+    //     (Arreat Summit says the same.) A side without any eligible affix returns 0 and the other side is forced, see affixProb.
     magicSplit: { both: 0.25, prefixOnly: 0.25, suffixOnly: 0.5 },
-    // --- rare items: number of affixes uniform in [min,max]; each affix prefix/suffix 50/50; <=3 of each ---
-    rareAffixMin: 3, rareAffixMax: 6, rareJewelMax: 4, rarePrefixChance: 0.5, rareMaxPerSide: 3,
+    // --- rare items. VERIFIED, D2MOO D2Game/src/ITEMS/ItemsMagic.cpp D2GAME_RollRareItem_6FC53360 (expansion format >= 1; the 1.00-format path
+    //     sub_6FC53760 uses a uniform 4-6 instead and is not what LoD/RotW run):
+    //     * affix count = dword_6FD27E70[rand & 7] = {3,4,4,5,5,5,6,6}, i.e. NOT uniform 3..6 (3: 1/8, 4: 2/8, 5: 3/8, 6: 2/8);
+    //     * jewels: rand(2) + 3 = 3 or 4 (the old uniform 3-4 was right);
+    //     * each step: while neither side is full, prefix/suffix with rand & 1 (50/50); when a side is full (ITEMS_MAX_MODS = 3) the other is used;
+    //       a roll that finds no eligible affix (ITEMS_RollMagicAffixesNew returns 0) marks that side full and does NOT use up one of the
+    //       count steps (--nCounter), so the item still gets its full count when the other side has room;
+    //     * every pick is a fresh weighted draw from the affixes whose `group` is not on the item yet (prefix AND suffix groups share the check,
+    //       ITEMMODS_HasAffixWithGroup both ways) - equivalent to the rejection draw rareMC uses.
+    rareAffixCounts: [3, 4, 4, 5, 5, 5, 6, 6], rareJewelCounts: [3, 4], rarePrefixChance: 0.5, rareMaxPerSide: 3,
+    // --- affix weight. D2MOO ItemsMagic.cpp ComputeAffixFrequency: items.txt `magic lvl` > 0 (staves, wands, orbs, circlets) weight every
+    //     affix by frequency * affix level instead of frequency. ASSUMPTION: D2R keeps this (only D2MOO / 1.10 confirms it). false = plain frequency.
+    //     (D2MOO's MagicItemRollAffix draws rand(total + 1), so the LAST eligible row gets weight +1: ignored, relative effect 1/total.)
+    affixWeightByLevel: true,
+    // --- staff mods (itemtypes.txt `StaffMods`: class skill bonuses on wands/staves/orbs/sceptres/..., RotW also knife/grimoire 'war').
+    //     VERIFIED, D2MOO D2Game/src/ITEMS/Items.cpp sub_6FC52410 (called at the end of every normal/low/superior/magic/rare/crafted item roll,
+    //     never for unique/set) -> sub_6FC52650. ITEMS_GetStaffMods (D2Common Items.cpp) reads the item's FIRST type only.
+    //     count: roll = rand % 100: > 90 three, > 70 two, > 30 one, else none      => P(0..3) = 31/40/20/9 %
+    //     tier base (item level of the drop, NOT the affix level): > 36 -> 5 (expansion items only), > 24 -> 4, > 18 -> 3, > 11 -> 2, else 1
+    //     per skill: tier = base + {+1 (roll > 80, 19%), 0 (> 30, 50%), -1 (> 10, 20%), -2 (else 11%)}, at least 1;
+    //     skill = class first skill id + 5 * (tier - 1) + rand % 5 (30 consecutive skill ids; NOT skills.txt reqlevel, no level check at all);
+    //     up to `tries` rolls for one that (a) has no itypea1 or the item is of that type and (b) is not one of the (up to 3) skills already
+    //     picked; if all fail, the LAST rolled skill is posted anyway (it overwrites the value of an equal skill, and no skill is recorded as picked);
+    //     value (not on low quality): roll % 100 >= 90 -> 3, >= 60 -> 2, else 1 => 60/30/10 %. (The imbue / cube path adds the item level to the
+    //     rolls via ITEMDROPFLAG_STAFFMODUSEILVL; drops never do.)
+    //     UNVERIFIED for D2R: the Warlock (class 7; D2MOO's 1.10 code treats class 7 as 'none') and any D2R balance change.
+    staffMods: {
+      count: [31, 40, 20, 9],                                  // percent for 0, 1, 2, 3 skills
+      baseIlvl: [[36, 5], [24, 4], [18, 3], [11, 2]],          // item level > first -> tier base second; else 1
+      tierShift: [[19, 1], [50, 0], [20, -1], [11, -2]],       // percent for base+1, base, base-1, base-2
+      value: [[60, 1], [30, 2], [10, 3]],                      // percent for +1, +2, +3
+      tries: 6, perTier: 5,
+    },
+    // --- automagic (automagic.txt rows of items.txt `auto prefix`). VERIFIED, D2MOO D2Game/src/ITEMS/ItemMode.cpp (item finalisation, ~line 6298):
+    //     after the regular affixes of an inferior/normal/superior/magic/rare/crafted item (not unique/set) ITEMS_RollMagicAffixes(pItem, 0, 1, 0,
+    //     1, 0, wAutoPrefix) picks one row of the item's auto group: spawnable NOT required (bRequireSpawnableAffix = 0), forced roll, the usual
+    //     level / maxlevel / itype / etype / class / frequency checks, and on a RARE item only rows with rare = 1.
     // --- monster rank level offsets (data guide: "The unique monster bonus can go over [the TZ max]") ---
     champOffset: 2, uniqueOffset: 3, minionOffset: 3,
     // --- ladder: current ladder season used for first/lastLadderSeason gating ---
@@ -752,13 +790,28 @@
       return null;
     }
     const eligCache = new Map();
-    /** eligible prefix/suffix lists for a base at a given affix level (rare=true: rare-flagged affixes only) */
+    /** affix a may sit on base `it` (ITEMMODS_CanItemHaveMagicAffix, D2Common ItemMods.cpp: any etype of the item's chain -> no, an itype of the chain -> yes;
+     *  ITEMMODS_AffixPlayerClassisCompatible, D2Game ItemsMagic.cpp: a class-specific base only takes its own class's affixes) */
+    function affixFits(a, it, cls) {
+      for (const e of a.et) if (it.anc.indexOf(e) >= 0) return false;
+      let ok = false;
+      for (const t of a.it) if (it.anc.indexOf(t) >= 0) { ok = true; break; }
+      if (!ok) return false;
+      // class tagged affixes (e.g. +Sorceress skills) may appear on any base of a matching item type (amulets, staves, charms),
+      // but a class-specific base (e.g. an Amazon bow) only takes affixes of its own class.
+      if (a.cls && cls.length && cls.indexOf(a.cls) < 0) return false;
+      return true;
+    }
+    /** eligible prefix/suffix lists for a base at a given affix level (rare=true: rare-flagged affixes only). The entries are the affix rows,
+     *  with `f` replaced by the draw weight (frequency, or frequency * level on items with a magic level, CONFIG.affixWeightByLevel). */
     function eligible(code, alvl, rare) {
       const key = code + '|' + alvl + '|' + (rare ? 1 : 0);
       let r = eligCache.get(key);
       if (r) return r;
       const it = items[code];
       const cls = itemClasses(it);
+      const byLevel = CONFIG.affixWeightByLevel && it.ml > 0;
+      const weighted = (a) => (byLevel ? Object.assign({}, a, { f: a.f * a.lvl }) : a);
       const res = { p: [], s: [] };
       for (const kind of ['p', 's']) {
         const seen = new Set();
@@ -771,27 +824,93 @@
             if (rare && !a.rare) continue;
             if (a.lvl > alvl) continue;
             if (a.max && a.max < alvl) continue;
-            // class tagged affixes (e.g. +Sorceress skills) may appear on any base of a matching item type (amulets, staves, charms),
-            // but a class-specific base (e.g. an Amazon bow) only takes affixes of its own class.
-            if (a.cls && cls.length && cls.indexOf(a.cls) < 0) continue;
-            let bad = false;
-            for (const e of a.et) if (it.anc.indexOf(e) >= 0) { bad = true; break; }
-            if (bad) continue;
-            res[kind].push(a);
+            // the socket affixes (Jeweler's ...) are never rolled: ITEMMODS_CanItemHaveMagicAffix rejects a first property whose stat is item_numsockets
+            if (a.mods.length && a.mods[0][0] === 'sock') continue;
+            if (!affixFits(a, it, cls)) continue;
+            res[kind].push(weighted(a));
           }
         }
       }
-      // automagic (items with an "auto prefix" group): exactly one eligible row is attached
+      // automagic (items with an "auto prefix" group): exactly one eligible row is attached. Spawnable is not required (D2MOO passes
+      // bRequireSpawnableAffix = 0), but the type / class / level checks and, on rares, the rare flag apply.
       res.auto = [];
       if (it.ap) {
         for (const a of (autoByGroup[it.ap] || [])) {
-          if (!a.sp) continue;
+          if (rare && !a.rare) continue;
           if (a.lvl > alvl) continue;
           if (a.max && a.max < alvl) continue;
-          res.auto.push(a);
+          if (!affixFits(a, it, cls)) continue;
+          res.auto.push(weighted(a));
         }
       }
       eligCache.set(key, res);
+      return res;
+    }
+
+    // ---------------- staff mods (class skill bonuses of wands, staves, orbs, ...; see CONFIG.staffMods) ----------------
+    /** tier base of the staff mod skills for an item level (the drop's level, not the affix level) */
+    function staffBase(ilvl) {
+      for (const [lv, b] of CONFIG.staffMods.baseIlvl) if (ilvl > lv) return b;
+      return 1;
+    }
+    /** the class skills the base's type can roll as staff mods: [{idx (0..29 within the class), k (stat key), ok (itypea1 satisfied)}] or null */
+    function staffSkills(code) {
+      const it = items[code];
+      const ty = types[it.t];
+      const L = ty && ty.sm && D.staff && D.staff[ty.sm];
+      if (!L) return null;
+      return L.map((s, idx) => ({ idx, k: s.k, ok: !s.ia || it.anc.indexOf(s.ia) >= 0 }));
+    }
+    const staffCache = new Map();
+    /** Exact distribution of the staff mod outcome as a bitmask of satisfied conditions: [{p, mask}] (bit i = conds[i] met by a staff skill
+     *  with value >= min). Enumerates the game's draw sequence (sub_6FC52650) exactly, including skill repeats prevention and the
+     *  all-tries-failed fallback, collapsing states that differ only in irrelevant skills' values. */
+    function staffDist(code, base, conds) {
+      const triv = [{ p: 1, mask: 0 }];
+      const L = staffSkills(code);
+      if (!L) return triv;
+      const rel = new Map();   // skill idx -> [[cond index, min]]
+      conds.forEach((c, i) => { for (const s of L) if (s.k === c.key) { if (!rel.has(s.idx)) rel.set(s.idx, []); rel.get(s.idx).push([i, c.min]); } });
+      if (!rel.size) return triv;
+      const ck = code + '|' + base + '|' + JSON.stringify(conds.map((c) => [c.key, c.min]));
+      if (staffCache.has(ck)) return staffCache.get(ck);
+      const SM = CONFIG.staffMods;
+      const tiers = new Map();
+      for (const [pc, sh] of SM.tierShift) { const t = Math.max(1, base + sh); tiers.set(t, (tiers.get(t) || 0) + pc / 100); }
+      const stateKey = (st) => st.ids.join(',') + '|' + st.vals.map((v) => v[0] + ':' + v[1]).join(',');
+      const post = (st, idx, p, out) => {   // the stat is set on the item: the value roll, overwriting an equal skill
+        const vals = rel.has(idx) ? SM.value : [[100, 0]];
+        for (const [pv, v] of vals) {
+          let nv = st.vals;
+          if (rel.has(idx)) nv = st.vals.filter((x) => x[0] !== idx).concat([[idx, v]]).sort((x, y) => x[0] - y[0]);
+          const ns = { ids: st.ids2 || st.ids, vals: nv, p: st.p * p * pv / 100 };
+          const k = stateKey(ns);
+          const cur = out.get(k);
+          if (cur) cur.p += ns.p; else out.set(k, ns);
+        }
+      };
+      const step = (states) => {
+        const out = new Map();
+        for (const st of states.values()) {
+          for (const [t, pt] of tiers) {
+            const g0 = SM.perTier * (t - 1);
+            const A = [], R = [];
+            for (let k = 0; k < SM.perTier; k++) { const s = L[g0 + k]; if (s.ok && st.ids.indexOf(g0 + k) < 0) A.push(g0 + k); else R.push(g0 + k); }
+            const rr = Math.pow(R.length / SM.perTier, SM.tries);
+            if (A.length) for (const a of A) post(Object.assign({}, st, { ids2: st.ids.concat([a]).sort((x, y) => x - y) }), a, pt * (1 - rr) / A.length, out);
+            if (R.length) for (const x of R) post(Object.assign({}, st, { ids2: null }), x, pt * rr / R.length, out);
+          }
+        }
+        return out;
+      };
+      const maskOf = (st) => { let m = 0; for (const [idx, v] of st.vals) for (const [i, mn] of rel.get(idx)) if (v >= mn) m |= 1 << i; return m; };
+      let states = new Map([['|', { ids: [], vals: [], p: 1 }]]);
+      const acc = new Map();
+      const addStage = (w) => { for (const st of states.values()) { const m = maskOf(st); acc.set(m, (acc.get(m) || 0) + w * st.p); } };
+      addStage(SM.count[0] / 100);
+      for (let c = 1; c < SM.count.length; c++) { states = step(states); addStage(SM.count[c] / 100); }
+      const res = Array.from(acc, ([mask, p]) => ({ p, mask }));
+      staffCache.set(ck, res);
       return res;
     }
 
@@ -810,20 +929,24 @@
       return best;
     }
 
-    /** P(item of given quality has all conditions) for the given base at alvl.
+    /** P(item of given quality has all conditions) for the given base at alvl. A condition can be met by an affix, the automagic row or a
+     *  staff mod skill (opts.ilvl = the drop's item level; staff mods depend on it, not on alvl).
      *  magic: exact enumeration. rare: seeded Monte Carlo (Rao-Blackwellised over the rolled values). */
     const affCache = new Map();
     function affixProb(code, alvl, quality_, conds, opts) {
       const rolls = (opts && opts.rolls) || 200000;
       const seed = (opts && opts.seed) || 12345;
       const el = eligible(code, alvl, quality_ === 'rare');
-      if (!el.sig) el.sig = el.p.map((a) => a.i).join(',') + '/' + el.s.map((a) => a.i).join(',') + '/' + el.auto.map((a) => a.g + a.n).join(',');
+      if (!el.sig) el.sig = el.p.map((a) => a.i + ':' + a.f).join(',') + '/' + el.s.map((a) => a.i + ':' + a.f).join(',') + '/' + el.auto.map((a) => a.g + a.n + ':' + a.f).join(',');
+      const ilvl = opts && opts.ilvl !== undefined ? opts.ilvl : minIlvlForAlvl(items[code], alvl);
+      const sbase = staffBase(ilvl === null ? 99 : ilvl);
+      const sd = staffDist(code, sbase, conds);
+      const sk = sd.length === 1 && sd[0].mask === 0 ? '' : code + sbase;
       // identical affix pools (different alvl) share one result
-      const ck = [items[code].t === 'jewl' ? 'J' : '', items[code].cs ? code : '', quality_, rolls, seed, JSON.stringify(conds), el.sig].join('|');
+      const ck = [items[code].t === 'jewl' ? 'J' : '', items[code].cs ? code : '', quality_, rolls, seed, JSON.stringify(conds), el.sig, sk].join('|');
       if (affCache.has(ck)) return affCache.get(ck);
       let res;
       // auto affix
-      let autoP = null;   // distribution over auto affixes: [ [prob per cond array], weight ]
       const nc = conds.length;
       const cp = (a) => conds.map((c) => condProb(a, c));
       let autoList = [];
@@ -837,50 +960,66 @@
         if (!el.p.length && !el.s.length) { res = 0; affCache.set(ck, res); return res; }
         if (!el.p.length) { so = 1; both = 0; po = 0; }
         else if (!el.s.length) { po = 1; both = 0; so = 0; }
-        const pre = prepSide(el.p, cp, nc);
-        const suf = prepSide(el.s, cp, nc);
-        const none = { w: 1, c: new Array(nc).fill(0) };
-        const forms = [[both, pre, suf], [po, pre, [none]], [so, [none], suf]];
+        // a group on both sides (RotW 307) cannot be drawn twice: the suffix is drawn from the pool without the prefix's group
+        const pg = new Set(el.p.map((a) => a.g)), shared = new Set();
+        for (const a of el.s) if (pg.has(a.g)) shared.add(a.g);
+        const pre = prepSide(el.p, cp, nc, shared);
+        const suf = prepSide(el.s, cp, nc, shared);
+        const sufG = new Map();
+        for (const b of suf) if (b.g) sufG.set(b.g, (sufG.get(b.g) || 0) + b.w);
+        const none = { w: 1, c: new Array(nc).fill(0), g: 0 };
+        const forms = [[both, pre, suf, true], [po, pre, [none], false], [so, [none], suf, false]];
         let total = 0;
-        for (const [fw, L1, L2] of forms) {
-          if (fw <= 0) continue;
-          let s = 0;
-          for (const a of L1) for (const b of L2) {
-            let pr = a.w * b.w;
-            for (const au of autoList) {
-              let q = 1;
-              for (let i = 0; i < nc; i++) {
-                q *= 1 - (1 - a.c[i]) * (1 - b.c[i]) * (1 - au.c[i]);
-                if (q === 0) break;
+        for (const st of sd) {
+          for (const [fw, L1, L2, excl] of forms) {
+            if (fw <= 0) continue;
+            let s = 0;
+            for (const a of L1) {
+              const ex = excl && a.g ? (sufG.get(a.g) || 0) : 0;
+              const nf = ex >= 1 ? 0 : 1 / (1 - ex);
+              for (const b of (ex >= 1 ? [none] : L2)) {
+                if (ex > 0 && b.g === a.g) continue;
+                const pr = a.w * (ex >= 1 ? 1 : b.w * nf);
+                for (const au of autoList) {
+                  let q = 1;
+                  for (let i = 0; i < nc; i++) {
+                    if ((st.mask >> i) & 1) continue;
+                    q *= 1 - (1 - a.c[i]) * (1 - b.c[i]) * (1 - au.c[i]);
+                    if (q === 0) break;
+                  }
+                  s += pr * au.w * q;
+                }
               }
-              s += pr * au.w * q;
             }
+            total += st.p * fw * s;
           }
-          total += fw * s;
         }
         res = total;
       } else {
-        res = rareMC(code, el, conds, autoList, rolls, seed);
+        res = rareMC(code, el, conds, autoList, rolls, seed, sd);
       }
       affCache.set(ck, res);
       return res;
     }
 
-    function prepSide(list, cp, nc) {
-      // collapse affixes with no relevance to the conditions into one "irrelevant" entry
+    function prepSide(list, cp, nc, shared) {
+      // collapse affixes with no relevance to the conditions (and in no group shared with the other side) into one "irrelevant" entry
       let W = 0; for (const a of list) W += a.f;
       const out = [];
       let irr = 0;
       for (const a of list) {
         const c = cp(a);
-        if (c.some((x) => x > 0)) out.push({ w: a.f / W, c });
+        const g = shared.has(a.g) ? a.g : 0;
+        if (g || c.some((x) => x > 0)) out.push({ w: a.f / W, c, g });
         else irr += a.f / W;
       }
-      if (irr > 0) out.push({ w: irr, c: new Array(nc).fill(0) });
+      if (irr > 0) out.push({ w: irr, c: new Array(nc).fill(0), g: 0 });
       return out;
     }
 
-    function rareMC(code, el, conds, autoList, rolls, seed) {
+    /** Rare item: the game's loop (CONFIG.rareAffixCounts ...) simulated with a seeded RNG; the expected value over the rolled affix
+     *  values and over the automagic row / staff mods is taken analytically. */
+    function rareMC(code, el, conds, autoList, rolls, seed, sd) {
       const it = items[code];
       const rng = mulberry32(seed);
       const nc = conds.length;
@@ -893,63 +1032,80 @@
       }
       const P = side(el.p), S = side(el.s);
       if (!P.list.length && !S.list.length) return 0;
-      const kMax = (it.t === 'jewl') ? CONFIG.rareJewelMax : CONFIG.rareAffixMax;
-      const kMin = Math.min(CONFIG.rareAffixMin, kMax);
-      const autoCum = autoList.map((a) => a.w);
+      const counts = (it.t === 'jewl') ? CONFIG.rareJewelCounts : CONFIG.rareAffixCounts;
       const miss = new Float64Array(nc);   // running product of (1 - p) per condition
-      const usedP = [], usedS = [];
-      function draw(Sd, used) {
-        for (let tries = 0; tries < 60; tries++) {
+      const used = [];                     // groups already on the item (prefix and suffix share the check)
+      /** weighted draw among the affixes whose group is not used yet; -1 = none left */
+      function draw(Sd) {
+        if (!Sd.list.length) return -1;
+        for (let tries = 0; tries < 40; tries++) {
           const r = rng() * Sd.total;
           let lo = 0, hi = Sd.cum.length - 1;
           while (lo < hi) { const mid = (lo + hi) >> 1; if (Sd.cum[mid] > r) hi = mid; else lo = mid + 1; }
-          const g = Sd.groups[lo];
-          if (used.indexOf(g) < 0 || g === 0) { used.push(g); return lo; }
+          if (used.indexOf(Sd.groups[lo]) < 0) return lo;
         }
+        let tot = 0;
+        for (let i = 0; i < Sd.list.length; i++) if (used.indexOf(Sd.groups[i]) < 0) tot += Sd.list[i].f;
+        if (tot <= 0) return -1;
+        let r = rng() * tot;
+        for (let i = 0; i < Sd.list.length; i++) if (used.indexOf(Sd.groups[i]) < 0 && (r -= Sd.list[i].f) < 0) return i;
         return -1;
       }
       let acc = 0;
       for (let n = 0; n < rolls; n++) {
-        const k = kMin + floor(rng() * (kMax - kMin + 1));
-        usedP.length = 0; usedS.length = 0;
+        const count = counts[floor(rng() * counts.length)];
+        used.length = 0;
         for (let i = 0; i < nc; i++) miss[i] = 1;
-        let np = 0, ns = 0;
-        for (let j = 0; j < k; j++) {
-          const canP = np < CONFIG.rareMaxPerSide && P.list.length > 0;
-          const canS = ns < CONFIG.rareMaxPerSide && S.list.length > 0;
-          if (!canP && !canS) break;
-          const pickP = canP && canS ? rng() < CONFIG.rarePrefixChance : canP;
-          let idx = pickP ? draw(P, usedP) : draw(S, usedS);
-          if (idx < 0) continue;
-          const cps = pickP ? P.cps[idx] : S.cps[idx];
-          if (pickP) np++; else ns++;
+        let np = 0, ns = 0, pFull = false, sFull = false, k = 0;
+        while (k < count && !(pFull && sFull)) {
+          const suffix = !sFull && (pFull || !(rng() < CONFIG.rarePrefixChance));
+          const Sd = suffix ? S : P;
+          const idx = draw(Sd);
+          if (idx < 0) { if (suffix) sFull = true; else pFull = true; continue; }   // nothing eligible: the side is closed, the step is not used up
+          used.push(Sd.groups[idx]);
+          const cps = Sd.cps[idx];
           for (let i = 0; i < nc; i++) miss[i] *= 1 - cps[i];
+          if (suffix) { if (++ns >= CONFIG.rareMaxPerSide) sFull = true; } else if (++np >= CONFIG.rareMaxPerSide) pFull = true;
+          k++;
         }
         let q = 0;
         for (const au of autoList) {
-          let z = 1;
-          for (let i = 0; i < nc; i++) z *= 1 - miss[i] * (1 - au.c[i]);
-          q += au.w * z;
+          for (const st of sd) {
+            let z = st.p;
+            for (let i = 0; i < nc; i++) if (!((st.mask >> i) & 1)) z *= 1 - miss[i] * (1 - au.c[i]);
+            q += au.w * z;
+          }
         }
         acc += q;
       }
       return acc / rolls;
     }
 
-    /** For each condition: lowest affix level (and monster level) at which some eligible affix on the base can reach it */
+    /** For each condition: lowest affix level (and monster level) at which some eligible affix, the automagic row or a staff mod skill on the
+     *  base can reach it */
     function minLevels(code, quality_, conds) {
       const it = items[code];
+      const L = staffSkills(code);
+      const maxVal = Math.max.apply(null, CONFIG.staffMods.value.map((v) => v[1]));
       const out = [];
       for (const c of conds) {
-        let found = null;
+        let found = null, foundIl = null;
         for (let al = 1; al <= 99; al++) {
           const el = eligible(code, al, quality_ === 'rare');
           const lists = [el.p, el.s, el.auto];
           let ok = false;
-          for (const L of lists) for (const a of L) if (condProb(a, c) > 0) { ok = true; break; }
-          if (ok) { found = al; break; }
+          for (const Ls of lists) for (const a of Ls) if (condProb(a, c) > 0) { ok = true; break; }
+          if (ok) { found = al; foundIl = minIlvlForAlvl(it, al); break; }
         }
-        out.push({ key: c.key, alvl: found, mlvl: found === null ? null : minIlvlForAlvl(it, found) });
+        if (L && c.min <= maxVal) {
+          // staff mod: the lowest item level at which some tier of a matching skill can be rolled
+          const tiers = L.filter((s) => s.k === c.key).map((s) => Math.floor(s.idx / CONFIG.staffMods.perTier) + 1);
+          for (let il = it.q; tiers.length && il <= 120 && (foundIl === null || il < foundIl); il++) {
+            const b = staffBase(il);
+            if (CONFIG.staffMods.tierShift.some(([, sh]) => tiers.indexOf(Math.max(1, b + sh)) >= 0)) { found = affixLevel(il, it); foundIl = il; break; }
+          }
+        }
+        out.push({ key: c.key, alvl: found, mlvl: found === null ? null : foundIl });
       }
       return out;
     }
@@ -975,6 +1131,18 @@
           if (m[2] < cur.min) cur.min = m[2];
           cur.text = describe(m[4], cur.min, cur.max);
           set.set(m[4], cur);
+        }
+        // staff mod skills of the base's type (+1..+3 each)
+        const L = staffSkills(code);
+        if (L) {
+          const vs = CONFIG.staffMods.value.map((v) => v[1]);
+          for (const s of L) {
+            if (!s.ok) continue;
+            const cur = set.get(s.k) || { key: s.k, min: Math.min.apply(null, vs), max: Math.max.apply(null, vs) };
+            cur.min = Math.min(cur.min, Math.min.apply(null, vs)); cur.max = Math.max(cur.max, Math.max.apply(null, vs));
+            cur.text = describe(s.k, cur.min, cur.max);
+            set.set(s.k, cur);
+          }
         }
       }
       return Array.from(set.values()).sort((a, b) => a.key.localeCompare(b.key));
@@ -1002,16 +1170,16 @@
           if (w <= 0) continue;
           pq += w;
           const alvl = affixLevel(src.mlvl, items[code]);
-          const pk = code + '|' + alvl;
+          const pk = code + '|' + alvl + '|' + staffBase(src.mlvl);   // staff mods depend on the drop's item level, not the affix level
           parts.set(pk, (parts.get(pk) || 0) + w);
-          need.set(pk, [code, alvl]);
+          need.set(pk, [code, alvl, src.mlvl]);
         }
         if (pq > 0) recs.push({ src, parts, pbase, pq });
       }
       const probs = new Map();
       let done = 0;
-      for (const [pk, [code, alvl]] of need) {
-        probs.set(pk, affixProb(code, alvl, qn, o.conds, { rolls: o.rolls }));
+      for (const [pk, [code, alvl, ilvl]] of need) {
+        probs.set(pk, affixProb(code, alvl, qn, o.conds, { rolls: o.rolls, ilvl }));
         done++;
         if (progress && (done % 3 === 0 || done === need.size)) progress(done, need.size);
       }
@@ -1070,7 +1238,7 @@
 
     return {
       CONFIG, data: D, DIFFS, items, types, getCtx, playersN, adjNoDrop, dist, upgradeTC,
-      mode, heraldsAvailable, sunderChance, sunderPaths, isSunder, adjQuality, heraldSpawnPct, quality, qualityTotals, sources, srcDist, chanceFor, baseQualityChance, affixLevel, minIlvlForAlvl, eligible, affixProb, minLevels,
+      mode, heraldsAvailable, sunderChance, sunderPaths, isSunder, adjQuality, heraldSpawnPct, quality, qualityTotals, sources, srcDist, chanceFor, baseQualityChance, affixLevel, minIlvlForAlvl, eligible, affixProb, minLevels, staffDist, staffBase,
       statList, describe, affixSearch, searchIndex, baseTypes, metaCache, uniqById, setById, uniqByCode, setByCode, prettyId, tzLevel,
       eligibleUniques, eligibleSets, condProb, trialsFor,
     };

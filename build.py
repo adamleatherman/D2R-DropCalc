@@ -125,6 +125,7 @@ def build(mode):
             "tc": num(r.get("TreasureClass")),
             "rar": num(r.get("Rarity")),
             "cls": r.get("Class", ""),
+            "sm": r.get("StaffMods", ""),   # class code of the class skill bonuses this item type rolls (D2MOO ITEMS_GetStaffMods)
         }
 
 
@@ -430,6 +431,7 @@ def build(mode):
         return MOD.get(key.lower()) if key else None
 
     SKILLS = {}
+    CLASS_SKILLS = {}  # charclass code -> [(skill id, skill name, itypea1)]
     SKILL_CLASS = {}   # skill name -> charclass code (for "(Sorceress Only)")
     sdesc = {r["skilldesc"]: r for r in rd("skilldesc") if r.get("skilldesc")}
     for r in rd("skills"):
@@ -438,6 +440,8 @@ def build(mode):
             SKILLS[r["*Id"]] = dn
             SKILLS[r["skill"]] = dn
             SKILL_CLASS[r["skill"]] = r.get("charclass", "")
+            if r.get("charclass"):
+                CLASS_SKILLS.setdefault(r["charclass"], []).append((int(r["*Id"]), r["skill"], r.get("itypea1", "")))
     # class order = charstats rows (the blank "Expansion" separator row has no strings and is skipped); class index * 3 + tab - 1 = skilltab id
     CLASSES = [r for r in rd("charstats") if r.get("StrAllSkills")]
     CLASS_CODES = {"ama": 0, "sor": 1, "nec": 2, "pal": 3, "bar": 4, "dru": 5, "ass": 6, "war": 7}
@@ -585,6 +589,16 @@ def build(mode):
         label_for(c, "0")
     DESC_REPORT[mode] = {"checked": len(used), "fallback": dict(FALLBACKS)}
 
+    # class skill lists for the staff mods (D2MOO sub_6FC52650: the game picks class first skill id + 5 * (tier - 1) + 0..4, so the 30 class
+    # skills must be consecutive ids). Each entry: id, stat key (= description label of the single skill stat) and the item type the skill needs.
+    staff = {}
+    for cc in sorted({t["sm"] for t in types.values() if t["sm"]}):
+        L = sorted(CLASS_SKILLS.get(cc, []))
+        if not L:
+            continue
+        assert len(L) == 30 and L[-1][0] - L[0][0] == 29, "class %s skills are not 30 consecutive ids" % cc
+        staff[cc] = [{"id": i, "k": label_for("skill", nm), "ia": ia} for i, nm, ia in L]
+
     # ----------------------------------------------------------- terror zones
     tz = {"bounds": [], "levels": {}, "zones": {}}
     with open(os.path.join(SRC, "hd", "desecratedzones.json"), encoding="utf-8") as f:
@@ -619,7 +633,7 @@ def build(mode):
         "types": types, "items": items, "tc": tcs, "groups": groups, "levels": levels,
         "monsters": monsters, "su": su, "su_area": SU_AREA, "su_unused": SU_UNUSED, "boss_area": BOSS_AREA,
         "uniques": uniques, "sets": setitems, "ratio": ratio,
-        "prefixes": prefixes, "suffixes": suffixes, "automagic": automagic,
+        "prefixes": prefixes, "suffixes": suffixes, "automagic": automagic, "staff": staff,
         "tz": tz,
     }
 

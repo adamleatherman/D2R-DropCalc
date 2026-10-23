@@ -361,6 +361,39 @@
       // no qlvl <= mlvl filter on generic TCs: Hell Bovine (mlvl 81, regular) can drop Archon Plate (utp, qlvl 84); quality at diff -3 with zero TC factors
       const bs = E.sources(ctxFor(1, 1)).find((s) => s.name === 'Hell Bovine' && s.diff === 2 && s.rank === 'regular');
       res.bovine = bs ? { mlvl: bs.mlvl, c: E.chanceFor(ctx, bs, tg, 0), q: E.quality('utp', 81, 0, [0, 0, 0, 0], true, 2) } : null; }
+    // ---- item generation rules: staff mods, magic exact odds, rare Monte Carlo (reference: test_engine.py, independent re-implementation of D2MOO)
+    res.rules = { staff: [], magic: [], rare: [], lodNoStaff: null, cfg: JSON.parse(JSON.stringify(E.CONFIG.staffMods)) };
+    {
+      const FIRE = 'Fire Resist +#%', MANA = 'Cold Resist +#%';   // (MANA = the second condition: cold resist)
+      const skey = (D, cls, idx) => D.staff[cls][idx].k;
+      const alv = (Eg, code, il) => Eg.affixLevel(il, Eg.items[code]);
+      for (const [code, cls, idx, mn, il] of [['wnd', 'nec', 12, 1, 20], ['wnd', 'nec', 12, 2, 50], ['wnd', 'nec', 7, 1, 20], ['ob5', 'sor', 14, 1, 20], ['ob5', 'sor', 14, 3, 50],
+                                               ['dgr', 'war', 16, 1, 20], ['dgr', 'war', 18, 2, 50], ['wa1', 'war', 14, 1, 20], ['wa1', 'war', 16, 1, 50]]) {
+        const k = skey(data, cls, idx), al = alv(E, code, il), o = { ilvl: il, rolls: 60000 };
+        const sc = { key: k, min: mn }, fc = { key: FIRE, min: 10 };
+        res.rules.staff.push({ code, cls, idx, min: mn, ilvl: il, key: k,
+          magicStaff: E.affixProb(code, al, 'magic', [sc], o), magicBoth: E.affixProb(code, al, 'magic', [sc, fc], o), magicFire: E.affixProb(code, al, 'magic', [fc], o),
+          rareStaff: E.affixProb(code, al, 'rare', [sc], o), rareBoth: E.affixProb(code, al, 'rare', [sc, fc], o), rareFire: E.affixProb(code, al, 'rare', [fc], o),
+          inList: E.statList([code], 'magic').some((x) => x.key === k) });
+      }
+      // LoD: the same wand rolls the same staff mods; a knife has none (StaffMods 'war' is RotW only), and the Warlock list is absent
+      { const k = skey(dataL, 'nec', 12), al = alv(EL, 'wnd', 20);
+        res.rules.lodNoStaff = { wand: EL.affixProb('wnd', al, 'magic', [{ key: k, min: 1 }], { ilvl: 20 }), wandRotw: E.affixProb('wnd', al, 'magic', [{ key: k, min: 1 }], { ilvl: 20 }),
+          knifeSm: dataL.types.knif.sm, knifeSmRotw: data.types.knif.sm, warStaff: !!dataL.staff.war, listed: EL.statList(['dgr'], 'magic').filter((x) => /Warlock/.test(x.key) && /Hex/.test(x.key)).length,
+          listedRotw: E.statList(['dgr'], 'magic').filter((x) => /Hex/.test(x.key)).length }; }
+      // magic exact odds, affix conditions only (no staff mods): several bases / item levels, one and two conditions
+      for (const [code, il] of [['wnd', 20], ['wnd', 70], ['ob5', 45], ['cap', 60], ['amu', 80], ['wa5', 55], ['dgr', 30], ['jew', 50], ['gwn', 33]]) {
+        const al = alv(E, code, il);
+        res.rules.magic.push({ code, ilvl: il, alvl: al, one: E.affixProb(code, al, 'magic', [{ key: FIRE, min: 10 }], { ilvl: il }),
+          two: E.affixProb(code, al, 'magic', [{ key: FIRE, min: 10 }, { key: MANA, min: 10 }], { ilvl: il }) });
+      }
+      // rare: engine Monte Carlo of the game's affix loop (one armor, one jewel, one orb with automagic)
+      for (const [code, il] of [['cap', 60], ['jew', 60], ['ob5', 60]]) {
+        const al = alv(E, code, il);
+        res.rules.rare.push({ code, ilvl: il, alvl: al, one: E.affixProb(code, al, 'rare', [{ key: FIRE, min: 10 }], { ilvl: il, rolls: 200000 }),
+          two: E.affixProb(code, al, 'rare', [{ key: FIRE, min: 10 }, { key: MANA, min: 10 }], { ilvl: il, rolls: 200000 }) });
+      }
+    }
     res.sourcesCount = E.sources(ctxFor(1, 1)).length;
     res.config = E.CONFIG;
   } catch (e) { res.errors.push(String(e.stack || e)); }
