@@ -377,7 +377,7 @@ class Rules:
                     lo, hi = (m[0][1], m[0][2]) if m[0][1] != m[0][2] else ((m[0][1] or par),) * 2
                     m = [("sock", max(1, min(lo or par, ms)), max(1, min(hi or par, ms)))] + m[1:]
                 w = n(a["frequency"]) * (n(a["level"]) if ml else 1)    # ComputeAffixFrequency
-                res[kind].append({"w": w, "g": n(a.get("group")), "m": m})
+                res[kind].append({"w": w, "g": n(a.get("group")), "m": m, "lr": n(a.get("levelreq")), "lvl": n(a["level"])})
         self.pool_cache[key] = res
         return res
 
@@ -388,7 +388,7 @@ class Rules:
         for code, mn_req in conds:
             best = 0.0
             for c, mn, mx in a["m"]:
-                if c == code:
+                if c == code or (isinstance(code, frozenset) and c in code):
                     p = 1.0 if mn_req <= mn else (0.0 if mn_req > mx else (mx - mn_req + 1) / (mx - mn + 1))
                     best = max(best, p)
             out.append(best)
@@ -556,6 +556,97 @@ class Rules:
             total += cnt.get(c, 0) * sum(p for (ids, tv), p in states.items() if tv >= minv)
         return total
 
+    # --- item builder references -------------------------------------------------------------------------------------------------
+    @staticmethod
+    def staff_tiers(ilvl):
+        base = 5 if ilvl > 36 else 4 if ilvl > 24 else 3 if ilvl > 18 else 2 if ilvl > 11 else 1
+        return {max(1, base + sh) for sh in (1, 0, -1, -2)}
+
+    def plan(self, code, ilvl, quality, conds):
+        """Brute force: can the item carry all conds ((property code, min) or ('staff', tier, value)) and with which lowest affix level requirement?
+        Subsets of candidate sources (p / s / auto rows) up to the number of conditions; magic 1 prefix + 1 suffix, rare 3 + 3 (total <= 6, jewel 4),
+        one automagic row, no two affixes of one group. Returns (ok, lr)."""
+        import itertools
+        rare = quality == "rare"
+        pl = self.pool(code, self.alvl(code, ilvl), rare, ilvl)
+        need = set(range(len(conds)))
+        for i, c in enumerate(conds):
+            if c[0] == "staff":
+                if c[1] not in self.staff_tiers(ilvl) or c[2] > 3:
+                    return (False, None)
+                need.discard(i)
+        cands = []
+        for kind in ("p", "s", "a"):
+            for a in pl[kind]:
+                cov = frozenset(i for i in need if self.cond_p(a, [conds[i]])[0] > 0)
+                if cov and (kind, a["g"] if kind != "a" else 0, a["lr"], cov) not in cands:
+                    cands.append((kind, a["g"] if kind != "a" else 0, a["lr"], cov))
+        if not need:
+            return (True, 0)
+        jewel = self.ref.items[code].get("type") == "jewl"
+        lim = (3, 3, 4 if jewel else 6) if rare else (1, 1, 2)
+        best = None
+        for k in range(1, len(need) + 1):
+            for sub in itertools.combinations(cands, k):
+                if set().union(*[c[3] for c in sub]) != need:
+                    continue
+                np_ = sum(1 for c in sub if c[0] == "p"); ns = sum(1 for c in sub if c[0] == "s"); na = sum(1 for c in sub if c[0] == "a")
+                if np_ > lim[0] or ns > lim[1] or np_ + ns > lim[2] or na > 1:
+                    continue
+                gs = [c[1] for c in sub if c[0] != "a" and c[1]]
+                if len(gs) != len(set(gs)):
+                    continue
+                lr = max(c[2] for c in sub)
+                best = lr if best is None else min(best, lr)
+        return (best is not None, best)
+
+    def combo(self, code, conds, quality):
+        """(first item level, last item level, lowest character level) from base level to 99, like the builder"""
+        it = self.ref.items[code]
+        lv = n(it.get("levelreq"))
+        lo = hi = req = None
+        for il in range(max(1, n(it["level"])), 100):
+            ok, lr = self.plan(code, il, quality, conds)
+            if not ok:
+                continue
+            if lo is None:
+                lo = il
+            hi = il
+            r = max(lv, lr)
+            req = r if req is None else min(req, r)
+        return (lo is not None, lo, hi, req)
+
+    def appear(self, code, ilvl):
+        """P(each magic affix row appears), keyed (kind, affix level, number of mods): rows are summed per key, so display-scaled values (charges, per-level stats) do not matter; exact over prefix/suffix pairs (group exclusion), automagic w/W"""
+        pl = self.pool(code, self.alvl(code, ilvl), False, ilvl)
+        P, S, A = pl["p"], pl["s"], pl["a"]
+        out = {}
+        key = lambda kind, a: (kind, a["lvl"], len(a["m"]))
+        add = lambda k, p: out.__setitem__(k, out.get(k, 0.0) + p)
+        WA = sum(a["w"] for a in A)
+        for a in A:
+            add(key("a", a), a["w"] / WA)
+        if not P and not S:
+            return out
+        forms = [(0.25, True, True), (0.25, True, False), (0.5, False, True)]
+        if not P:
+            forms = [(1.0, False, True)]
+        elif not S:
+            forms = [(1.0, True, False)]
+        WP = sum(a["w"] for a in P); WS = sum(a["w"] for a in S)
+        for fw, hp, hs in forms:
+            for a in (P if hp else [None]):
+                pw = a["w"] / WP if a else 1.0
+                sl = S if hs else []
+                if hp and hs:
+                    sl = [x for x in S if x["g"] != a["g"]]
+                ws = sum(x["w"] for x in sl)
+                if hp:
+                    add(key("p", a), fw * pw)
+                for x in sl:
+                    add(key("s", x), fw * pw * x["w"] / ws)
+        return out
+
 
 # ------------------------------------------------------------ Monte Carlo of the raw TC tree (drop cap check)
 import random
@@ -709,7 +800,13 @@ def run_engine():
         if not m:
             raise SystemExit("no output from test page")
         import html
-        return json.loads(html.unescape(m.group(1)))
+        js = json.loads(html.unescape(m.group(1)))
+        # the old Tab 2 deep link (?q2=&ql=&c=) must still resolve in the real page (builder, main thread: ?noworker)
+        dl = subprocess.run([b, "--headless=new", "--disable-gpu", "--virtual-time-budget=60000", "--dump-dom",
+                             "http://127.0.0.1:%d/index.html?noworker&mode=rotw&q2=Monarch&ql=magic&c=Socketed%%20(%%23):4" % port], capture_output=True, text=True, timeout=180).stdout
+        t = re.search(r'<div class="box" id="res2">(.*?)</div>\s*<div class="note" id="finfo2">(.*?)</div>', dl, re.S)
+        js["deeplink"] = html.unescape(re.sub(r"<[^>]+>", " ", t.group(1) + " | " + t.group(2))) if t else ""
+        return js
     finally:
         srv.terminate()
 
@@ -1284,6 +1381,71 @@ def main():
     for k in (("rin", "magic", 80, 1), ("amu", "magic", 80, 1), ("rin", "rare", 80, 1), ("jew", "magic", 80, 1), ("jew", "rare", 80, 1)):
         check("%s %s: no socket affix (no inventory / not socketable): P = 0, not offered as a stat" % (k[0], k[1]), SKT[k]["p"] + (1 if SKT[k]["listed"] else 0), 0, 0)
     check("Monarch offers 'Socketed (#)' as a stat", 1 if SKT[("uit", "magic", 80, 4)]["listed"] else 0, 1, 0)
+    # ---- item builder: engine vs the raw-table reference
+    B = js["builder"]
+    DJ = json.load(open(os.path.join(HERE, "data.json"), encoding="utf-8"))
+    KEYCODE = {}
+    for a in DJ["prefixes"] + DJ["suffixes"] + DJ["automagic"]:
+        for m_ in a["mods"]:
+            KEYCODE[m_[4]] = KEYCODE.get(m_[4], frozenset()) | {m_[0]}
+    for t in ("boot", "circ", "ashd", "wand"):
+        exp = sorted(c for c, r in ref.items.items() if n(r.get("spawnable")) and t in ref.item_anc(c) and n(r.get("level")) > 0 and ref.item_anc(c) and not n(r.get("quest")))
+        check("builder type %s: bases == raw-table spawnable items of the type" % t, 1 if B["types"][t] == exp else 0, 1, 0, "%d engine, %d reference" % (len(B["types"][t]), len(exp)))
+    check("builder tiers: boots 5 normal / 5 exceptional / 5 elite; jewelry ignores the tier", 1 if B["tiers"]["boot"] == [5, 5, 5] and B["tiers"]["amu"][0] == B["tiers"]["amu"][1] else 0, 1, 0, str(B["tiers"]))
+    for e in B["appear"]:
+        code, il = e["code"], e["ilvl"]
+        refd = RU.appear(code, il)
+        eng = {}
+        for side, lvl, mods_, pm, pr, nOn, _ in e["rows"]:
+            k = ({"prefix": "p", "suffix": "s", "auto": "a"}[side], lvl, len(mods_))
+            eng[k] = eng.get(k, 0.0) + pm
+        keys = set(k for k in refd if refd[k] > 0) | set(k for k in eng if eng[k] > 0)
+        err = max([abs(eng.get(k, 0.0) - refd.get(k, 0.0)) for k in keys] or [0])
+        if err > 1e-9:
+            for k in sorted(keys):
+                if abs(eng.get(k, 0.0) - refd.get(k, 0.0)) > 1e-9:
+                    print("  appearance mismatch", code, k, eng.get(k), refd.get(k))
+        check("per-affix magic appearance %s ilvl %d: %d affix rows == exact reference (max abs error)" % (code, il, len(keys)), err, 0, 0, "max abs err %.2e" % err)
+        sp = sum(v for k, v in refd.items() if k[0] == "p"); ss = sum(v for k, v in refd.items() if k[0] == "s")
+        info("appearance %s: sum of prefix / suffix odds" % code, "%.4f / %.4f" % (sp, ss), "-", "")
+    N = 150000
+    pm = RU.rare_mc("cap", 60, [("res-fire", 1)], N, 4245)
+    sd = math.sqrt(max(pm * (1 - pm), 1e-12) / N + max(B["rareFire"] * (1 - B["rareFire"]), 1e-12) / 200000)
+    z = (B["rareFire"] - pm) / sd
+    ROWS.append(("PASS" if abs(z) < 5 else "FAIL", "per-affix rare appearance cap ilvl 60: sum over fire resist rows vs Python game-loop simulation, |z| < 5", B["rareFire"], pm, "z = %.2f" % z))
+    if abs(z) >= 5:
+        FAIL.append("rare appearance fire")
+    for a in B["agg"]:
+        tag = "boots %s, %d condition(s), act 1 Hell" % (a["q"], a["nc"])
+        check("type aggregation %s: type result == sum of per-base results (max rel diff)" % tag, a["maxRel"], 0, 0, "%d sources, %.1e" % (a["rows"], a["maxRel"]))
+        check("type aggregation %s: sources with a result match (%d vs %d)" % (tag, a["rows"], a["sumRows"]), a["rows"], a["sumRows"], 0)
+        check("type aggregation %s: pruning impossible pools changes nothing" % tag, a["maxRelPrune"], 0, 0)
+        check("type aggregation %s: per-base contributions add up to the total" % tag, a["maxBB"], 0, 0)
+    def cvt(key, mn):
+        if key == B["staffKey"]:
+            return ("staff", 1, mn)     # the staff list's idx 2 skill is tier 1
+        return (KEYCODE[key], mn)
+    for sp in B["combos"]:
+        conds = [cvt(k, mn) for k, mn in sp["conds"]]
+        for q in ("magic", "rare"):
+            per = sp["per"][q]
+            step = 1 if len(conds) < 3 else 5
+            bad = 0
+            for i in range(0, len(per), step):
+                code, ok, lo, hi, rq = per[i]
+                rok, rlo, rhi, rrq = RU.combo(code, conds, q)
+                if (ok, lo, hi, rq) != (rok, rlo, rhi, rrq):
+                    bad += 1; print("  builder mismatch", sp["name"], q, code, (ok, lo, hi, rq), (rok, rlo, rhi, rrq))
+            check("builder levels, %s (%s): ok / lowest item level / last item level / required level per base == brute-force reference (%d bases)" % (sp["name"], q, len(range(0, len(per), step))), bad, 0, 0)
+            if per and per[0][1]:
+                info("builder %s (%s)" % (sp["name"], q), "ilvl %s-%s, req %s" % (per[0][2], per[0][3], per[0][4]), "-", "first base %s" % per[0][0])
+    CB = {c["name"]: c["an"] for c in B["combos"]}
+    check("2 prefixes (fire + cold resist, boots): fits a magic? no (1 prefix) -> rare only", 1 if (CB["boots fire30 + cold20 (2 prefixes)"]["magic"] is False and CB["boots fire30 + cold20 (2 prefixes)"]["rare"]) else 0, 1, 0)
+    check("3 prefixes (boots): rare only, with an explanation for magic", 1 if (not CB["boots ED30 + cold20 + fire20 (3 prefixes)"]["magic"] and CB["boots ED30 + cold20 + fire20 (3 prefixes)"]["rare"] and CB["boots ED30 + cold20 + fire20 (3 prefixes)"]["why"]["magic"]) else 0, 1, 0)
+    check("Jeweler's (Monarch, 4 sockets): magic only", 1 if (CB["monarch sockets 4"]["magic"] and not CB["monarch sockets 4"]["rare"]) else 0, 1, 0)
+    check("Chromatic-class automagic (auric shield, group 304): offered on magic, never on rare", 1 if (B["chromatic"]["magic"] > 0 and B["chromatic"]["rare"] == 0) else 0, 1, 0, str(B["chromatic"]))
+    check("lower-is-better condition (le): -30 <= -20 holds, -30 >= -20 does not", B["le"]["reqLe"] + 10 * B["le"]["reqGe"], 1, 0)
+    check("old deep link ?q2=Monarch&ql=magic&c=Socketed (#):4 resolves in the page: magic result, rare impossible", 1 if ("Magic" in js["deeplink"] and "77" in js["deeplink"] and "not possible" in js["deeplink"] and "sources" in js["deeplink"]) else 0, 1, 0, js["deeplink"][:160].replace(chr(10), " "))
     # ---- print
     w = max(len(r[1]) for r in ROWS)
     for st, name, got, want, note in ROWS:

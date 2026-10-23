@@ -1,4 +1,4 @@
-/* Web Worker: runs the affix search (exact for magic, Monte Carlo for rare) off the UI thread. */
+/* Web Worker: runs the item builder's heavy parts (farm search, affix appearance table; exact for magic, Monte Carlo for rare) off the UI thread. */
 importScripts('engine.js');
 const engines = {};   // one engine per data file (data.json = RotW, data-lod.json = LoD), loaded on first use
 
@@ -12,12 +12,17 @@ self.onmessage = async (ev) => {
   const m = ev.data;
   try {
     const E = await engineFor(m.file);
-    if (m.type === 'search') {
-      const ctx = E.getCtx(m.ctx);
-      const res = E.affixSearch(ctx, m.opts, (done, total) => self.postMessage({ type: 'progress', done, total, id: m.id }));
-      // strip heavy objects: keep serialisable row summaries
-      const rows = res.rows.map((r) => ({ src: r.src, pBase: r.pBase, pQual: r.pQual, pAff: r.pAff, pTotal: r.pTotal, perRun: r.perRun, alvl: r.alvl }));
-      self.postMessage({ type: 'result', id: m.id, rows, minLv: res.minLv, pools: res.pools });
+    if (m.type === 'farm') {
+      // item builder: farm sources of a combination, one affix search per possible quality
+      const ctx = E.getCtx(m.ctx), out = {};
+      m.qualities.forEach((q, qi) => {
+        const res = E.affixSearch(ctx, Object.assign({}, m.opts, { quality: q, prune: true, byBase: true }), (done, total) => self.postMessage({ type: 'progress', done: (qi + done / total) / m.qualities.length, total: 1, id: m.id }));
+        // strip heavy objects: keep serialisable row summaries
+        out[q] = res.rows.map((r) => ({ src: r.src, pBase: r.pBase, pQual: r.pQual, pAff: r.pAff, pTotal: r.pTotal, perRun: r.perRun, alvl: r.alvl, byBase: r.byBase }));
+      });
+      self.postMessage({ type: 'result', id: m.id, rows: out });
+    } else if (m.type === 'table') {
+      self.postMessage({ type: 'result', id: m.id, rows: E.builderAffixTable(m.codes, m.ilvl, { rolls: m.rolls }) });
     } else if (m.type === 'stats') {
       self.postMessage({ type: 'stats', id: m.id, stats: E.statList(m.codes, m.quality) });
     }

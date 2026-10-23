@@ -45,6 +45,22 @@
   .tz { color:#e07a6a; font-size:11px; }
   a { color:var(--accent); }
   [hidden] { display:none !important; }
+  .il { display:flex; gap:6px; align-items:center; } .il input[type=range] { width:110px; padding:0; }
+  .b2grid { display:grid; grid-template-columns:minmax(0,2fr) minmax(0,1fr); gap:10px; align-items:start; }
+  .b2grid > .box { margin-bottom:0; min-width:0; }
+  .tbl.small { max-height:52vh; }
+  tr.dim td { color:var(--dim); opacity:.6; } tr.pick { cursor:pointer; }
+  .chk { flex-direction:row !important; align-items:center; gap:5px !important; font-size:12px !important; color:var(--text) !important; }
+  .selrow { border-top:1px solid var(--line); padding:6px 0; }
+  .selrow .nm { display:flex; justify-content:space-between; gap:8px; }
+  .selrow .ctl { display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin-top:3px; }
+  .selrow input[type=range] { flex:1 1 120px; min-width:100px; padding:0; }
+  .bad { color:var(--bad); } .good { color:var(--good); }
+  .lnk { display:flex; flex-direction:column; font-size:11px; color:var(--dim); gap:2px; margin-top:6px; } .lnk input { width:100%; }
+  details summary { cursor:pointer; color:var(--accent); margin:6px 0; }
+  .side { font-size:11px; padding:0 5px; border-radius:8px; background:var(--panel2); } .side.prefix { color:#8ab4ff; } .side.suffix { color:#7fe0c0; } .side.auto { color:#e6c34d; } .side.staff { color:#ff8f6a; }
+  @media (max-width:860px) { .b2grid { grid-template-columns:minmax(0,1fr); } }
+  @media (max-width:600px) { header, nav, main { padding-left:16px; padding-right:16px; } nav { flex-wrap:wrap; } nav button { padding:6px 9px; } .ac input { width:100%; } .row > label { min-width:0; } .row .ac { max-width:100%; } }
 </style>
 </head>
 <body>
@@ -67,7 +83,7 @@
 </header>
 <nav>
   <button id="t1" class="on">1. Item search</button>
-  <button id="t2">2. Affix finder</button>
+  <button id="t2">2. Item builder</button>
   <button id="t3">About / assumptions</button>
 </nav>
 <main>
@@ -88,23 +104,42 @@
 
   <section id="tab2" class="tab">
     <div class="row">
-      <label>Base or base type
-        <div class="ac"><input id="q2" placeholder="e.g. Circlet, Any amulet, Diadem, Sacred Armor" autocomplete="off"><ul id="ac2" hidden></ul></div>
+      <label>Item type (or one specific base)
+        <div class="ac"><input id="q2" placeholder="e.g. Boots, Circlet, Wand, Sword, Monarch" autocomplete="off"><ul id="ac2" hidden></ul></div>
       </label>
-      <label>Quality <select id="ql2"><option value="magic">Magic</option><option value="rare">Rare</option></select></label>
-      <label>Monte Carlo rolls (rare) <select id="mc2"><option>50000</option><option selected>200000</option><option>1000000</option></select></label>
+      <label title="Only the bases of this tier (armor and weapons); jewelry, charms and jewels have no tiers">Tier <select id="tr2"><option value="-1">All</option><option value="0">Normal</option><option value="1">Exceptional</option><option value="2">Elite</option></select></label>
+      <label title="The item level the affix table below is evaluated at (which affixes can roll, their odds). The results panel does not depend on it: it tells you the item levels that work.">Item level (affix table)
+        <span class="il"><input type="number" id="il2" min="1" max="99" value="85"><input type="range" id="ilr2" min="1" max="99" value="85"></span></label>
+      <label title="Auto: magic and/or rare, whatever the selection allows (a magic item has at most 1 prefix and 1 suffix)">Quality <select id="ql2"><option value="">Auto (magic and/or rare)</option><option value="magic">Magic only</option><option value="rare">Rare only</option></select></label>
+      <label title="Rare odds are Monte Carlo (magic is exact). Applies to the farm search; the affix table uses a similar number of rolls per base.">Monte Carlo rolls (rare) <select id="mc2"><option>20000</option><option selected>50000</option><option>200000</option></select></label>
       <label>Area <select id="ar2"><option value="">All areas</option></select></label>
       <label>Rows <select id="n2"><option>50</option><option selected>200</option><option>1000</option></select></label>
     </div>
-    <div class="box">
-      <div id="conds"></div>
-      <datalist id="statlist"></datalist>
-      <button id="addcond">+ add condition</button>
-      <button id="go2" class="primary">Search</button>
-      <progress id="prog2" value="0" max="1" hidden></progress>
-      <span class="note" id="info2"></span>
+    <div class="note" id="info2">Pick an item type (Boots, Circlet, Sword, ...) or a single base, click the affixes you want, set the minimum values with the sliders, and read off the item levels and the best places to farm it.</div>
+    <div class="b2grid">
+      <div class="box">
+        <div class="row">
+          <label>Filter affixes <input id="f2" placeholder="name, stat or class text" style="width:200px"></label>
+          <label>Side <select id="sd2"><option value="">All</option><option>prefix</option><option>suffix</option><option>auto</option><option>staff</option></select></label>
+          <label class="chk"><input type="checkbox" id="av2"> available at this item level</label>
+        </div>
+        <div class="note" id="tinfo2"></div>
+        <div class="tbl small"><table id="tb2a"></table></div>
+      </div>
+      <div class="box" id="selbox">
+        <b>Your item</b>
+        <div id="sel2" class="note">Click an affix in the table to add its stat. Each stat gets a minimum value you can move with the slider.</div>
+        <div id="conf2"></div>
+        <div class="row" style="margin-top:8px">
+          <button id="go2" class="primary">Find farm sources</button>
+          <button id="clr2">Clear</button>
+          <progress id="prog2" value="0" max="1" hidden></progress>
+        </div>
+        <label class="lnk">Link to this build <input id="link2" readonly></label>
+      </div>
     </div>
-    <div id="min2" class="note"></div>
+    <div class="box" id="res2"></div>
+    <div class="note" id="finfo2"></div>
     <div class="tbl"><table id="tb2"></table></div>
   </section>
 

@@ -407,6 +407,65 @@
           listed: E.statList([code], q).some((x) => x.key === SK), maxS: E.maxSockets(code, il) });
       }
     }
+
+    // ---- item builder (types, per-affix odds, type aggregation, feasibility / levels; reference: test_engine.py) ------------------------
+    res.builder = { types: {}, appear: [], rareFire: null, agg: [], combos: [], chromatic: null };
+    {
+      for (const t of ['boot', 'circ', 'ashd', 'wand']) res.builder.types[t] = E.builderBases(t, -1).sort();
+      res.builder.tiers = { boot: [0, 1, 2].map((tr) => E.builderBases('boot', tr).length), amu: [E.builderBases('amul', 1).length, E.builderBases('amul', -1).length] };
+      for (const [code, il] of [['lbt', 85], ['cap', 60], ['wnd', 20], ['ci0', 70], ['uit', 80]]) {
+        const rows = E.builderAffixTable([code], il, { rolls: 20000 });
+        res.builder.appear.push({ code, ilvl: il, rows: rows.filter((r) => r.side !== 'staff').map((r) => [r.side, r.lvl, r.mods.map((m) => [m.min, m.max]), r.magic, r.rareP, r.nOn, r.id]) });
+      }
+      { const rows = E.builderAffixTable(['cap'], 60, { rolls: 200000 }); let p = 0;
+        for (const r of rows) if (r.mods.some((m) => m.key === 'Fire Resist +#%')) p += r.rareP;
+        res.builder.rareFire = p; }
+      // type aggregation: affixSearch over all boots == sum of the single-base searches (magic exact and rare with the same seeds); prune does not change a result
+      { const ctx = E.getCtx({ players: 1, party: 1, ladder: true, tz: false, mf: 0, clvl: 85, tier: 1 });
+        const boots = E.builderBases('boot', -1), FRW = '+#% Faster Run/Walk';
+        for (const [q, conds] of [['magic', [{ key: FRW, min: 20 }]], ['magic', [{ key: FRW, min: 20 }, { key: 'Fire Resist +#%', min: 30 }]], ['rare', [{ key: FRW, min: 20 }, { key: 'Fire Resist +#%', min: 30 }]]]) {
+          const o = { quality: q, conds, mf: 0, diff: 2, act: 1, area: 0, rolls: 6000, byBase: true };
+          const all = E.affixSearch(ctx, Object.assign({ codes: boots }, o), null), pr = E.affixSearch(ctx, Object.assign({ codes: boots, prune: true }, o), null);
+          const sum = new Map();
+          for (const c of boots) for (const r of E.affixSearch(ctx, Object.assign({ codes: [c] }, o), null).rows) sum.set(r.src.key, (sum.get(r.src.key) || 0) + r.pTotal);
+          const pm = new Map(pr.rows.map((r) => [r.src.key, r.pTotal]));
+          let maxRel = 0, maxRelPrune = 0, maxBB = 0;
+          for (const r of all.rows) {
+            maxRel = Math.max(maxRel, Math.abs(r.pTotal - (sum.get(r.src.key) || 0)) / r.pTotal);
+            maxRelPrune = Math.max(maxRelPrune, Math.abs(r.pTotal - (pm.get(r.src.key) || 0)) / r.pTotal);
+            let bb = 0; for (const c in r.byBase) bb += r.byBase[c];
+            maxBB = Math.max(maxBB, Math.abs(bb - r.pTotal) / r.pTotal);
+          }
+          res.builder.agg.push({ q, nc: conds.length, rows: all.rows.length, sumRows: sum.size, maxRel, maxRelPrune, maxBB });
+        }
+      }
+      // feasibility and levels per base
+      const K = { frw: '+#% Faster Run/Walk', fire: 'Fire Resist +#%', cold: 'Cold Resist +#%', ed: '+#% Enhanced Defense', sock: 'Socketed (#)', all: 'All Resistances +#', fcr: '+#% Faster Cast Rate' };
+      const amp = data.staff.nec[2].k;   // tier 1 skill of the necromancer list
+      res.builder.staffKey = amp;
+      const specs = [
+        ['boots FRW20 + fire30', E.builderBases('boot', -1), [[K.frw, 20], [K.fire, 30]]],
+        ['boots ED30 + cold20 + fire20 (3 prefixes)', E.builderBases('boot', -1), [[K.ed, 30], [K.cold, 20], [K.fire, 20]]],
+        ['boots fire30 + cold20 (2 prefixes)', E.builderBases('boot', -1), [[K.fire, 30], [K.cold, 20]]],
+        ['monarch sockets 4', ['uit'], [[K.sock, 4]]],
+        ['circlet FCR 20', E.builderBases('circ', -1), [[K.fcr, 20]]],
+        ['wand staff +3 tier1 skill', E.builderBases('wand', -1), [[amp, 3]]],
+        ['wand staff +3 + fire10', E.builderBases('wand', -1), [[amp, 3], [K.fire, 10]]],
+        ['auric shields all res 35', E.builderBases('ashd', -1), [[K.all, 35]]],
+      ];
+      for (const [name, codes, cs] of specs) {
+        const conds = cs.map(([key, min]) => ({ key, min }));
+        const out = { name, conds: cs, per: {} };
+        for (const q of ['magic', 'rare']) out.per[q] = codes.map((c) => { const r = E.comboForBase(c, conds, q); return [c, r.ok, r.minIl, r.maxIl, r.reqLv]; });
+        const an = E.comboAnalysis(codes, conds);
+        out.an = { magic: an.magic.ok, rare: an.rare.ok, why: { magic: an.magic.why, rare: an.rare.why } };
+        res.builder.combos.push(out);
+      }
+      res.builder.chromatic = { magic: E.eligible('pa5', 99, false).auto.filter((a) => a.n === 'Chromatic').length, rare: E.eligible('pa5', 99, true).auto.filter((a) => a.n === 'Chromatic').length };
+      // lower-is-better direction: "Requirements +#%" <= -20 vs >= -20
+      res.builder.le = { statLe: E.builderStats(E.builderBases('boot', -1)).filter((s) => s.le).map((s) => s.key),
+        reqLe: E.condProb({ mods: [['x', '', -30, -30, 'R']] }, { key: 'R', min: -20, le: true }), reqGe: E.condProb({ mods: [['x', '', -30, -30, 'R']] }, { key: 'R', min: -20 }) };
+    }
     res.sourcesCount = E.sources(ctxFor(1, 1)).length;
     res.config = E.CONFIG;
   } catch (e) { res.errors.push(String(e.stack || e)); }

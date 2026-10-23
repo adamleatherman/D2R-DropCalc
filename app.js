@@ -3,11 +3,10 @@
   'use strict';
   const $ = (id) => document.getElementById(id);
   const DIFF = ['Normal', 'Nightmare', 'Hell'];
-  let E = null, S = null, INDEX = [], BASEOPTS = [];
+  let E = null, S = null, INDEX = [];
   // one data file and one engine per game mode, loaded on first use and kept
   const DATAFILE = { rotw: 'data.json', lod: 'data-lod.json' };
   const ENGINES = {};
-  let worker = null, reqId = 0;
 
   // ---------------- persistent selectors ----------------
   const KEYS = ['s_mode', 's_tier', 's_diff', 's_players', 's_party', 's_mf', 's_quest', 's_tz', 's_clvl', 's_ladder', 's_act', 's_pct'];
@@ -66,9 +65,10 @@
         const x = col.sort ? col.sort(a) : col.get(a), y = col.sort ? col.sort(b) : col.get(b);
         if (x < y) return -st.dir; if (x > y) return st.dir; return 0;
       });
+      st.shownRows = rows;
       const shown = rows.slice(0, st.limit);
       let h = '<thead><tr>' + vcols.map((c) => '<th class="' + (c.l ? 'l' : '') + '" data-k="' + c.k + '"' + (c.note ? ' title="' + esc(c.note) + '"' : '') + '>' + esc(c.label) + (c.k === st.key ? (st.dir < 0 ? ' v' : ' ^') : '') + '</th>').join('') + '</tr></thead><tbody>';
-      for (const r of shown) h += '<tr>' + vcols.map((c) => '<td class="' + (c.l ? 'l' : '') + '">' + (c.html ? c.html(r) : esc(c.fmt ? c.fmt(r) : c.get(r))) + '</td>').join('') + '</tr>';
+      for (const r of shown) h += '<tr' + (st.rowCls ? ' class="' + st.rowCls(r) + '"' : '') + '>' + vcols.map((c) => '<td class="' + (c.l ? 'l' : '') + '">' + (c.html ? c.html(r) : esc(c.fmt ? c.fmt(r) : c.get(r))) + '</td>').join('') + '</tr>';
       h += '</tbody>';
       el.innerHTML = h;
       return { total: rows.length, shown: shown.length };
@@ -78,6 +78,10 @@
       const k = th.dataset.k;
       if (st.key === k) st.dir = -st.dir; else { st.key = k; st.dir = -1; if (cols.find((c) => c.k === k).l) st.dir = 1; }
       st.onSort && st.onSort(render());
+    });
+    el.addEventListener('click', (ev) => {   // optional row click handler (st.onRow(row))
+      const tr = ev.target.closest('tbody tr'); if (!tr || !st.onRow) return;
+      st.onRow(st.shownRows[tr.sectionRowIndex]);
     });
     st.render = render;
     return st;
@@ -188,96 +192,321 @@
       '  MF=' + sel.mf + '%' + (sel.quest ? '  |  quest drop (act bosses)' : '') + (bq ? '  |  base quality: ' + BQN[bq] : '') + '  |  ' + Math.round(performance.now() - t0) + ' ms. Click a column header to sort.';
   }
 
-  // ---------------- Tab 2 ----------------
-  let T2 = null, conds = [], statCodes = [];
+  // ---------------- Tab 2: item builder ----------------
+  // State: bd.type (type or single base option), bd.codes (bases in play), bd.stats (stat key -> range over all tiers), bd.sel (picked stats with thresholds).
+  // All rules live in engine.js (builder*, comboAnalysis, affixSearch); this only presents them.
+  const CLASSN = { ama: 'Amazon', bar: 'Barbarian', nec: 'Necromancer', pal: 'Paladin', sor: 'Sorceress', ass: 'Assassin', dru: 'Druid', war: 'Warlock' };
+  const QN = { magic: 'Magic', rare: 'Rare' };
+  let T2 = null, TA = null, TYPEOPTS = [];
+  let bd = { type: null, codes: [], stats: new Map(), sel: [], rows: [], an: null, farm: null, farmQ: [] };
+  let tableWorker = null, farmWorker = null, tableId = 0, farmId = 0;
+
   const cols2 = srcCols.concat([
-    { k: 'alvl', label: 'alvl', get: (r) => r.alvl },
-    { k: 'pbase', label: 'P(base)', get: (r) => r.pBase, fmt: (r) => odds(r.pBase) },
-    { k: 'pq', label: 'P(base x quality)', get: (r) => r.pQual, fmt: (r) => odds(r.pQual) },
-    { k: 'paff', label: 'P(affixes | quality)', get: (r) => r.pAff, fmt: (r) => odds(r.pAff) },
-    { k: 'ptot', label: 'P per kill', note: 'Chance that one kill drops a matching item (shown as odds; sorts by probability).', get: (r) => r.pTotal, fmt: (r) => odds(r.pTotal) },
+    { k: 'pm', label: 'P(magic)', show: () => bd.farmQ.indexOf('magic') >= 0, note: 'Chance per kill of a MAGIC item of the type with the combination (exact).', get: (r) => r.pm, fmt: (r) => odds(r.pm) },
+    { k: 'pr', label: 'P(rare)', show: () => bd.farmQ.indexOf('rare') >= 0, note: 'Chance per kill of a RARE item of the type with the combination (Monte Carlo).', get: (r) => r.pr, fmt: (r) => odds(r.pr) },
+    { k: 'ptot', label: 'P per kill', note: 'Chance that one kill drops a matching item (sum over every base of the type and the possible qualities; shown as odds, sorts by probability).', get: (r) => r.pTotal, fmt: (r) => odds(r.pTotal) },
     { k: 'runs', label: 'kills/run', get: (r) => r.src.perRun, fmt: (r) => r.src.herald ? 'n/a' : r.src.perRun < 10 ? r.src.perRun.toFixed(2) : r.src.perRun.toFixed(0) },
     { k: 'perrun', label: 'P per run', note: 'Chance of a matching item in one run (rough model; shown as odds).', get: (r) => r.perRun, fmt: (r) => odds(r.perRun) },
   ]);
-  let base2 = null;
+  const typeLabel = (t) => t.name + (t.cls ? ' (' + (CLASSN[t.cls] || t.cls) + ')' : '') + (t.broad ? ' - broad group' : '') + ' - ' + t.codes.length + ' bases';
+  const effTier = () => parseInt($('tr2').value, 10);
+  const effIlvl = () => { const v = clampInt($('il2'), 1, 99); $('ilr2').value = v; return v; };
+  function curCodes() {
+    if (!bd.type) return [];
+    return bd.type.kind === 'base' ? [bd.type.code] : E.builderBases(bd.type.code, effTier());
+  }
+  const baseName = (c) => E.items[c].n;
+  const tierName = (c) => ['', 'exceptional', 'elite'][E.items[c].tier] || '';
+  const condsOf = () => bd.sel.map((s) => { const st = bd.stats.get(s.key); return st && st.le ? { key: s.key, min: s.thr, le: true } : { key: s.key, min: s.thr }; });
+  const statText = (s) => { const st = bd.stats.get(s.key); return E.describe(s.key, s.thr, s.thr) + (st && st.le ? '  (or lower)' : '  (or more)'); };
 
-  function baseCodes(b) {
-    if (!b) return [];
-    if (b.kind === 'base') return [b.code];
-    return b.codes.filter((c) => E.items[c].sp);
+  function pctx() {
+    const sel = S = readSel();
+    return { sel, ctxS: { players: sel.players, party: sel.party, ladder: sel.ladder, tz: sel.tz, quest: sel.quest, clvl: sel.clvl, mf: sel.mf, tier: sel.tier } };
   }
-  function refreshStats() {
-    const codes = baseCodes(base2);
-    if (!codes.length) return;
-    const stats = E.statList(codes, $('ql2').value);
-    statCodes = stats;
-    $('statlist').innerHTML = stats.map((s) => '<option value="' + esc(s.key) + '">' + esc(s.text) + '</option>').join('');
+  /** a fresh worker; null when Workers are unavailable (the work then runs on the main thread) */
+  function newWorker() {
+    if (new URLSearchParams(location.search).has('noworker')) return null;
+    try { const w = new Worker('worker.js'); w.onerror = () => {}; return w; } catch (e) { return null; }
   }
-  function addCond(key, min) {
-    const div = document.createElement('div');
-    div.className = 'cond';
-    div.innerHTML = '<input list="statlist" class="ck" placeholder="stat (type to search, e.g. Faster Cast, Sorceress, Life)"> &gt;= <input type="number" class="cm" value="' + (min || 1) + '" min="1"> <button class="rm">x</button>';
-    if (key) div.querySelector('.ck').value = key;
-    div.querySelector('.rm').onclick = () => div.remove();
-    $('conds').appendChild(div);
+  /** run a job on a dedicated worker, replacing (terminating) one that is still busy with a stale request */
+  function runJob(kind, msg, onProgress, onDone, fallback) {
+    const id = kind === 'farm' ? ++farmId : ++tableId;
+    let w = kind === 'farm' ? farmWorker : tableWorker;
+    if (w && w.busy) { w.terminate(); w = null; }
+    if (!w) w = newWorker();
+    if (kind === 'farm') farmWorker = w; else tableWorker = w;
+    if (!w) { setTimeout(() => { if (id === (kind === 'farm' ? farmId : tableId)) onDone(fallback()); }, 20); return id; }
+    w.busy = true;
+    w.onmessage = (ev) => {
+      const m = ev.data; if (m.id !== id) return;
+      if (m.type === 'progress') onProgress && onProgress(m.done / m.total);
+      else { w.busy = false; if (m.type === 'result') onDone(m.rows); else onDone(null, m.message); }
+    };
+    w.postMessage(Object.assign({ id, file: DATAFILE[E.mode] }, msg));
+    return id;
   }
-  function readConds() {
-    const out = [];
-    for (const d of $('conds').children) {
-      const key = d.querySelector('.ck').value.trim();
-      const min = parseFloat(d.querySelector('.cm').value);
-      if (key) out.push({ key, min: isNaN(min) ? 1 : min });
+
+  // ----- the affix table (every prefix / suffix / automagic row / staff skill that can roll on the type) -----
+  const sideTag = (r) => '<span class="side ' + r.side + '">' + r.side + '</span>';
+  const lvWindow = (r) => r.minIl === null ? '-' : r.maxIl >= 99 ? r.minIl + '+' : r.minIl + ' to ' + r.maxIl;
+  const colsA = [
+    { k: 'name', label: 'Name', l: 1, get: (r) => r.name.toLowerCase(), html: (r) => esc(r.name) + ' ' + sideTag(r) },
+    { k: 'desc', label: 'Description (all tiers)', l: 1, get: (r) => r.desc.toLowerCase(), html: (r) => esc(r.desc) },
+    { k: 'lvl', label: 'Affix lvl', note: 'Affix level. Staff skills have a tier instead.', get: (r) => r.lvl === null ? r.tier : r.lvl, fmt: (r) => r.lvl === null ? 'tier ' + r.tier : r.lvl },
+    { k: 'lr', label: 'Req lvl', note: 'Character level the affix requires (levelreq).', get: (r) => r.lr === null ? 0 : r.lr, fmt: (r) => r.lr === null ? '-' : r.lr },
+    { k: 'il', label: 'Item level', note: 'Item levels at which some base of the type can roll it: "20+" or a window "24 to 35" (affix max level, staff skill tiers).', get: (r) => r.minIl === null ? 999 : r.minIl, fmt: lvWindow },
+    { k: 'cls', label: 'Class', l: 1, get: (r) => r.cls, fmt: (r) => r.cls ? (CLASSN[r.cls] || r.cls) + ' only' : '' },
+    { k: 'grp', label: 'Excludes', l: 1, note: 'Affixes of the same group never appear together on one item. The group is named after its first stat.', get: (r) => r.groupName, fmt: (r) => r.g ? 'group: ' + r.groupName : '' },
+    { k: 'qual', label: 'Quality', l: 1, get: (r) => r.rare ? 1 : 0, fmt: (r) => r.rare ? 'magic + rare' : 'magic only' },
+    { k: 'pm', label: 'Odds (magic)', note: 'Chance that a magic item of the type (mean over its bases, at the item level above) carries this affix. Exact.', get: (r) => r.magic, fmt: (r) => odds(r.magic) },
+    { k: 'pr', label: 'Odds (rare)', note: 'Same for a rare item. Monte Carlo (noise on rare affixes is a few percent of the value).', get: (r) => r.rareP, fmt: (r) => odds(r.rareP) },
+  ];
+
+  function filterRows() {
+    const f = $('f2').value.trim().toLowerCase().split(/\s+/).filter(Boolean), sd = $('sd2').value, av = $('av2').checked;
+    return bd.rows.filter((r) => (!sd || r.side === sd) && (!av || r.avail) &&
+      f.every((w) => (r.name + ' ' + r.desc + ' ' + r.side + ' ' + (r.cls ? (CLASSN[r.cls] || r.cls) + ' only' : '') + ' ' + r.groupName).toLowerCase().indexOf(w) >= 0));
+  }
+  function renderTable() {
+    TA.rows = filterRows();
+    const r = TA.render();
+    $('tinfo2').textContent = bd.codes.length ? r.total + ' of ' + bd.rows.length + ' affixes (showing ' + r.shown + '); odds are for a random base of the selection (' + bd.codes.length + ' bases) at item level ' + effIlvl() + '. Click a row to add it. Dimmed rows cannot roll at this item level.' : '';
+  }
+  function requestTable() {
+    if (!bd.codes.length) { bd.rows = []; renderTable(); return; }
+    const ilvl = effIlvl(), codes = bd.codes.slice();
+    const rolls = Math.min(parseInt($('mc2').value, 10), Math.max(4000, Math.floor(1000000 / codes.length)));
+    $('tinfo2').textContent = 'Computing affix odds...';
+    runJob('table', { type: 'table', codes, ilvl, rolls }, null, (rows, err) => {
+      if (!rows) { $('tinfo2').textContent = 'Error: ' + err; return; }
+      bd.rows = rows; renderTable();
+    }, () => E.builderAffixTable(codes, ilvl, { rolls }));
+  }
+
+  // ----- selected stats with sliders -----
+  function addStat(key, thr) {
+    const st = bd.stats.get(key); if (!st) return false;
+    let e = bd.sel.find((s) => s.key === key);
+    if (!e) { e = { key, thr: 0 }; bd.sel.push(e); }
+    if (thr === undefined || isNaN(thr)) thr = st.le ? st.max : st.min;
+    e.thr = Math.max(st.min, Math.min(st.max, thr));
+    return true;
+  }
+  function renderSel() {
+    const box = $('sel2');
+    if (!bd.sel.length) { box.className = 'note'; box.textContent = 'Click an affix in the table to add its stat. Each stat gets a minimum value you can move with the slider.'; return; }
+    box.className = '';
+    box.innerHTML = bd.sel.map((s, i) => {
+      const st = bd.stats.get(s.key);
+      return '<div class="selrow" data-i="' + i + '"><div class="nm"><span>' + esc(statText(s)) + '</span><button class="rm" title="remove">x</button></div>' +
+        '<div class="ctl"><span>' + (st.le ? '&lt;=' : '&gt;=') + '</span><input type="number" class="thr" value="' + s.thr + '" min="' + st.min + '" max="' + st.max + '">' +
+        '<input type="range" class="thrr" min="' + st.min + '" max="' + st.max + '" step="1" value="' + s.thr + '"><small class="note">' + st.min + ' to ' + st.max + '</small></div></div>';
+    }).join('');
+  }
+  let anTimer = null, farmTimer = null;
+  function changed(opt) {
+    opt = opt || {};
+    syncUrl();
+    clearTimeout(anTimer); anTimer = setTimeout(updateAnalysis, 120);
+    clearTimeout(farmTimer);
+    if (opt.noFarm) return;
+    farmTimer = setTimeout(runFarm, 900);
+  }
+
+  // ----- results: item levels / character level / conflicts (cheap, main thread) -----
+  const ilTxt = (lo, hi) => hi >= 99 ? lo + '+' : lo + ' to ' + hi;
+  function updateAnalysis() {
+    clearTimeout(anTimer);
+    const res = $('res2'), conf = $('conf2');
+    bd.an = null; bd.farmQ = [];
+    if (!bd.codes.length) { res.innerHTML = '<div class="note">No bases for this type / tier.</div>'; conf.innerHTML = ''; return; }
+    if (!bd.sel.length) { res.innerHTML = '<div class="note">Select at least one affix to see the item levels and farm sources.</div>'; conf.innerHTML = ''; T2.rows = []; T2.render(); $('finfo2').textContent = ''; return; }
+    const an = bd.an = E.comboAnalysis(bd.codes, condsOf());
+    const forced = $('ql2').value, qs = forced ? [forced] : ['magic', 'rare'];
+    bd.farmQ = qs.filter((q) => an[q].ok);
+    // conflicts / quality decision
+    const msgs = [];
+    for (const q of ['magic', 'rare']) {
+      if (an[q].ok) continue;
+      msgs.push('<div class="bad"><b>' + QN[q] + ' not possible:</b> ' + an[q].why.map(esc).join(' ') + '</div>');
     }
-    return out;
+    if (an.magic.ok && an.rare.ok) msgs.push('<div class="good">Possible as a magic and as a rare item.</div>');
+    else if (an.magic.ok) msgs.push('<div class="good">Only a magic item can have this combination.</div>');
+    else if (an.rare.ok) msgs.push('<div class="good">Only a rare item can have this combination.</div>');
+    if (forced && !an[forced].ok && (forced === 'magic' ? an.rare.ok : an.magic.ok)) msgs.push('<div class="bad">Quality is restricted to ' + forced + '; set it to Auto to use the other quality.</div>');
+    conf.innerHTML = msgs.join('');
+    // results panel
+    const rows = [];
+    for (const q of ['magic', 'rare']) {
+      const a = an[q];
+      if (!a.ok) { rows.push('<tr><td class="l">' + QN[q] + '</td><td colspan="3" class="l bad">not possible</td></tr>'); continue; }
+      rows.push('<tr><td class="l">' + QN[q] + '</td><td>' + a.minIl + ' <small>(' + esc(baseName(a.minIlCode)) + ')</small></td><td>' + (a.maxIl < 99 ? ilTxt(a.minIl, a.maxIl) : a.minIl + '+') + '</td><td>' + a.reqLv + ' <small>(' + esc(baseName(a.reqCode)) + ', item level ' + a.reqIl + ')</small></td></tr>');
+    }
+    const first = (x) => (x.m.minIl || x.r.minIl || 999);
+    const perRows = bd.codes.map((c) => ({ c, m: an.magic.per.find((x) => x.code === c), r: an.rare.per.find((x) => x.code === c) }))
+      .sort((x, y) => (first(x) - first(y)) || E.items[x.c].q - E.items[y.c].q);
+    const cell = (x) => x.ok ? ilTxt(x.minIl, x.maxIl) : '-';
+    const rl = (x) => x.ok ? x.reqLv : '-';
+    res.innerHTML = '<div class="tbl"><table><thead><tr><th class="l">Quality</th><th title="Lowest item level at which some base of the type can roll the whole combination">Lowest item level</th><th title="Item levels that work (a window with an upper bound exists when staff skills are involved: their tier depends on the item level)">Item level window</th><th class="l" title="max(base requirement, requirements of the cheapest affix tiers that satisfy the sliders)">Required character level</th></tr></thead><tbody>' + rows.join('') + '</tbody></table></div>' +
+      '<details><summary>Per base (' + bd.codes.length + ')</summary><div class="tbl small"><table id="tbbase"><thead><tr><th class="l">Base</th><th>qlvl</th><th class="l">Tier</th><th>Magic: item level</th><th>Magic: req lvl</th><th>Rare: item level</th><th>Rare: req lvl</th><th title="Share of the best farm source (per kill) that comes from this base">Best source: share</th></tr></thead><tbody>' +
+      perRows.map((x) => '<tr data-c="' + x.c + '"><td class="l">' + esc(baseName(x.c)) + '</td><td>' + E.items[x.c].q + '</td><td class="l">' + tierName(x.c) + '</td><td>' + cell(x.m) + '</td><td>' + rl(x.m) + '</td><td>' + cell(x.r) + '</td><td>' + rl(x.r) + '</td><td class="sh">-</td></tr>').join('') +
+      '</tbody></table></div></details>';
+    if (!bd.farmQ.length) { T2.rows = []; T2.render(); $('finfo2').textContent = ''; }
+    showShares();
+  }
+  /** per-base contribution to the best farm source, from the last farm result */
+  function showShares() {
+    const tb = $('tbbase'); if (!tb) return;
+    const top = bd.farm && bd.farm.top;
+    for (const tr of tb.querySelectorAll('tbody tr')) {
+      const td = tr.querySelector('.sh'), v = top && top.byBase ? top.byBase[tr.dataset.c] || 0 : 0;
+      td.textContent = v > 0 ? (100 * v / top.pTotal).toFixed(1) + '% (' + odds(v) + ')' : '-';
+    }
   }
 
-  function runTab2() {
-    if (!base2) { $('info2').textContent = 'Pick a base or base type first.'; return; }
-    const cs = readConds();
-    if (!cs.length) { $('info2').textContent = 'Add at least one condition.'; return; }
-    const known = new Set(statCodes.map((s) => s.key));
-    const bad = cs.find((c) => !known.has(c.key));
-    if (bad) { $('info2').textContent = 'Unknown stat "' + bad.key + '" for this base/quality - choose from the list.'; return; }
-    const sel = S = readSel(); saveSel();
-    const opts = { codes: baseCodes(base2), quality: $('ql2').value, conds: cs, mf: sel.mf, diff: sel.diff, act: sel.act,
-      area: parseInt($('ar2').value || '0', 10), rolls: parseInt($('mc2').value, 10) };
-    const ctxS = { players: sel.players, party: sel.party, ladder: sel.ladder, tz: sel.tz, quest: sel.quest, clvl: sel.clvl, mf: sel.mf, tier: sel.tier };
-    const id = ++reqId;
-    $('prog2').hidden = false; $('prog2').value = 0; $('info2').textContent = 'Working...'; $('go2').disabled = true;
+  // ----- farm sources (worker) -----
+  function runFarm() {
+    clearTimeout(farmTimer);
+    if (!bd.an || !bd.farmQ.length) return;
+    const { sel, ctxS } = pctx(); saveSel();
+    const qs = bd.farmQ.slice(), an = bd.an;
+    const codes = bd.codes.filter((c) => qs.some((q) => an[q].per.find((x) => x.code === c).ok));
+    const opts = { codes, conds: condsOf(), mf: sel.mf, diff: sel.diff, act: sel.act, area: parseInt($('ar2').value || '0', 10), rolls: parseInt($('mc2').value, 10) };
+    $('prog2').hidden = false; $('prog2').value = 0;
+    $('finfo2').textContent = 'Searching farm sources...';
     const t0 = performance.now();
-    const finish = (res) => {
-      $('go2').disabled = false; $('prog2').hidden = true;
-      let rows = res.rows;
+    const finish = (rowsByQ, err) => {
+      $('prog2').hidden = true;
+      if (!rowsByQ) { $('finfo2').textContent = 'Error: ' + err; return; }
+      const m = new Map();
+      for (const q of qs) for (const r of rowsByQ[q]) {
+        let x = m.get(r.src.key);
+        if (!x) { x = { src: r.src, pm: 0, pr: 0, pTotal: 0, perRun: 0, byBase: {} }; m.set(r.src.key, x); }
+        if (q === 'magic') x.pm = r.pTotal; else x.pr = r.pTotal;
+        x.pTotal += r.pTotal; x.perRun += r.perRun;
+        for (const c in r.byBase || {}) x.byBase[c] = (x.byBase[c] || 0) + r.byBase[c];
+      }
+      let rows = Array.from(m.values());
       if (sel.tz) rows = rows.filter((r) => r.src.tz);
       T2.rows = rows; T2.limit = parseInt($('n2').value, 10);
-      // rank by per-run when an area is selected, otherwise by per-kill
       T2.key = opts.area ? 'perrun' : 'ptot'; T2.dir = -1;
       const r = T2.render();
-      $('info2').textContent = r.total.toLocaleString() + ' sources (showing ' + r.shown + '); ' + res.pools + ' distinct (base, affix level) pools; ' +
-        (opts.quality === 'rare' ? 'Monte Carlo ' + opts.rolls.toLocaleString() + ' rolls/pool' : 'exact enumeration') + (sel.quest ? '; quest drop (act bosses)' : '') + '; ' + Math.round(performance.now() - t0) + ' ms';
-      const lines = [];
-      cs.forEach((c, i) => {
-        let best = null;
-        for (const m of res.minLv) { const x = m[i]; if (x && x.alvl !== null && (!best || x.alvl < best.alvl)) best = x; }
-        lines.push(esc(c.key) + ' >= ' + c.min + ': ' + (best ? 'needs affix level ' + best.alvl + ' (monster/item level ' + best.mlvl + '+)' : 'no affix can reach this'));
-      });
-      $('min2').innerHTML = 'Minimum levels (per condition on its own): ' + lines.join(' &nbsp;|&nbsp; ');
+      let top = null; for (const x of rows) if (!top || x.pTotal > top.pTotal) top = x;
+      bd.farm = { top, rows: rows.length };
+      showShares();
+      $('finfo2').textContent = (r.total ? '' : 'No source found: monsters of the selected difficulty/act may not drop items at these item levels (try Difficulty: All or Normal). ') + r.total.toLocaleString() + ' sources (showing ' + r.shown + ')' + (top ? '; best per kill: ' + top.src.name + ' in ' + top.src.areaName + ' (' + DIFF[top.src.diff] + '), ' + odds(top.pTotal) : '') + '; ' +
+        qs.map((q) => QN[q] + (q === 'rare' ? ' = Monte Carlo ' + opts.rolls.toLocaleString() + ' rolls/pool' : ' = exact')).join(', ') + (sel.quest ? '; quest drop (act bosses)' : '') + '; ' + Math.round(performance.now() - t0) + ' ms. Click a column header to sort.';
     };
-    if (worker) {
-      worker.onmessage = (ev) => {
-        const m = ev.data; if (m.id !== id) return;
-        if (m.type === 'progress') $('prog2').value = m.done / m.total;
-        else if (m.type === 'result') finish(m);
-        else if (m.type === 'error') { $('go2').disabled = false; $('prog2').hidden = true; $('info2').textContent = 'Error: ' + m.message; }
-      };
-      worker.postMessage({ type: 'search', id, ctx: ctxS, opts, file: DATAFILE[sel.mode] });
-    } else {
-      // fallback (no Worker support): run on the main thread
-      setTimeout(() => {
-        const res = E.affixSearch(E.getCtx(ctxS), opts, null);
-        finish(res);
-      }, 20);
+    runJob('farm', { type: 'farm', ctx: ctxS, opts, qualities: qs }, (f) => { $('prog2').value = f; }, finish, () => {
+      const out = {}; for (const q of qs) out[q] = E.affixSearch(E.getCtx(ctxS), Object.assign({}, opts, { quality: q, prune: true, byBase: true }), null).rows; return out;
+    });
+  }
+
+  // ----- URL state: ?t2=boot (or &b2=<base code>)&tr2=-1&il=85&q=&a=<stat key>:<min> (repeatable); the old ?q2=&ql=&c= link is still read -----
+  function syncUrl() {
+    try {
+      const qs = new URLSearchParams(location.search);
+      for (const k of ['q2', 'ql', 'c', 't2', 'b2', 'tr2', 'il', 'q', 'a', 'diff']) qs.delete(k);
+      if (bd.type) {
+        qs.set(bd.type.kind === 'base' ? 'b2' : 't2', bd.type.code);
+        if (bd.type.kind === 'type' && effTier() >= 0) qs.set('tr2', effTier());
+        if ($('il2').value !== '85') qs.set('il', $('il2').value);
+        if ($('ql2').value) qs.set('q', $('ql2').value);
+        for (const s of bd.sel) qs.append('a', s.key + ':' + s.thr);
+        if (E.mode === 'lod') qs.set('mode', 'lod');
+        if ($('s_diff').value !== '2') qs.set('diff', $('s_diff').value);
+      }
+      history.replaceState(null, '', location.pathname + (qs.toString() ? '?' + qs.toString() : ''));
+      $('link2').value = bd.type ? location.href : '';
+    } catch (e) { /* ignore */ }
+  }
+
+  function setType(opt) {
+    bd.type = opt; bd.sel = [];
+    refreshBuilder();
+  }
+  function refreshBuilder() {
+    bd.codes = curCodes();
+    bd.stats = new Map(E.builderStats(bd.codes).map((s) => [s.key, s]));
+    bd.sel = bd.sel.filter((s) => bd.stats.has(s.key));
+    for (const s of bd.sel) addStat(s.key, s.thr);
+    bd.farm = null;
+    renderSel(); requestTable(); changed();
+  }
+  function onPickRow(r) {
+    if (!r) return;
+    for (const m of r.mods) {
+      const st = bd.stats.get(m.key);
+      if (st) addStat(m.key, st.le ? m.max : m.min);
     }
+    renderSel(); changed();
+  }
+  function findTypeOption(w) {
+    w = w.toLowerCase();
+    const names = TYPEOPTS.filter((o) => o.kind === 'type');
+    return names.find((o) => o.name.toLowerCase() === w) || names.find((o) => o.name.toLowerCase().startsWith(w)) || names.find((o) => o.name.toLowerCase().indexOf(w) >= 0) ||
+      TYPEOPTS.find((o) => o.kind === 'base' && o.label.toLowerCase().indexOf(w) >= 0) || null;
+  }
+  function typeOptions() {
+    const tys = E.builderTypes().map((t) => ({ kind: 'type', code: t.code, name: t.name, label: typeLabel(t), search: t.name + ' ' + t.code }));
+    const ok = new Set(); for (const t of E.builderTypes()) for (const c of t.codes) ok.add(c);
+    return tys.concat(INDEX.filter((x) => x.kind === 'base' && ok.has(x.code)));
+  }
+  function initTab2() {
+    T2 = makeTable($('tb2'), cols2, 'ptot', -1);
+    TA = makeTable($('tb2a'), colsA, 'pm', -1);
+    TA.limit = 400;
+    TA.rowCls = (r) => 'pick' + (r.avail ? '' : ' dim');
+    TA.onRow = onPickRow;
+    autocomplete($('q2'), $('ac2'), () => TYPEOPTS, (x) => setType(x));
+    $('tr2').addEventListener('change', () => { if (bd.type && bd.type.kind === 'type') refreshBuilder(); });
+    $('ilr2').addEventListener('input', () => { $('il2').value = $('ilr2').value; });
+    $('ilr2').addEventListener('change', () => { syncUrl(); requestTable(); });
+    $('il2').addEventListener('change', () => { effIlvl(); syncUrl(); requestTable(); });
+    $('ql2').addEventListener('change', () => { syncUrl(); updateAnalysis(); runFarm(); });
+    $('mc2').addEventListener('change', () => { requestTable(); changed(); });
+    for (const id of ['ar2', 'n2']) $(id).addEventListener('change', () => changed());
+    $('f2').addEventListener('input', renderTable);
+    $('sd2').addEventListener('change', renderTable);
+    $('av2').addEventListener('change', renderTable);
+    $('go2').onclick = () => { updateAnalysis(); runFarm(); };
+    $('clr2').onclick = () => { bd.sel = []; renderSel(); bd.farm = null; changed({ noFarm: true }); };
+    $('link2').addEventListener('focus', () => $('link2').select());
+    const selbox = $('sel2');
+    selbox.addEventListener('click', (ev) => {
+      if (!ev.target.classList.contains('rm')) return;
+      bd.sel.splice(+ev.target.closest('.selrow').dataset.i, 1); renderSel(); changed();
+    });
+    selbox.addEventListener('input', (ev) => {
+      const row = ev.target.closest('.selrow'); if (!row) return;
+      const s = bd.sel[+row.dataset.i], st = bd.stats.get(s.key);
+      let v = parseFloat(ev.target.value); if (isNaN(v)) return;
+      v = Math.max(st.min, Math.min(st.max, Math.round(v)));
+      s.thr = v;
+      if (ev.target.classList.contains('thrr')) row.querySelector('.thr').value = v; else row.querySelector('.thrr').value = v;
+      row.querySelector('.nm span').textContent = statText(s);
+      changed();
+    });
+  }
+  /** apply the builder part of the URL (new ?t2/?b2/?a, or the old ?q2=&ql=&c= deep link); true when it set a type */
+  function applyUrl2(qs) {
+    let opt = null;
+    if (qs.get('t2')) opt = TYPEOPTS.find((o) => o.kind === 'type' && o.code === qs.get('t2'));
+    else if (qs.get('b2')) opt = TYPEOPTS.find((o) => o.kind === 'base' && o.code === qs.get('b2'));
+    else if (qs.get('q2')) opt = findTypeOption(qs.get('q2'));
+    if (!opt) return false;
+    if (qs.get('tr2')) $('tr2').value = qs.get('tr2');
+    if (qs.get('il')) { $('il2').value = qs.get('il'); effIlvl(); }
+    const q = qs.get('q') || qs.get('ql'); if (q) $('ql2').value = q;
+    $('q2').value = opt.label;
+    bd.type = opt; bd.codes = curCodes();
+    bd.stats = new Map(E.builderStats(bd.codes).map((s) => [s.key, s]));
+    bd.sel = [];
+    for (const c of qs.getAll('a').concat(qs.getAll('c'))) { const i = c.lastIndexOf(':'); addStat(c.slice(0, i), parseFloat(c.slice(i + 1))); }
+    renderSel(); requestTable(); syncUrl(); updateAnalysis(); runFarm();
+    document.getElementById('t2').click();
+    return true;
   }
 
   // ---------------- init ----------------
@@ -294,13 +523,7 @@
     $('s_mode').value = E.mode;
     $('dataInfo').textContent = 'data: D2R ' + E.data.meta.gameVersion + ' (' + (E.mode === 'lod' ? 'Lord of Destruction' : 'Reign of the Warlock') + '), built ' + E.data.meta.built;
     INDEX = E.searchIndex();
-    const typeOpts = [];
-    for (const [code, list] of E.baseTypes()) {
-      if (!list.some((c) => E.items[c].sp)) continue;
-      if (!list.some((c) => E.items[c].cr || E.items[c].am)) continue;
-      typeOpts.push({ kind: 'type', code, codes: list, label: 'Any ' + E.types[code].n.toLowerCase() + ' (' + list.length + ' bases, type ' + code + ')' });
-    }
-    BASEOPTS = typeOpts.concat(INDEX.filter((x) => x.kind === 'base' && E.items[x.code].sp && !E.items[x.code].an));
+    TYPEOPTS = typeOptions();
     const areas = Object.keys(E.data.levels).filter((id) => E.data.levels[id].mon.length || E.data.levels[id].nmon.length)
       .map((id) => ({ id, a: E.data.levels[id] })).sort((x, y) => x.a.act - y.a.act || x.id - y.id);
     const cur = $('ar2').value;
@@ -313,14 +536,17 @@
 
   /** Game mode selector: swap engine + data, re-index, drop the old results and re-run the current tab. */
   async function switchMode(m) {
-    const had2 = T2 && T2.rows.length > 0;
+    const had2 = bd.sel.length > 0;
     await useEngine(m);
     if (target1) { target1 = INDEX.find((x) => sameTarget(x, target1)) || null; if (!target1) { $('q1').value = ''; T1.rows = []; T1.render(); } }
-    if (base2) { base2 = BASEOPTS.find((x) => sameTarget(x, base2)) || null; if (!base2) { $('q2').value = ''; $('conds').innerHTML = ''; } }
-    if (base2) refreshStats();
+    if (bd.type) {
+      const o = TYPEOPTS.find((x) => x.kind === bd.type.kind && x.code === bd.type.code) || null;
+      bd.type = o; bd.farm = null;
+      if (!o) { $('q2').value = ''; bd.sel = []; }
+      refreshBuilder();
+    }
     T2.rows = []; T2.render();
     if (target1) runTab1();
-    if (had2 && base2) runTab2();
   }
 
   async function init() {
@@ -330,9 +556,8 @@
     if (qs0.get('tz')) { $('s_tz').checked = true; $('s_clvl').value = qs0.get('tz'); }
     if (qs0.get('tier')) $('s_tier').value = qs0.get('tier');
     if (qs0.get('mf')) $('s_mf').value = qs0.get('mf');
+    if (qs0.get('diff')) $('s_diff').value = qs0.get('diff');
     await useEngine($('s_mode').value);
-    const noWorker = new URLSearchParams(location.search).has('noworker');
-    try { if (noWorker) throw new Error('worker disabled'); worker = new Worker('worker.js'); worker.onerror = () => { worker = null; }; } catch (e) { worker = null; }
 
     // tabs
     const tabs = ['t1', 't2', 't3'];
@@ -342,7 +567,7 @@
     for (const k of KEYS) $(k).addEventListener('change', () => {
       saveSel();
       if (k === 's_mode') { switchMode($('s_mode').value).catch((e) => { $('info1').textContent = 'Could not load data: ' + e; }); return; }
-      updTier(); if (target1) runTab1();
+      updTier(); if (target1) runTab1(); if (bd.an) { syncUrl(); runFarm(); }
     });
     $('s_act').addEventListener('change', () => { if (target1) runTab1(); });
 
@@ -356,36 +581,17 @@
     $('n1').addEventListener('change', runTab1);
 
     // tab 2
-    T2 = makeTable($('tb2'), cols2, 'ptot', -1);
-    autocomplete($('q2'), $('ac2'), () => BASEOPTS, (x) => {
-      base2 = x;
-      const q = $('ql2');
-      refreshStats();
-      $('conds').innerHTML = ''; addCond();
-    });
-    $('ql2').addEventListener('change', () => { refreshStats(); });
-    $('addcond').onclick = () => addCond();
-    $('go2').onclick = runTab2;
+    initTab2();
     // about
     $('about').innerHTML = aboutHtml();
-    // optional deep links for smoke tests: ?q1=Griffon   or   ?q2=circlet&ql=magic&c=%2B%23%25%20Faster%20Cast%20Rate:20
+    // deep links: ?q1=Griffon   or the item builder: ?t2=circ&q=magic&a=%2B%23%25%20Faster%20Cast%20Rate:20 (old form ?q2=circlet&ql=magic&c=... still works)
     const qs = new URLSearchParams(location.search);
     if (qs.get('q1')) {
       const w = qs.get('q1').toLowerCase();
       target1 = INDEX.find((x) => (x.search || x.label).toLowerCase().indexOf(w) >= 0);
       if (target1) { $('q1').value = target1.label; runTab1(); }
     }
-    if (qs.get('q2')) {
-      const w = qs.get('q2').toLowerCase();
-      base2 = BASEOPTS.find((x) => x.label.toLowerCase().indexOf(w) >= 0);
-      if (base2) {
-        $('q2').value = base2.label; if (qs.get('ql')) $('ql2').value = qs.get('ql');
-        refreshStats(); $('conds').innerHTML = '';
-        for (const c of qs.getAll('c')) { const i = c.lastIndexOf(':'); addCond(c.slice(0, i), parseFloat(c.slice(i + 1))); }
-        document.getElementById('t2').click();
-        runTab2();
-      }
-    }
+    applyUrl2(qs);
   }
 
   function aboutHtml() {

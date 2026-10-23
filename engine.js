@@ -768,6 +768,7 @@
     for (const a of allAffixes) {
       for (const t of a.it) (affByType[a.k][t] = affByType[a.k][t] || []).push(a);
     }
+    D.automagic.forEach((a, i) => { a.i = i; });   // identity of an automagic row (the item builder lists them by index)
     const autoByGroup = {};
     for (const a of D.automagic) (autoByGroup[a.g] = autoByGroup[a.g] || []).push(a);
 
@@ -937,7 +938,11 @@
         if (m[4] !== c.key) continue;
         const mn = m[2], mx = m[3];
         let p;
-        if (c.min <= mn) p = 1;
+        if (c.le) {   // lower is better (negative stats such as "Requirements -20%"): value <= c.min
+          if (c.min >= mx) p = 1;
+          else if (c.min < mn) p = 0;
+          else p = (c.min - mn + 1) / (mx - mn + 1);
+        } else if (c.min <= mn) p = 1;
         else if (c.min > mx) p = 0;
         else p = (mx - c.min + 1) / (mx - mn + 1);
         if (p > best) best = p;
@@ -1035,7 +1040,7 @@
 
     /** Rare item: the game's loop (CONFIG.rareAffixCounts ...) simulated with a seeded RNG; the expected value over the rolled affix
      *  values and over the automagic row / staff mods is taken analytically. */
-    function rareMC(code, el, conds, autoList, rolls, seed, sd) {
+    function rareMC(code, el, conds, autoList, rolls, seed, sd, hits) {
       const it = items[code];
       const rng = mulberry32(seed);
       const nc = conds.length;
@@ -1079,6 +1084,7 @@
           const idx = draw(Sd);
           if (idx < 0) { if (suffix) sFull = true; else pFull = true; continue; }   // nothing eligible: the side is closed, the step is not used up
           used.push(Sd.groups[idx]);
+          if (hits) (suffix ? hits.s : hits.p)[idx]++;   // per-affix appearance counting (builder table)
           const cps = Sd.cps[idx];
           for (let i = 0; i < nc; i++) miss[i] *= 1 - cps[i];
           if (suffix) { if (++ns >= CONFIG.rareMaxPerSide) sFull = true; } else if (++np >= CONFIG.rareMaxPerSide) pFull = true;
@@ -1195,7 +1201,7 @@
       const probs = new Map();
       let done = 0;
       for (const [pk, [code, alvl, ilvl]] of need) {
-        probs.set(pk, affixProb(code, alvl, qn, o.conds, { rolls: o.rolls, ilvl }));
+        probs.set(pk, o.prune && !planCombo(code, ilvl, qn, o.conds).ok ? 0 : affixProb(code, alvl, qn, o.conds, { rolls: o.rolls, ilvl }));   // prune: structurally impossible pools are exactly 0
         done++;
         if (progress && (done % 3 === 0 || done === need.size)) progress(done, need.size);
       }
@@ -1207,9 +1213,298 @@
           if (w > bestW) { bestW = w; alvl = need.get(pk)[1]; }
         }
         if (tot <= 0) continue;
-        rows.push({ src: r.src, pBase: r.pbase, pQual: r.pq, pAff: tot / r.pq, pTotal: tot, perRun: tot * r.src.perRun, alvl });
+        const row = { src: r.src, pBase: r.pbase, pQual: r.pq, pAff: tot / r.pq, pTotal: tot, perRun: tot * r.src.perRun, alvl };
+        if (o.byBase) {   // contribution of each base code to pTotal
+          row.byBase = {};
+          for (const [pk, w] of r.parts) { const c = need.get(pk)[0]; row.byBase[c] = (row.byBase[c] || 0) + w * probs.get(pk); }
+        }
+        rows.push(row);
       }
       return { rows, minLv: o.codes.length ? o.codes.map((c) => minLevels(c, qn, o.conds)) : [], pools: need.size };
+    }
+
+    // ---------------- item builder (UI tab 2): types, affix catalogue, appearance odds, feasibility / levels of a combination ----------------
+    // Nothing here changes a rule: it re-uses eligible(), condProb(), staffDist(), affixLevel(), the magic split and the rare loop (rareMC) and
+    // answers builder questions from them. A condition is {key, min[, le]}: stat key >= min (le: <= min, for stats where lower is better).
+    const tierOf = (idx) => Math.floor(idx / CONFIG.staffMods.perTier) + 1;
+    /** staff mod tiers a drop of item level il can roll */
+    function staffTiersAt(il) {
+      const b = staffBase(il), s = new Set();
+      for (const [, sh] of CONFIG.staffMods.tierShift) s.add(Math.max(1, b + sh));
+      return s;
+    }
+    const staffMaxVal = () => Math.max.apply(null, CONFIG.staffMods.value.map((v) => v[1]));
+    const ilOf = (code, ilvl) => Math.max(ilvl, items[code].q, 1);   // a base never drops below its own level in the builder
+    const affId = (a) => a.k + a.i;   // 'p12' / 's7' / 'a3' (automagic row); staff mod skills are 'k' + stat key
+
+    let btCache = null;
+    /** item types the builder offers: [{code, name, cls, codes (rare/magic-capable spawnable bases), broad}]. broad = an abstract type no base is
+     *  directly of ("Any Armor", "Melee Weapon", ...); the concrete ones (Boots, Sword, Circlet, ...) come first. */
+    function builderTypes() {
+      if (btCache) return btCache;
+      const direct = new Set();
+      for (const c in items) { direct.add(items[c].t); if (items[c].t2) direct.add(items[c].t2); }
+      const out = [];
+      for (const [code, list] of baseTypes()) {
+        const codes = list.filter((c) => items[c].cr || items[c].am);
+        if (codes.length) out.push({ code, name: types[code].n, cls: types[code].cls || '', codes, broad: !direct.has(code) });
+      }
+      out.sort((a, b) => (a.broad - b.broad) || a.name.localeCompare(b.name));
+      return (btCache = out);
+    }
+    /** bases of a type, optionally one tier only (tier 0 normal / 1 exceptional / 2 elite; jewelry, charms and jewels have no tiers and always stay) */
+    function builderBases(typeCode, tier) {
+      const ty = builderTypes().find((t) => t.code === typeCode);
+      if (!ty) return [];
+      return ty.codes.filter((c) => !(tier >= 0) || items[c].k === 'm' || items[c].tier === tier);
+    }
+
+    /** [first, last] item level (base level .. 99) where pred holds, or null */
+    function ilRange(code, pred) {
+      let lo = null, hi = null;
+      for (let il = Math.max(1, items[code].q); il <= 99; il++) if (pred(il)) { if (lo === null) lo = il; hi = il; }
+      return lo === null ? null : [lo, hi];
+    }
+    const grpNames = new Map();
+    /** readable name of an affix group (the stat of its first affix, "Faster Cast Rate"); the group is what makes affixes mutually exclusive */
+    function groupName(g) {
+      if (!g) return '';
+      if (!grpNames.size) {
+        for (const a of allAffixes.concat(D.automagic)) if (a.g && !grpNames.has(a.g) && a.mods.length) grpNames.set(a.g, a.mods[0][4].replace(/[+-]?#%?/g, '').replace(/\(.*?\)/g, '').replace(/\s+/g, ' ').trim());
+      }
+      return grpNames.get(g) || ('group ' + g);
+    }
+    /** Every affix row that can ever roll on one of the bases: Map id -> {id, side prefix|suffix|auto|staff, name, mods:[{key,min,max}], lvl, lr, cls, rare, g,
+     *  groupName, maxLvl, tier (staff), per: Map code -> [first, last] item level]}. ilvl (optional) clamps socket ranges to the sockets the bases hold. */
+    function builderCatalog(codes, ilvl) {
+      const rows = new Map();
+      const put = (id, mk, code, rng) => {
+        if (!rng) return;
+        let r = rows.get(id);
+        if (!r) { r = mk(); r.id = id; r.per = new Map(); rows.set(id, r); }
+        r.per.set(code, rng);
+      };
+      const socketHi = codes.reduce((m, c) => Math.max(m, maxSockets(c, ilvl === undefined ? 99 : ilOf(c, ilvl))), 0);
+      for (const code of codes) {
+        const it = items[code], cls = itemClasses(it);
+        const mk = (side, a) => () => ({
+          side, name: a.dn || a.n, lvl: a.lvl, lr: a.lr, cls: a.cls || '', rare: !!a.rare, g: a.g, groupName: groupName(a.g), maxLvl: a.max || 0,
+          mods: a.mods.map((m) => m[0] === 'sock' ? { key: m[4], min: Math.max(1, Math.min(m[2] || +m[1] || 0, socketHi)), max: Math.max(1, Math.min(m[3] || +m[1] || 0, socketHi)) } : { key: m[4], min: m[2], max: m[3] }),
+        });
+        const okAt = (a, il) => { const al = affixLevel(il, it); return a.lvl <= al && (!a.max || a.max >= al) && (!(a.mods.length && a.mods[0][0] === 'sock') || maxSockets(code, il) > 0); };
+        for (const kind of ['p', 's']) {
+          const seen = new Set();
+          for (const t of it.anc) for (const a of (affByType[kind][t] || [])) {
+            if (seen.has(affId(a))) continue;
+            seen.add(affId(a));
+            if (!a.sp || !affixFits(a, it, cls)) continue;
+            put(affId(a), mk(kind === 'p' ? 'prefix' : 'suffix', a), code, ilRange(code, (il) => okAt(a, il)));
+          }
+        }
+        if (it.ap) for (const a of (autoByGroup[it.ap] || [])) if (affixFits(a, it, cls)) put(affId(a), mk('auto', a), code, ilRange(code, (il) => okAt(a, il)));
+        const L = staffSkills(code);
+        if (L) {
+          const vs = CONFIG.staffMods.value.map((v) => v[1]);
+          for (const s of L) {
+            if (!s.ok) continue;
+            put('k' + s.k, () => ({ side: 'staff', name: 'Staff skill', lvl: null, lr: null, cls: '', rare: true, g: 0, groupName: '', maxLvl: 0, tier: tierOf(s.idx), mods: [{ key: s.k, min: Math.min.apply(null, vs), max: Math.max.apply(null, vs) }] }),
+              code, ilRange(code, (il) => staffTiersAt(il).has(tierOf(s.idx))));
+          }
+        }
+      }
+      return rows;
+    }
+    /** stats a type can roll over all tiers: [{key, min, max, text, le (lower is better: every value <= 0), staff}] sorted by text */
+    function builderStats(codes) {
+      const m = new Map();
+      for (const r of builderCatalog(codes).values()) for (const x of r.mods) {
+        const cur = m.get(x.key) || { key: x.key, min: x.min, max: x.max, staff: r.side === 'staff' };
+        cur.min = Math.min(cur.min, x.min); cur.max = Math.max(cur.max, x.max);
+        m.set(x.key, cur);
+      }
+      for (const s of m.values()) { s.le = s.max <= 0 && s.min < 0 && s.key.split('#').length === 2; s.text = describe(s.key, s.min, s.max); }
+      return Array.from(m.values()).sort((a, b) => a.text.localeCompare(b.text));
+    }
+
+    /** P(each affix row appears) on one base of a given item level and quality: Map id -> p. Magic: exact (the magic split + group exclusion,
+     *  same model as affixProb); rare: the rare loop Monte Carlo (rareMC) counting picks; automagic rows and staff mod skills as in affixProb. */
+    function affixAppearance(code, ilvl, quality_, rolls, seed) {
+      const it = items[code], rare = quality_ === 'rare';
+      const el = eligible(code, affixLevel(ilvl, it), rare, ilvl);
+      const out = new Map();
+      if (el.auto.length) { let W = 0; for (const a of el.auto) W += a.f; for (const a of el.auto) out.set(affId(a), a.f / W); }
+      const L = staffSkills(code);
+      if (L) {
+        const sb = staffBase(ilvl);
+        for (const s of L) {
+          if (!s.ok) continue;
+          let p = 0; for (const st of staffDist(code, sb, [{ key: s.k, min: 1 }])) if (st.mask & 1) p += st.p;
+          if (p > 0) out.set('k' + s.k, p);
+        }
+      }
+      if (!el.p.length && !el.s.length) return out;
+      if (rare) {
+        const hits = { p: new Float64Array(el.p.length), s: new Float64Array(el.s.length) }, n = rolls || 50000;
+        rareMC(code, el, [], [{ w: 1, c: [] }], n, seed || 12345, [{ p: 1, mask: 0 }], hits);
+        el.p.forEach((a, i) => out.set(affId(a), hits.p[i] / n));
+        el.s.forEach((a, i) => out.set(affId(a), hits.s[i] / n));
+        return out;
+      }
+      const split = CONFIG.magicSplit;
+      let both = split.both, po = split.prefixOnly, so = split.suffixOnly;
+      if (!el.p.length) { so = 1; both = 0; po = 0; } else if (!el.s.length) { po = 1; both = 0; so = 0; }
+      let Wp = 0, Ws = 0; for (const a of el.p) Wp += a.f; for (const a of el.s) Ws += a.f;
+      const pg = new Set(el.p.map((a) => a.g)), shared = new Set();
+      for (const a of el.s) if (pg.has(a.g)) shared.add(a.g);
+      const gm = (g) => (shared.has(g) && g ? g : 0);   // only groups present on both sides exclude each other
+      const sufG = new Map(), preG = new Map();
+      let pre0 = 0;
+      for (const b of el.s) if (gm(b.g)) sufG.set(b.g, (sufG.get(b.g) || 0) + b.f / Ws);
+      for (const a of el.p) { if (gm(a.g)) preG.set(a.g, (preG.get(a.g) || 0) + a.f / Wp); else pre0 += a.f / Wp; }
+      for (const a of el.p) out.set(affId(a), (both + po) * a.f / Wp);
+      for (const b of el.s) {
+        const wb = b.f / Ws, gb = gm(b.g);
+        let acc = pre0 * wb;
+        for (const [g, wa] of preG) { const ex = sufG.get(g) || 0; if (ex < 1 && gb !== g) acc += wa * wb / (1 - ex); }
+        out.set(affId(b), so * wb + both * acc);
+      }
+      return out;
+    }
+
+    /** The builder's affix table for a set of bases at an item level: catalogue rows with availability at that level and appearance odds (mean over
+     *  the bases, a base that cannot roll the affix counting 0) for magic (exact) and rare (Monte Carlo, o.rolls per base). */
+    function builderAffixTable(codes, ilvl, o) {
+      o = o || {};
+      const cat = builderCatalog(codes, ilvl);
+      const sum = { magic: new Map(), rare: new Map() };
+      for (const code of codes) {
+        const il = ilOf(code, ilvl);
+        for (const q of o.rare === false ? ['magic'] : ['magic', 'rare']) {
+          for (const [id, p] of affixAppearance(code, il, q, o.rolls, o.seed)) sum[q].set(id, (sum[q].get(id) || 0) + p);
+        }
+      }
+      const rows = [];
+      for (const r of cat.values()) {
+        let lo = null, hi = null, nOn = 0;
+        for (const [code, [a, b]] of r.per) {
+          lo = lo === null ? a : Math.min(lo, a); hi = hi === null ? b : Math.max(hi, b);
+          const il = ilOf(code, ilvl);
+          if (il >= a && il <= b) nOn++;
+        }
+        rows.push({ id: r.id, side: r.side, name: r.name, mods: r.mods, desc: r.mods.map((m) => describe(m.key, m.min, m.max)).join(' / '), lvl: r.lvl, lr: r.lr, cls: r.cls, rare: r.rare,
+          g: r.g, groupName: r.groupName, maxLvl: r.maxLvl, tier: r.tier || 0, minIl: lo, maxIl: hi, nBases: r.per.size, nOn, avail: nOn > 0,
+          magic: (sum.magic.get(r.id) || 0) / codes.length, rareP: r.rare ? (sum.rare.get(r.id) || 0) / codes.length : 0 });
+      }
+      return rows;
+    }
+
+    /** Candidate sources for the conditions on a base at item level il: one entry per distinct (side, group, level requirement, covered conditions). */
+    function comboSources(code, il, quality_, conds) {
+      const it = items[code], nc = conds.length;
+      const el = eligible(code, affixLevel(il, it), quality_ === 'rare', il);
+      const out = new Map();
+      const add = (side, a) => {
+        let mask = 0; for (let i = 0; i < nc; i++) if (condProb(a, conds[i]) > 0) mask |= 1 << i;
+        if (!mask) return;
+        const g = side === 'a' ? 0 : a.g, key = side + '|' + g + '|' + (a.lr || 0) + '|' + mask;
+        if (!out.has(key)) out.set(key, { side, g, lr: a.lr || 0, mask });
+      };
+      for (const a of el.p) add('p', a);
+      for (const a of el.s) add('s', a);
+      for (const a of el.auto) add('a', a);
+      const L = staffSkills(code);
+      if (L) {
+        const tiers = staffTiersAt(il), mv = staffMaxVal();
+        conds.forEach((c, i) => {
+          if (c.le || c.min > mv) return;
+          for (const s of L) if (s.ok && s.k === c.key && tiers.has(tierOf(s.idx))) out.set('k' + s.idx, { side: 'k', g: 0, lr: 0, mask: 1 << i });
+        });
+      }
+      return Array.from(out.values());
+    }
+    /** Can base `code` at item level il carry all conditions as a `quality_` item, and what is the lowest character level the affixes then require?
+     *  Structure only (positive probability): slots (magic 1 prefix + 1 suffix, rare 3 + 3 within the count, automagic and staff skills use none),
+     *  affix groups (no two of one group), rare-only affixes on rares, item level windows. relax = {groups, slots} drops those checks (explanations). */
+    function planCombo(code, il, quality_, conds, relax) {
+      relax = relax || {};
+      const nc = conds.length;
+      if (!nc) return { ok: true, lr: 0, np: 0, ns: 0 };
+      const srcs = comboSources(code, il, quality_, conds);
+      const full = (1 << nc) - 1, rare = quality_ === 'rare';
+      const lim = relax.slots ? { p: 99, s: 99, tot: 99 } : rare ? { p: CONFIG.rareMaxPerSide, s: CONFIG.rareMaxPerSide, tot: Math.max.apply(null, items[code].t === 'jewl' ? CONFIG.rareJewelCounts : CONFIG.rareAffixCounts) } : { p: 1, s: 1, tot: 2 };
+      const kmax = CONFIG.staffMods.count.length - 1;
+      const byBit = conds.map((c, i) => srcs.filter((s) => (s.mask >> i) & 1));
+      let best = null;
+      const groups = [];
+      const dfs = (cov, np, ns, na, nk, lr) => {
+        const score = relax.slots ? np + ns : lr;
+        if (best && score >= best.score) return;
+        if (cov === full) { best = { score, np, ns, lr }; return; }
+        let bit = 0; while ((cov >> bit) & 1) bit++;
+        for (const s of byBit[bit]) {
+          let dp = 0, ds = 0, da = 0, dk = 0;
+          if (s.side === 'p') { if (np >= lim.p || np + ns >= lim.tot) continue; dp = 1; }
+          else if (s.side === 's') { if (ns >= lim.s || np + ns >= lim.tot) continue; ds = 1; }
+          else if (s.side === 'a') { if (na >= 1) continue; da = 1; }
+          else { if (nk >= kmax) continue; dk = 1; }
+          if (s.g && !relax.groups && groups.indexOf(s.g) >= 0) continue;
+          if (s.g) groups.push(s.g);
+          dfs(cov | s.mask, np + dp, ns + ds, na + da, nk + dk, Math.max(lr, s.lr));
+          if (s.g) groups.pop();
+        }
+      };
+      dfs(0, 0, 0, 0, 0, 0);
+      return best ? { ok: true, lr: best.lr, np: best.np, ns: best.ns } : { ok: false };
+    }
+    /** one base: item levels (base level .. 99) at which the combination is possible: first / last, and the lowest character level it requires
+     *  (max of the base's own requirement and the affixes') with the first item level reaching it */
+    function comboForBase(code, conds, quality_, relax) {
+      const it = items[code], cache = new Map();
+      let minIl = null, maxIl = null, req = null, reqIl = null, np = null, ns = null;
+      for (let il = Math.max(1, it.q); il <= 99; il++) {
+        const ck = affixLevel(il, it) + '|' + staffBase(il) + '|' + maxSockets(code, il);
+        let p = cache.get(ck);
+        if (!p) { p = planCombo(code, il, quality_, conds, relax); cache.set(ck, p); }
+        if (!p.ok) continue;
+        if (minIl === null) { minIl = il; np = p.np; ns = p.ns; }
+        maxIl = il;
+        const r = Math.max(it.lv || 0, p.lr);
+        if (req === null || r < req) { req = r; reqIl = il; }
+      }
+      return { code, ok: minIl !== null, minIl, maxIl, reqLv: req, reqIl, np, ns };
+    }
+    const anyOk = (codes, conds, q, relax) => codes.some((c) => comboForBase(c, conds, q, relax).ok);
+    /** why no base can carry the combination as a `quality_` item: list of sentences */
+    function explainCombo(codes, conds, quality_) {
+      const txt = (c) => describe(c.key, c.min, c.min);
+      const dead = conds.filter((c) => !anyOk(codes, [c], quality_, { groups: true, slots: true }));
+      if (dead.length) return dead.map((c) => txt(c) + ' cannot be rolled on a ' + quality_ + ' item of this type' + (quality_ === 'rare' && anyOk(codes, [c], 'magic', { groups: true, slots: true }) ? ' (only magic-only affixes give it)' : '') + '.');
+      if (!anyOk(codes, conds, quality_, { groups: true, slots: true })) return ['No single item level makes all of these stats available together (affix levels, or the item level window of staff skills).'];
+      if (!anyOk(codes, conds, quality_, { slots: true })) {
+        const out = [];
+        for (let i = 0; i < conds.length; i++) for (let j = i + 1; j < conds.length; j++) if (!anyOk(codes, [conds[i], conds[j]], quality_, { slots: true })) out.push(txt(conds[i]) + ' and ' + txt(conds[j]) + ' are only available from affixes of the same group, which cannot appear together.');
+        return out.length ? out : ['Two or more of these stats are only available from affixes of the same group, which cannot appear together.'];
+      }
+      let best = null;
+      for (const c of codes) { const r = comboForBase(c, conds, quality_, { slots: true }); if (r.ok && (!best || r.np + r.ns < best.np + best.ns)) best = r; }
+      return ['Needs at least ' + best.np + ' prefix' + (best.np === 1 ? '' : 'es') + ' and ' + best.ns + ' suffix' + (best.ns === 1 ? '' : 'es') + (quality_ === 'magic' ? ', a magic item has 1 prefix and 1 suffix.' : ', a rare item has at most ' + CONFIG.rareMaxPerSide + ' of each and ' + Math.max.apply(null, CONFIG.rareAffixCounts) + ' affixes in all.')];
+    }
+    /** The builder's answer for a combination on a set of bases: per quality {ok, why[], per[] (comboForBase of each base), minIl/minIlCode (lowest item level),
+     *  maxIl (latest item level any base still allows), reqLv/reqCode (lowest character level the finished item needs)} */
+    function comboAnalysis(codes, conds) {
+      const out = {};
+      for (const q of ['magic', 'rare']) {
+        const per = codes.map((c) => comboForBase(c, conds, q));
+        const ok = per.filter((x) => x.ok);
+        const r = { ok: ok.length > 0, per, why: ok.length ? [] : explainCombo(codes, conds, q) };
+        if (ok.length) {
+          const lo = ok.reduce((a, b) => (b.minIl < a.minIl ? b : a)), rq = ok.reduce((a, b) => (b.reqLv < a.reqLv ? b : a));
+          r.minIl = lo.minIl; r.minIlCode = lo.code; r.maxIl = Math.max.apply(null, ok.map((x) => x.maxIl));
+          r.reqLv = rq.reqLv; r.reqCode = rq.code; r.reqIl = rq.reqIl;
+        }
+        out[q] = r;
+      }
+      return out;
     }
 
     // ---------------- search index ----------------
@@ -1257,6 +1552,7 @@
       mode, heraldsAvailable, sunderChance, sunderPaths, isSunder, adjQuality, heraldSpawnPct, quality, qualityTotals, sources, srcDist, chanceFor, baseQualityChance, affixLevel, minIlvlForAlvl, eligible, maxSockets, affixProb, minLevels, staffDist, staffBase,
       statList, describe, affixSearch, searchIndex, baseTypes, metaCache, uniqById, setById, uniqByCode, setByCode, prettyId, tzLevel,
       eligibleUniques, eligibleSets, condProb, trialsFor,
+      builderTypes, builderBases, builderCatalog, builderStats, builderAffixTable, affixAppearance, planCombo, comboForBase, comboAnalysis, explainCombo, groupName,
     };
   }
 

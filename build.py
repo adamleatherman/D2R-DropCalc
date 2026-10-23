@@ -177,6 +177,7 @@ def build(mode):
                 "t": t,
                 "anc": anc,
                 "q": num(r.get("level")),
+                "lv": num(r.get("levelreq")),   # character level the base itself requires
                 "r": max(1, own.get("rar", 0)),   # generic weapN/armoN weight = ItemTypes.txt Rarity of the first type, floor 1 (D2MOO DATATBLS_CreateItemTypeTreasureClasses)
                 "sp": num(r.get("spawnable")),
                 "ml": num(r.get("magic lvl")),
