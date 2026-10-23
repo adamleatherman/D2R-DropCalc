@@ -565,6 +565,32 @@
       F.bowEthRow = ['bow', 'xbow'].some((t) => E.builderBases(t, -1).some((c) => E.builderCatalog([c], 85).has('xeth')));
       F.monarchEthRow = E.builderCatalog(['uit'], 85).has('xeth');
       F.ethSetQuals = E.builderCatalog(['uit'], 85).get('xeth').quals;
+      // area grouping (areaSources): champions / uniques / minions / heralds of one area merged; per-kill odds of a merged row = each member's, area totals unchanged
+      F.groups = {};
+      for (const tzOn of [false, true]) {
+        const cx = E.getCtx({ players: 1, party: 1, ladder: true, tz: tzOn, clvl: 85, tier: 1, mf: 0 }), tg = { kind: 'base', code: 'uit' };
+        const raw = E.sources(cx).filter((s) => s.diff === 2), grp = E.areaSources(cx).filter((s) => s.diff === 2);
+        let worst = 0, members = 0;
+        for (const g of grp) {
+          if (!g.members) continue;
+          const ids = g.mon.split(' '), pg = E.chanceFor(cx, g, tg, 0).target;
+          for (const s of raw) if (s.rank === g.rank && s.area === g.area && s.tz === g.tz && s.mlvl === g.mlvl && ids.indexOf(s.mon) >= 0) {
+            members++; const p = E.chanceFor(cx, s, tg, 0).target; worst = Math.max(worst, Math.abs(p - pg) / Math.max(pg, 1e-300)); }
+        }
+        const tot = (L) => L.reduce((t, s) => t + E.chanceFor(cx, s, tg, 0).target * s.perRun, 0);
+        const cnt = (L, rank, area) => L.filter((s) => s.rank === rank && s.areaName === area && s.tz === tzOn).length;
+        F.groups[tzOn ? 'tz' : 'noTz'] = { worst, members, grouped: grp.filter((s) => s.members).length, rawGroupable: raw.filter((s) => /champion|unique|minion|herald/.test(s.rank)).length,
+          totRaw: tot(raw), totGrp: tot(grp), drifterChamp: cnt(grp, 'champion', 'Drifter Cavern'), drifterUnique: cnt(grp, 'unique', 'Drifter Cavern'),
+          drifterChampRaw: cnt(raw, 'champion', 'Drifter Cavern'), bloodMoorHerald: cnt(grp, 'herald', 'Blood Moor'), bloodMoorHeraldRaw: cnt(raw, 'herald', 'Blood Moor') };
+      }
+      // All tiers (tier 0): one 'Herald tier N' row per tier, each equal to the per-monster herald of that tier (Blood Moor, Hell, Sunder Charm path via Monarch + Flame Rift)
+      { const all = E.areaSources(E.getCtx({ players: 1, party: 1, ladder: true, tz: true, clvl: 85, tier: 0, mf: 0 })).filter((s) => s.rank === 'herald' && s.areaName === 'Blood Moor' && s.diff === 2);
+        const names = all.map((s) => s.name), tg = { kind: 'unique', id: 'PreCrafted Flame Rift' };
+        let worst = 0;
+        for (const g of all) { const cx = E.getCtx({ players: 1, party: 1, ladder: true, tz: true, clvl: 85, tier: g.tier, mf: 0 }); const r = E.sources(cx).find((x) => x.rank === 'herald' && x.mon === 'zombie1' && x.areaName === 'Blood Moor' && x.diff === 2);
+          const cx0 = E.getCtx({ players: 1, party: 1, ladder: true, tz: true, clvl: 85, tier: 0, mf: 0 }); const pg = E.chanceFor(cx0, g, tg, 0).target, pr = E.chanceFor(E.getCtx({ players: 1, party: 1, ladder: true, tz: true, clvl: 85, tier: g.tier, mf: 0 }), r, tg, 0).target;
+          worst = Math.max(worst, Math.abs(pg - pr) / Math.max(pr, 1e-300)); }
+        F.heraldTiers = { names, worst, p: all.map((g) => E.chanceFor(E.getCtx({ players: 1, party: 1, ladder: true, tz: true, clvl: 85, tier: 0, mf: 0 }), g, tg, 0).target) }; }
     }
     res.sourcesCount = E.sources(ctxFor(1, 1)).length;
     res.config = E.CONFIG;

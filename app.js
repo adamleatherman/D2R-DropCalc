@@ -38,7 +38,7 @@
     return {
       diff: parseInt($('s_diff').value, 10), players, party,
       mf: clampInt($('s_mf'), 0, 1000), tz: $('s_tz').checked, quest: $('s_quest').checked, clvl: clampInt($('s_clvl'), 1, 99),
-      mode: E.mode, tier: parseInt($('s_tier').value, 10) || 1,
+      mode: E.mode, tier: parseInt($('s_tier').value, 10) || 0,   // 0 = all tiers (one herald row per tier)
       ladder: $('s_ladder').value === '1', act: parseInt($('s_act').value, 10),
     };
   }
@@ -90,7 +90,7 @@
   const HERALD_TIP = 'Drop table: monstats TreasureClassHerald(H), group-upgraded at mlvl + herald tier boost (group 41: Act N (H) Herald A-C).';
   const rankTag = (r) => r === 'regular' ? '' : r === 'herald' ? ' <span class="tag herald" title="' + esc(HERALD_TIP) + '">herald</span>' : ' <span class="tag ' + r + '">' + r + '</span>';
   const srcCols = [
-    { k: 'name', label: 'Monster', l: 1, get: (r) => r.src.name, html: (r) => esc(r.src.name) + rankTag(r.src.rank) },
+    { k: 'name', label: 'Monster', l: 1, get: (r) => r.src.name, html: (r) => (r.src.members ? '<span title="' + esc(r.src.members.join(', ')) + '">' + esc(r.src.name) + '</span>' : esc(r.src.name)) + rankTag(r.src.rank) },
     { k: 'area', label: 'Area', l: 1, get: (r) => r.src.areaName, html: (r) => esc(r.src.areaName) + (r.src.tz ? ' <span class="tz">TZ</span>' : '') },
     { k: 'diff', label: 'Diff', l: 1, get: (r) => r.src.diff, fmt: (r) => DIFF[r.src.diff].slice(0, 2) + (r.src.diff == 1 ? 'm' : '') },
     { k: 'act', label: 'Act', get: (r) => r.src.act },
@@ -162,7 +162,7 @@
   function getSources(sel) {
     const ctx = E.getCtx({ players: sel.players, party: sel.party, ladder: sel.ladder, tz: sel.tz, quest: sel.quest, clvl: sel.clvl, mf: sel.mf, tier: sel.tier });
     const sig = JSON.stringify([sel.quest, sel.tz, sel.clvl, sel.mode, sel.tier, sel.players, sel.party]);
-    if (srcCache.sig !== sig) srcCache = { sig, list: E.sources(ctx) };
+    if (srcCache.sig !== sig) srcCache = { sig, list: E.areaSources(ctx) };   // champions / uniques / minions / heralds merged per area
     return { ctx, list: srcCache.list };
   }
 
@@ -180,7 +180,7 @@
       if (sel.act && src.act !== sel.act) continue;
       if (rk && src.rank !== rk) continue;
       if (sel.tz && !src.tz) continue;
-      if (f && (src.name + ' ' + src.mon + ' ' + src.areaName).toLowerCase().indexOf(f) < 0) continue;
+      if (f && (src.name + ' ' + (src.members || []).join(' ') + ' ' + src.mon + ' ' + src.areaName).toLowerCase().indexOf(f) < 0) continue;
       const c = E.chanceFor(ctx, src, target1, sel.mf);
       if (bq) c.target = E.baseQualityChance(c, bq);
       if (c.target > 0) rows.push({ src, c, sp: isSun() ? E.sunderPaths(ctx, src, target1.id, sel.mf) : null });
@@ -318,7 +318,7 @@
     if (!area) { mo.innerHTML = '<option value="">All sources</option>'; return; }
     const sel = readSel(), { list } = getSources(sel);
     const rows = list.filter((s) => s.area === area && (sel.diff < 0 || s.diff === sel.diff) && (!sel.act || s.act === sel.act) && (!sel.tz || s.tz) && !s.herald);
-    mo.innerHTML = '<option value="">All sources in the area</option>' + rows.map((s) => '<option value="' + esc(s.key) + '">' + esc(s.name) + (s.rank === 'regular' ? '' : ' (' + s.rank + ')') + (sel.diff < 0 ? ' - ' + DIFF[s.diff] : '') + '</option>').join('');
+    mo.innerHTML = '<option value="">All sources in the area</option>' + rows.map((s) => '<option value="' + esc(s.key) + '">' + esc(s.name) + (s.rank === 'regular' || s.members ? '' : ' (' + s.rank + ')') + (sel.diff < 0 ? ' - ' + DIFF[s.diff] : '') + '</option>').join('');
     if (rows.some((s) => s.key === cur)) mo.value = cur;
   }
   function requestTable() {

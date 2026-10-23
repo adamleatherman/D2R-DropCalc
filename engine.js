@@ -669,6 +669,39 @@
       return out;
     }
 
+    const GROUP_LABEL = { champion: 'Champion monsters', unique: 'Unique monsters', minion: 'Minions', herald: 'Heralds' };
+    /** sources() with the champions, uniques, minions and heralds of one area merged: in one area / difficulty / rank every monster type ends on the
+     *  same group-upgraded TC at the same mlvl (NM/Hell; Normal uses each type's own mlvl), so their per-kill odds are identical. Rows merge only when
+     *  upgraded TC, mlvl and herald tier all match; kills/run add up. A rank that still splits in an area lists its member names after the label.
+     *  Merged rows carry members (display names) and mon (the ids, space separated); regular monsters, super uniques and bosses pass through.
+     *  Heralds: one row per tier ("Herald tier N"), all five when the context's tier is 0 (All tiers), else only that tier. Verified against the data:
+     *  in every terror zone, at every tier and clvl, all herald types of the area end on one Herald TC (same mlvl, tier boost and quality adjustment). */
+    function areaSources(ctx) {
+      const out = [], groups = new Map(), split = new Map();
+      const st = ctx.s.tier, tiers = st >= 1 && st <= 5 ? [st] : [1, 2, 3, 4, 5];
+      const expand = (src) => src.herald ? tiers.map((tier) => Object.assign({}, src, { tier, tcBoost: (D.tz.herald[tier - 1] || { boost: 0 }).boost })) : [src];
+      for (const src0 of sources(ctx)) for (const src of expand(src0)) {
+        if (!GROUP_LABEL[src.rank]) { out.push(src); continue; }
+        const top = upgradeTC(src.tc, src.mlvl + (src.tcBoost || 0), false, src.herald ? HERALD_TC : null);
+        const where = [src.rank, src.area, src.diff, src.tz ? 1 : 0, src.tier || 0].join('|');
+        const key = 'grp|' + where + '|' + src.mlvl + '|' + top;
+        let g = groups.get(key);
+        if (!g) {
+          g = Object.assign({}, src, { key, members: [], mon: '', perRun: 0, share: 0 });
+          groups.set(key, g); out.push(g);
+          split.set(where, (split.get(where) || 0) + 1);
+        }
+        if (g.members.indexOf(src.name) < 0) g.members.push(src.name);
+        g.mon += (g.mon ? ' ' : '') + src.mon;
+        g.perRun += src.perRun; g.share += src.share || 0;
+      }
+      for (const g of groups.values()) {
+        const where = [g.rank, g.area, g.diff, g.tz ? 1 : 0, g.tier || 0].join('|');
+        g.name = (g.herald ? 'Herald tier ' + g.tier : GROUP_LABEL[g.rank]) + (split.get(where) > 1 ? ': ' + g.members.join(', ') : '');
+      }
+      return out;
+    }
+
     function srcDist(ctx, src) {
       // bosses keep their own TC unless the zone is terrorized (data guide: group upgrade ignored for bosses unless desecrated)
       let topTC = upgradeTC(src.tc, src.mlvl + (src.tcBoost || 0), src.boss && !src.tz, src.herald ? HERALD_TC : null);
@@ -1286,7 +1319,7 @@
     function affixSearch(ctx, o, progress) {
       const codes = new Set(o.codes);
       const qn = o.quality, qf = QFIELD[qn];
-      let srcs = sources(ctx).filter((s) => (o.diff < 0 || s.diff === o.diff) && (!o.act || s.act === o.act) && (!o.area || s.area === o.area) && (!o.srcKey || s.key === o.srcKey));
+      let srcs = areaSources(ctx).filter((s) => (o.diff < 0 || s.diff === o.diff) && (!o.act || s.act === o.act) && (!o.area || s.area === o.area) && (!o.srcKey || s.key === o.srcKey));
       const recs = [];
       const need = new Map();
       for (const src of srcs) {
@@ -1503,7 +1536,7 @@
       o = o || {};
       const set = new Set(codes), mass = new Map();
       let tot = 0, n = 0;
-      for (const src of sources(ctx)) {
+      for (const src of areaSources(ctx)) {
         if (o.srcKey ? src.key !== o.srcKey : ((o.diff >= 0 && src.diff !== o.diff) || (o.act && src.act !== o.act) || (o.area && src.area !== o.area) || (o.tz && !src.tz))) continue;
         const f = o.srcKey ? 1 : src.perRun;
         if (!(f > 0)) continue;
@@ -1720,7 +1753,7 @@
     }
 
     return {
-      CONFIG, data: D, DIFFS, items, types, getCtx, playersN, adjNoDrop, dist, upgradeTC,
+      CONFIG, data: D, DIFFS, items, types, getCtx, playersN, adjNoDrop, dist, upgradeTC, areaSources,
       mode, heraldsAvailable, sunderChance, sunderPaths, isSunder, adjQuality, heraldSpawnPct, quality, qualityTotals, sources, srcDist, chanceFor, baseQualityChance, affixLevel, minIlvlForAlvl, eligible, maxSockets, affixProb, minLevels, staffDist, staffBase,
       statList, describe, affixSearch, searchIndex, baseTypes, metaCache, uniqById, setById, uniqByCode, setByCode, prettyId, tzLevel,
       eligibleUniques, eligibleSets, condProb, trialsFor,
