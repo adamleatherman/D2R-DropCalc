@@ -1945,6 +1945,40 @@
       return out;
     }
 
+    /** Can the combination be carried by any of the qualities on any base at some item level? Early exit (comboForBase without the full sweep). */
+    function feasibleAny(codes, conds, qualities, diff) {
+      const dd = { diff };
+      for (const q of qualities) for (const code of codes) {
+        const it = items[code], cache = new Map();
+        for (let il = Math.max(1, it.q); il <= 99; il++) {
+          const ck = affixLevel(il, it) + '|' + staffBase(il) + '|' + maxSockets(code, il) + '|' + plainSocketMax(code, il, diff);
+          let p = cache.get(ck);
+          if (!p) { p = planCombo(code, il, q, conds, dd); cache.set(ck, p); }
+          if (p.ok) return true;
+        }
+      }
+      return false;
+    }
+    /** The slider range of conds[i] that is still achievable while every other condition holds: {min, max}. A condition is met by one affix row, so the best
+     *  threshold is a row value of the stat (max for ge, min for le); feasibility only gets harder with a better threshold, so binary search over the row values.
+     *  Falls back to the catalogue range (builderStats) for flags and when the other conditions already conflict. o = {qualities (default all), diff}. */
+    function statRange(codes, conds, i, o) {
+      o = o || {};
+      const c = conds[i], qs = o.qualities || QUALS;
+      const st = builderStats(codes).find((x) => x.key === c.key);
+      if (!st) return { min: c.min, max: c.min };
+      const full = { min: st.min, max: st.max };
+      if (st.flag) return full;
+      const vals = new Set();
+      for (const r of builderCatalog(codes).values()) for (const x of r.mods) if (x.key === c.key) vals.add(c.le ? x.min : x.max);
+      const cand = Array.from(vals).sort((a, b) => (c.le ? a - b : b - a));   // best first
+      const ok = (v) => feasibleAny(codes, conds.map((x, j) => j === i ? Object.assign({}, x, { min: v }) : x), qs, o.diff);
+      if (!cand.length || !ok(cand[cand.length - 1])) return full;
+      let lo = 0, hi = cand.length - 1;   // cand[hi] feasible; find the first feasible
+      while (lo < hi) { const mid = (lo + hi) >> 1; if (ok(cand[mid])) hi = mid; else lo = mid + 1; }
+      return c.le ? { min: cand[lo], max: st.max } : { min: st.min, max: cand[lo] };
+    }
+
     // ---------------- search index ----------------
     function searchIndex() {
       const out = [];
@@ -1990,7 +2024,7 @@
       mode, heraldsAvailable, sunderChance, sunderPaths, isSunder, adjQuality, heraldSpawnPct, quality, qualityTotals, sources, srcDist, chanceFor, baseQualityChance, affixLevel, minIlvlForAlvl, eligible, maxSockets, affixProb, minLevels, staffDist, staffBase,
       statList, describe, describeAt, sliderWhat, affixSearch, searchIndex, baseTypes, metaCache, uniqById, setById, uniqByCode, setByCode, prettyId, tzLevel,
       eligibleUniques, eligibleSets, condProb, trialsFor,
-      builderTypes, builderBases, builderCatalog, builderStats, builderAffixTable, baseDropWeights, affixAppearance, planCombo, comboForBase, comboAnalysis, explainCombo, groupName,
+      builderTypes, builderBases, builderCatalog, builderStats, builderAffixTable, baseDropWeights, affixAppearance, planCombo, comboForBase, comboAnalysis, statRange, explainCombo, groupName,
       qualityPossible, ethItem, ethChance, plainSocketMax, plainSocketDist, extrasDist, QUALS, QLABEL, SOCK_KEY, ETH_KEY,
     };
   }

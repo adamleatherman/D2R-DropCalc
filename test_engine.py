@@ -1842,6 +1842,16 @@ def main():
         check("small charm magic ilvl 99: total poison damage >= %d: %.5f (engine) vs independent enumeration" % (mn_, p_), p_, RU.magic("cm1", 99, [("dmg-pois", mn_)]), 1e-9)
     for mn_, p_ in LB["fire"]:
         check("dagger magic ilvl 3: maximum fire damage >= %d: %.5f vs independent enumeration" % (mn_, p_), p_, RU.magic("dgr", 3, [("dmg-fire", mn_)]), 1e-9)
+    # slider ranges follow the other picked stats: small charm (magic: one prefix, one suffix), attack rating + maximum damage + life
+    sc_ = [x for x in DJ["prefixes"] if "scha" in x["it"]]
+    ar_ = [x for x in sc_ if any(m_[4] == "+# to Attack Rating" for m_ in x["mods"])]
+    arall_ = max(m_[3] for x in ar_ for m_ in x["mods"] if m_[4] == "+# to Attack Rating")
+    arfine_ = max(m_[3] for x in ar_ for m_ in x["mods"] if m_[4] == "+# to Attack Rating" and any(n_[4] == "+# to Maximum Damage" for n_ in x["mods"]))
+    arlo_ = min(m_[2] for x in ar_ for m_ in x["mods"] if m_[4] == "+# to Attack Rating")
+    RG = LB["range"]
+    check("small charm attack rating slider: catalogue %d-%d; with maximum damage (prefix) and life (suffix) picked it ends at the Fine prefix's %d (not %d)" % (arlo_, arall_, arfine_, arall_),
+          1 if (RG["cat"] == [arlo_, arall_] and RG["ar"] == [arlo_, arfine_] and RG["arMx"] == [arlo_, arall_] and RG["arAlone"] == [arlo_, arall_] and RG["arLf"] == [arlo_, arall_] and arfine_ < arall_) else 0, 1, 0, str(RG))
+    check("small charm slider ranges with conflicting other stats fall back to the catalogue range", 1 if RG["conflict"] == RG["cat"] else 0, 1, 0, str(RG["conflict"]))
     check("lower-is-better condition (le): -30 <= -20 holds, -30 >= -20 does not", B["le"]["reqLe"] + 10 * B["le"]["reqGe"], 1, 0)
     check("old deep link ?q2=Monarch&ql=magic&c=Socketed (#):4 resolves in the page: magic result, rare impossible", 1 if ("Magic" in js["deeplink"] and "77" in js["deeplink"] and "not possible" in js["deeplink"] and "sources" in js["deeplink"]) else 0, 1, 0, js["deeplink"][:160].replace(chr(10), " "))
     # ---- low / normal / superior items: sockets, ethereal, superior bonus (independent reference from the raw tables and the D2MOO rules) ----

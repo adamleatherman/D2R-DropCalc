@@ -341,12 +341,36 @@
   }
 
   // ----- selected stats with sliders -----
+  /** slider range of a picked stat: what is achievable with the other picked stats (s.lo / s.hi, set by updateRanges), else the catalogue range */
+  const rngOf = (s) => { const st = bd.stats.get(s.key); return { lo: s.lo !== undefined ? s.lo : st.min, hi: s.hi !== undefined ? s.hi : st.max }; };
+  const rngNote = (s) => { const st = bd.stats.get(s.key), r = rngOf(s); return r.lo + ' to ' + r.hi + (st.what ? ' ' + st.what : ''); };
+  /** per picked stat: range achievable while the others hold (E.statRange); clamps the thresholds into it */
+  function updateRanges() {
+    const cs = condsOf(), o = { qualities: wantQ(), diff: selDiff() };
+    bd.sel.forEach((s, i) => {
+      const st = bd.stats.get(s.key); if (st.flag) return;
+      const r = E.statRange(bd.codes, cs, i, o);
+      s.lo = r.min; s.hi = r.max; s.thr = Math.max(s.lo, Math.min(s.hi, s.thr));
+    });
+  }
+  /** after a threshold moved: refresh the other rows in place (range, value, text) without re-rendering the box */
+  function syncRows(j) {
+    updateRanges();
+    for (const row of $('sel2').querySelectorAll('.selrow')) {
+      const i = +row.dataset.i, s = bd.sel[i], st = bd.stats.get(s.key); if (i === j || st.flag) continue;
+      const r = rngOf(s);
+      for (const inp of row.querySelectorAll('.thr, .thrr')) { inp.min = r.lo; inp.max = r.hi; inp.value = s.thr; }
+      row.querySelector('.note').textContent = rngNote(s);
+      row.querySelector('.nm span').textContent = statText(s);
+    }
+  }
   function addStat(key, thr) {
     const st = bd.stats.get(key); if (!st) return false;
     let e = bd.sel.find((s) => s.key === key);
     if (!e) { e = { key, thr: 0 }; bd.sel.push(e); }
     if (thr === undefined || isNaN(thr)) thr = st.le ? st.max : st.min;
     e.thr = Math.max(st.min, Math.min(st.max, thr));
+    updateRanges();
     return true;
   }
   function renderSel() {
@@ -354,10 +378,10 @@
     if (!bd.sel.length) { box.className = 'note'; box.textContent = 'Click an affix in the table to add its stat. Each stat gets a minimum value you can move with the slider.'; return; }
     box.className = '';
     box.innerHTML = bd.sel.map((s, i) => {
-      const st = bd.stats.get(s.key);
+      const st = bd.stats.get(s.key), r = rngOf(s);
       return '<div class="selrow" data-i="' + i + '"><div class="nm"><span>' + esc(statText(s)) + '</span><button class="rm" title="remove">x</button></div>' + (st.flag ? '' :
-        '<div class="ctl"><span>' + (st.le ? '&lt;=' : '&gt;=') + '</span><input type="number" class="thr" value="' + s.thr + '" min="' + st.min + '" max="' + st.max + '">' +
-        '<input type="range" class="thrr" min="' + st.min + '" max="' + st.max + '" step="1" value="' + s.thr + '"><small class="note">' + st.min + ' to ' + st.max + (st.what ? ' ' + st.what : '') + '</small></div>') + '</div>';
+        '<div class="ctl"><span>' + (st.le ? '&lt;=' : '&gt;=') + '</span><input type="number" class="thr" value="' + s.thr + '" min="' + r.lo + '" max="' + r.hi + '">' +
+        '<input type="range" class="thrr" min="' + r.lo + '" max="' + r.hi + '" step="1" value="' + s.thr + '"><small class="note">' + rngNote(s) + '</small></div>') + '</div>';
     }).join('');
   }
   let anTimer = null, farmTimer = null;
@@ -523,7 +547,7 @@
     $('ilr2').addEventListener('input', () => { $('il2').value = $('ilr2').value; });
     $('ilr2').addEventListener('change', () => { syncUrl(); requestTable(); });
     $('il2').addEventListener('change', () => { effIlvl(); syncUrl(); requestTable(); });
-    $('ql2').addEventListener('change', () => { TA.key = 'o' + ($('ql2').value || 'magic'); TA.dir = -1; syncUrl(); requestTable(); updateAnalysis(); runFarm(); });
+    $('ql2').addEventListener('change', () => { TA.key = 'o' + ($('ql2').value || 'magic'); TA.dir = -1; updateRanges(); renderSel(); syncUrl(); requestTable(); updateAnalysis(); runFarm(); });
     $('mc2').addEventListener('change', () => { requestTable(); changed(); });
     $('ar2').addEventListener('change', () => { fillMonsters(); requestTable(); changed(); });
     $('mo2').addEventListener('change', () => { requestTable(); changed(); });
@@ -542,16 +566,17 @@
     const selbox = $('sel2');
     selbox.addEventListener('click', (ev) => {
       if (!ev.target.classList.contains('rm')) return;
-      bd.sel.splice(+ev.target.closest('.selrow').dataset.i, 1); renderSel(); changed();
+      bd.sel.splice(+ev.target.closest('.selrow').dataset.i, 1); updateRanges(); renderSel(); changed();
     });
     selbox.addEventListener('input', (ev) => {
       const row = ev.target.closest('.selrow'); if (!row) return;
-      const s = bd.sel[+row.dataset.i], st = bd.stats.get(s.key);
+      const s = bd.sel[+row.dataset.i], r = rngOf(s);
       let v = parseFloat(ev.target.value); if (isNaN(v)) return;
-      v = Math.max(st.min, Math.min(st.max, Math.round(v)));
+      v = Math.max(r.lo, Math.min(r.hi, Math.round(v)));
       s.thr = v;
       if (ev.target.classList.contains('thrr')) row.querySelector('.thr').value = v; else row.querySelector('.thrr').value = v;
       row.querySelector('.nm span').textContent = statText(s);
+      syncRows(+row.dataset.i);
       changed();
     });
   }
@@ -634,6 +659,7 @@
     for (const k of KEYS) $(k).addEventListener('change', () => {
       saveSel();
       if (k === 's_mode') { switchMode($('s_mode').value).catch((e) => { $('info1').textContent = 'Could not load data: ' + e; }); return; }
+      if (k === 's_diff' && bd.sel.length) { updateRanges(); renderSel(); }
       updTier(); if (target1) runTab1(); if (bd.an) { syncUrl(); runFarm(); }
       if (bd.type && $('ar2').value) { fillMonsters(); requestTable(); }
     });

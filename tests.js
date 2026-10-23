@@ -493,6 +493,9 @@
         for (const min of [1, 2, 3]) L.fire.push([min, E.affixProb('dgr', E.affixLevel(3, E.items.dgr), 'magic', [{ key: FIRE, min }], { ilvl: 3 })]);
         const bs = new Map(E.builderStats(['cm1']).map((x) => [x.key, x]));
         L.sl = { pois: [bs.get(POIS).min, bs.get(POIS).max, bs.get(POIS).text, bs.get(POIS).what], at: E.describeAt(POIS, 50, bs.get(POIS).v), atAll: E.describeAt(POIS, 50), atFire: E.describeAt(FIRE, 5), what: [E.sliderWhat('Level # Teleport (#/# Charges)'), E.sliderWhat('#% Chance to cast level # Nova on striking')] };
+        { const AR = '+# to Attack Rating', MX = '+# to Maximum Damage', LF = '+# to Life', cs = [{ key: AR, min: 1 }, { key: MX, min: 1 }, { key: LF, min: 1 }], o = { qualities: ['magic'], diff: 2 };
+          const sr = (c, i) => { const r = E.statRange(['cm1'], c, i, o); return [r.min, r.max]; };
+          L.range = { ar: sr(cs, 0), mx: sr(cs, 1), lf: sr(cs, 2), arAlone: sr([cs[0]], 0), arMx: sr([cs[0], cs[1]], 0), arLf: sr([cs[0], cs[2]], 0), cat: [bs.get(AR).min, bs.get(AR).max], conflict: sr([{ key: AR, min: 1 }, { key: AR, min: 30 }, cs[1], cs[2]], 0) }; }
         L.nodata = E.describe('Level # Fire Bolt (#/# Charges)', 1, 5);
       }
     }
