@@ -100,7 +100,7 @@
       const q = input.value.trim().toLowerCase();
       if (!q) { ul.hidden = true; return; }
       const words = q.split(/\s+/);
-      items = source().filter((x) => { const t = x.label.toLowerCase(); return words.every((w) => t.indexOf(w) >= 0); })
+      items = source().filter((x) => { const t = (x.search || x.label).toLowerCase(); return words.every((w) => t.indexOf(w) >= 0); })
         .sort((a, b) => (a.label.toLowerCase().startsWith(q) ? 0 : 1) - (b.label.toLowerCase().startsWith(q) ? 0 : 1)).slice(0, 40);
       ul.innerHTML = items.map((x, i) => '<li data-i="' + i + '">' + esc(x.label) + '</li>').join('');
       ul.hidden = !items.length; hi = -1;
@@ -176,7 +176,7 @@
       if (sel.act && src.act !== sel.act) continue;
       if (rk && src.rank !== rk) continue;
       if (sel.tz && !src.tz) continue;
-      if (f && (src.name + ' ' + src.areaName).toLowerCase().indexOf(f) < 0) continue;
+      if (f && (src.name + ' ' + src.mon + ' ' + src.areaName).toLowerCase().indexOf(f) < 0) continue;
       const c = E.chanceFor(ctx, src, target1, sel.mf);
       if (bq) c.target = E.baseQualityChance(c, bq);
       if (c.target > 0) rows.push({ src, c, sp: isSun() ? E.sunderPaths(ctx, src, target1.id, sel.mf) : null });
@@ -211,7 +211,7 @@
     if (!codes.length) return;
     const stats = E.statList(codes, $('ql2').value);
     statCodes = stats;
-    $('statlist').innerHTML = stats.map((s) => '<option value="' + esc(s.key) + '">max ' + s.max + '</option>').join('');
+    $('statlist').innerHTML = stats.map((s) => '<option value="' + esc(s.key) + '">' + esc(s.text) + '</option>').join('');
   }
   function addCond(key, min) {
     const div = document.createElement('div');
@@ -368,11 +368,11 @@
     $('go2').onclick = runTab2;
     // about
     $('about').innerHTML = aboutHtml();
-    // optional deep links for smoke tests: ?q1=Griffon   or   ?q2=circlet&ql=magic&c=Faster%20Cast%20Rate:20
+    // optional deep links for smoke tests: ?q1=Griffon   or   ?q2=circlet&ql=magic&c=%2B%23%25%20Faster%20Cast%20Rate:20
     const qs = new URLSearchParams(location.search);
     if (qs.get('q1')) {
       const w = qs.get('q1').toLowerCase();
-      target1 = INDEX.find((x) => x.label.toLowerCase().indexOf(w) >= 0);
+      target1 = INDEX.find((x) => (x.search || x.label).toLowerCase().indexOf(w) >= 0);
       if (target1) { $('q1').value = target1.label; runTab1(); }
     }
     if (qs.get('q2')) {

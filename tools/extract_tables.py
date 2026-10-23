@@ -30,6 +30,9 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 WANTED = [
     (re.compile(r"data/global/excel/(?:base/)?[^/]+\.(?:txt|bin)", re.I), lambda p: p[len("data/global/excel/"):]),
     (re.compile(r"data/hd/global/excel/desecratedzones\.json", re.I), lambda p: "hd/desecratedzones.json"),
+    # English string tables only (the build resolves names and descriptions from enUS; the other languages are not needed)
+    (re.compile(r"data/local/lng/strings/(?:item-modifiers|item-nameaffixes|item-names|item-runes|skills|monsters|levels)\.json", re.I),
+     lambda p: "strings/" + p.rsplit("/", 1)[1]),
 ]
 
 

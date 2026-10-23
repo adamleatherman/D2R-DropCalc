@@ -129,6 +129,28 @@
         heraldSources: Em.sources(Em.getCtx({ players: 1, party: 1, ladder: true, tz: true, clvl: 85, tier: 1, mf: 0 })).filter((s) => s.rank === 'herald').length,
         tzBounds: Dm.tz.bounds };
     }
+    // ---- display names and stat descriptions (strings/*.json), both modes ------------------------------
+    res.names = {};
+    for (const [mode, Em, Dm] of [['rotw', E, data], ['lod', EL, dataL]]) {
+      const index = Em.searchIndex();
+      const mods = Dm.prefixes.concat(Dm.suffixes, Dm.automagic).filter((a) => a.sp).map((a) => a.mods.map((m) => [a, m])).reduce((x, y) => x.concat(y), []);
+      const tab = (n) => { const m = mods.find((x) => x[1][0] === 'skilltab' && x[1][1] === String(n)); return m ? m[1][4] : null; };
+      const search = (q) => index.filter((x) => q.toLowerCase().split(/\s+/).every((w) => (x.search || x.label).toLowerCase().indexOf(w) >= 0)).map((x) => x.label);
+      const aff = Dm.prefixes.find((a) => a.n === 'TaintedAffix');
+      const su = Em.sources(Em.getCtx({ players: 1, party: 1, ladder: true, tz: false, mf: 0 })).find((x) => x.key === 'su|Siege Boss|2');
+      res.names[mode] = {
+        hc: Em.uniqById['Harlequin Crest'].n, hcLabel: (index.find((x) => x.id === 'Harlequin Crest') || {}).label,
+        thunder: Em.uniqById["Thudergod's Vigor"].n, thunderBoth: [search('thundergod').length, search('thudergod').length],
+        siege: su ? su.name : null, siegeId: Dm.su.find((x) => x.id === 'Siege Boss').n,
+        tainted: aff ? aff.dn : null, eburin: (Dm.prefixes.find((a) => a.n === 'Eburin') || {}).dn, taintedId: aff ? aff.n : null,
+        tabs: [21, 22, 23].map(tab), tab0: tab(0), fcr: mods.find((x) => x[1][0] === 'cast1')[1][4],
+        emptyDesc: mods.filter((x) => !x[1][4] || x[1][4].toLowerCase() === String(x[1][0]).toLowerCase()).map((x) => x[1][0]),
+        statue: ['ua1', 'ua2', 'ua3', 'ua4', 'ua5'].map((c) => (Dm.items[c] || {}).n), statueSearch: search('talic'),
+        areaName: Dm.levels['39'].name, mon: Dm.monsters.izual.n,
+        range: [Em.describe('+#% Faster Cast Rate', 10, 20), Em.describe('+# to Strength', 5, 5), Em.describe('Requirements +#%', -20, -10), Em.describe('Level # Fire Bolt (#/# Charges)', 1, 5)],
+        statList: Em.statList(['ci0'], 'magic').filter((x) => /Faster Cast|Warlock|Cold Skills/.test(x.key)).map((x) => x.text),
+      };
+    }
     // LoD Hell act bosses vs the independent reference on the base tables
     res.lod = { cases: {} };
     { const ctxL = (pl) => EL.getCtx({ players: pl, party: 1, ladder: true, tz: false, mf: 0 });
@@ -254,8 +276,8 @@
         res.drops.ars[id] = { n: rows.length, top: rows.slice(0, 5), topNoTz: rows.filter((x) => !x[4]).slice(0, 5), inIndex: idx.some((x) => x.kind === 'unique' && x.id === id) };
       }
       // Uber Ancients: six explicit uniques, expect 50% each per kill (before the cap)
-      for (const [nm, ids] of [['Uber Talic', ["Defender's Bile", "Defender's Fire"]], ['Uber Madawc', ["Guardian's Light", "Guardian's Thunder"]], ['Uber Korlic', ["Protector's Stone", "Protector's Frost"]]]) {
-        const rowsN = E.sources(ctx).filter((x) => x.name === nm);
+      for (const [nm, mon, ids] of [['Uber Talic', 'colossal1', ["Defender's Bile", "Defender's Fire"]], ['Uber Madawc', 'colossal2', ["Guardian's Light", "Guardian's Thunder"]], ['Uber Korlic', 'colossal3', ["Protector's Stone", "Protector's Frost"]]]) {
+        const rowsN = E.sources(ctx).filter((x) => x.mon === mon);   // by monster id (the display names are the strings' Talic / Madawc / Korlic)
         const s = rowsN.find((x) => x.diff === 2);
         const r = { rows: rowsN.length, diffs: rowsN.map((x) => x.diff), mlvl: s ? s.mlvl : null, area: s ? s.areaName : null, act: s ? s.act : null, ps: {}, idx: {} };
         for (const id of ids) { r.ps[id] = s ? E.chanceFor(ctx, s, { kind: 'unique', id }, 0).target : 0; r.idx[id] = idx.some((x) => x.kind === 'unique' && x.id === id); }
@@ -317,10 +339,11 @@
         bane: E.chanceFor(ctx, rak, { kind: 'unique', id: 'Bane Ash' }, 0).target, radament: rad.mlvl, radamentBase: data.monsters.radament.lv[2] }; }
     // super unique area mapping (SU_AREA fixes)
     { const ctx = ctxFor(1, 1); const S = E.sources(ctx).filter((s) => s.rank === 'super');
-      const row = (n, d) => { const s = S.find((x) => x.name === n && x.diff === d); return s ? { area: s.areaName, id: s.area, mlvl: s.mlvl, expect: data.levels[String(s.area)].lvl[d] + 3 } : null; };
+      const row = (id, d) => { const s = S.find((x) => x.key === 'su|' + id + '|' + d);   // by super unique id (display names come from the string tables)
+        return s ? { area: s.areaName, id: s.area, mlvl: s.mlvl, expect: data.levels[String(s.area)].lvl[d] + 3 } : null; };
       res.cap.suMap = { shenk: row('Siege Boss', 2), eldritch: row('Megaflow Rectifier', 2), thresh: row('Threash Socket', 2), colenzo: row('Baal Subject 1', 2),
         lister: row('Baal Subject 5', 1), bremm: row('Bremm Sparkfist', 2),
-        unused: ['Winged Death', 'The Tormentor', 'Taintbreeder', 'Riftwraith the Cannibal', 'Axe Dweller', 'Anodized Elite', 'Vinvear Molech', 'Magma Torquer', 'Blaze Ripper', 'Flamespike the Crawler'].filter((n) => S.some((x) => x.name === n || x.name === n)) }; }
+        unused: ['Winged Death', 'The Tormentor', 'Taintbreeder', 'Riftwraith the Cannibal', 'Axe Dweller', 'Anodized Elite', 'Vinvear Molech', 'Magma Torquer', 'Blaze Ripper', 'Flamespike the Crawler'].filter((n) => S.some((x) => x.key.indexOf('su|' + n + '|') === 0)) }; }
     // performance: all Hell sources, cap on vs off (cold caches via a fresh context key)
     for (const cap of [null, 6]) {
       E.CONFIG.dropCap = cap;

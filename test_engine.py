@@ -672,6 +672,35 @@ def main():
         check("%s: 'key of' matches pk1, pk2, pk3" % mode, 1 if {"pk1", "pk2", "pk3"} <= set(M[mode]["acQuery"]) else 0, 1)
         ROWS.append(("PASS" if M[mode]["acEssence"] >= 3 else "FAIL", "%s: essences in the autocomplete source" % mode, M[mode]["acEssence"], ">=3", ""))
         if M[mode]["acEssence"] < 3: FAIL.append("essence ac")
+    # ---- display names and stat descriptions: expected values come straight from the string tables / raw tables (independent of build.py)
+    def strs(fname):
+        with open(os.path.join(SRC, "strings", fname + ".json"), encoding="utf-8-sig") as f:
+            return {r["Key"].lower(): r["enUS"] for r in reversed(json.load(f))}
+    ST_IN, ST_AF, ST_SK, ST_MD = strs("item-names"), strs("item-nameaffixes"), strs("item-modifiers"), strs("monsters")
+    ST_LV = strs("levels")
+    for mode in ("rotw", "lod"):
+        N = js["names"][mode]
+        check("%s: Harlequin Crest display name (item-names)" % mode, 1 if N["hc"] == ST_IN["harlequin crest"] == "Harlequin Crest" else 0, 1)
+        check("%s: unique label starts with its display name" % mode, 1 if N["hcLabel"].startswith("Harlequin Crest - unique") else 0, 1)
+        check("%s: table-key typo shows the real name (Thudergod's Vigor -> %s)" % (mode, ST_IN["thudergod's vigor"]), 1 if N["thunder"] == ST_IN["thudergod's vigor"] == "Thundergod's Vigor" else 0, 1)
+        check("%s: search finds Thundergod's Vigor by display name and by old table key" % mode, 1 if min(N["thunderBoth"]) >= 1 else 0, 1)
+        check("%s: super unique 'Siege Boss' shows its real name (monsters.json)" % mode, 1 if N["siege"] == N["siegeId"] == ST_MD["siege boss"] == "Shenk the Overseer" else 0, 1)
+        check("%s: affix Eburin -> Eburine (item-nameaffixes), key unchanged" % mode, 1 if N["eburin"] == ST_AF["eburin"] == "Eburine" else 0, 1)
+        check("%s: area name from levels.json (Moo Moo Farm -> The Secret Cow Level)" % mode, 1 if N["areaName"] == ST_LV["moo moo farm"] == "The Secret Cow Level" else 0, 1)
+        check("%s: monster name from monsters.json (izual)" % mode, 1 if N["mon"] == "Izual" else 0, 1)
+        check("%s: no spawnable affix mod without a description / with a raw code" % mode, len(N["emptyDesc"]), 0)
+        check("%s: Cold Skills tab description (skilltab 5)" % mode, 1 if any("Cold Skills (Sorceress Only)" in x for x in N["statList"]) else 0, 1)
+        check("%s: describe() fills value / range / negative / multi-placeholder" % mode, 1 if N["range"] == ["+10-20% Faster Cast Rate", "+5 to Strength", "Requirements -20 to -10%", "Level # Fire Bolt (#/# Charges)"] else 0, 1)
+    N = js["names"]["rotw"]
+    check("RotW: affix TaintedAffix -> Tainted (item-nameaffixes), key unchanged", 1 if N["tainted"] == ST_AF["taintedaffix"] == "Tainted" and N["taintedId"] == "TaintedAffix" else 0, 1)
+    check("RotW: Warlock tabs 21/22/23 read Demon / Eldritch / Chaos (Warlock Only)",
+          1 if all(t and k in t and "(Warlock Only)" in t and t.startswith("+# to") for t, k in zip(N["tabs"], ("Demon", "Eldritch", "Chaos"))) else 0, 1)
+    check("RotW: tab 0 is Bow and Crossbow (Amazon Only)", 1 if N["tab0"] == "+# to Bow and Crossbow Skills (Amazon Only)" else 0, 1)
+    check("RotW: statue pieces ua1-ua5 have real names (%s)" % ", ".join(N["statue"]), 1 if N["statue"] == [ST_IN[c] for c in ("ua1", "ua2", "ua3", "ua4", "ua5")] and all(N["statue"]) else 0, 1)
+    check("RotW: 'talic' finds the statue piece", 1 if any("Talic's Anguish" in x for x in N["statueSearch"]) else 0, 1)
+    check("LoD: no statue pieces (no source) and same name machinery", 1 if js["names"]["lod"]["tabs"] == [None, None, None] and js["names"]["lod"]["tab0"] == N["tab0"] else 0, 1)
+    check("Faster Cast Rate description (item-modifiers ModStr4v)", 1 if N["fcr"] == ST_SK["modstr4v"].replace("%+d", "+#").replace("%%", "%") == "+#% Faster Cast Rate" else 0, 1)
+
     # ---- LoD mode: data-lod.json (excel/base tables) vs an independent reference on the base tables
     L = M
     ref_l = Ref("base")
@@ -834,8 +863,8 @@ def main():
     for nm, r in DR["ubers"].items():
         check("%s: rows only in Hell (%s)" % (nm, r["diffs"]), 1 if r["diffs"] == [2] else 0, 1)
         check("%s mlvl = monstats Level(H) 110" % nm, r["mlvl"], 110)
-        ROWS.append(("PASS" if r["area"] == "ColossalSummit" and r["act"] == 5 else "FAIL", "%s area/act" % nm, "%s / act %s" % (r["area"], r["act"]), "ColossalSummit / act 5", ""))
-        if not (r["area"] == "ColossalSummit" and r["act"] == 5): FAIL.append("uber area")
+        ROWS.append(("PASS" if r["area"] == "Colossal Summit" and r["act"] == 5 else "FAIL", "%s area/act" % nm, "%s / act %s" % (r["area"], r["act"]), "Colossal Summit / act 5", ""))
+        if not (r["area"] == "Colossal Summit" and r["act"] == 5): FAIL.append("uber area")
         for uid, p in r["ps"].items():
             check("%s -> %s: 1/2 per kill" % (nm, uid), p, 0.5, 1e-9)
             ROWS.append(("PASS" if r["idx"][uid] else "FAIL", "%s in search index" % uid, r["idx"][uid], True, ""))

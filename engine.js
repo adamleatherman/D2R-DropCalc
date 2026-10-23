@@ -521,7 +521,6 @@
       return name || t.tc || null;
     }
 
-    const BOSS_NAMES = { baalcrab: 'Baal', nihlathakboss: 'Nihlathak', bloodraven: 'Blood Raven', summoner: 'The Summoner', griswold: 'Griswold', colossal1: 'Uber Talic', colossal2: 'Uber Madawc', colossal3: 'Uber Korlic', izual: 'Izual', radament: 'Radament', andariel: 'Andariel', duriel: 'Duriel', mephisto: 'Mephisto', diablo: 'Diablo' };
     const prettyId = (s) => s.replace(/([a-z])(\d+)$/i, '$1 $2');
 
     /** All kill sources (monster x rank x area x difficulty) for a context.
@@ -606,7 +605,7 @@
           const qtc = s.quest && m.qtc && m.qtc[d] && TC[m.qtc[d]] && (!inTz || CONFIG.questOverridesTz) ? m.qtc[d] : null;
           if (qtc) tcn = qtc;
           if (!tcn || !TC[tcn]) continue;
-          out.push({ key: 'boss|' + id + '|' + d, mon: id, name: BOSS_NAMES[id] || m.n, rank: 'boss', diff: d, area: lid,
+          out.push({ key: 'boss|' + id + '|' + d, mon: id, name: m.n, rank: 'boss', diff: d, area: lid,
             areaName: A.name, act: A.act, mlvl, tc: tcn, boss: true, perRun: 1, tz: inTz, quest: !!qtc });
         }
       }
@@ -955,14 +954,26 @@
       return out;
     }
 
+    /** Description template ("+#% Faster Cast Rate") with its value placeholder filled by a value or a range ("+10-20% Faster Cast Rate").
+     *  Templates with several placeholders (skill procs, charges) are returned unchanged. */
+    function describe(tpl, mn, mx) {
+      const at = tpl.indexOf('#');
+      if (at < 0 || tpl.indexOf('#', at + 1) >= 0) return tpl;
+      const val = mn === mx ? String(mn) : (mn < 0 || mx < 0 ? mn + ' to ' + mx : mn + '-' + mx);
+      const signed = at > 0 && tpl[at - 1] === '+';
+      return tpl.slice(0, signed && val[0] === '-' ? at - 1 : at) + val + tpl.slice(at + 1);
+    }
+
     /** stats available (label list) for a set of bases at max alvl and given quality */
     function statList(codes, quality_) {
       const set = new Map();
       for (const code of codes) {
         const el = eligible(code, 99, quality_ === 'rare');
         for (const L of [el.p, el.s, el.auto]) for (const a of L) for (const m of a.mods) {
-          const cur = set.get(m[4]) || { key: m[4], max: 0 };
+          const cur = set.get(m[4]) || { key: m[4], min: m[2], max: m[3], text: describe(m[4], m[2], m[3]) };
           if (m[3] > cur.max) cur.max = m[3];
+          if (m[2] < cur.min) cur.min = m[2];
+          cur.text = describe(m[4], cur.min, cur.max);
           set.set(m[4], cur);
         }
       }
@@ -1026,12 +1037,12 @@
         const it = items[code];
         if (!(it.sp || explicitI.has(code)) || code === 'gld') continue;
         if (it.q <= 0 && it.k !== 'm') continue;
-        out.push({ kind: 'base', code, label: it.n + ' (' + code + ', qlvl ' + it.q + (it.tier === 1 ? ', exceptional' : it.tier === 2 ? ', elite' : '') + ')', name: it.n });
+        out.push({ kind: 'base', code, label: it.n + ' (' + code + ', qlvl ' + it.q + (it.tier === 1 ? ', exceptional' : it.tier === 2 ? ', elite' : '') + ')', name: it.n });   // the code is part of the label, so it is searchable too
       }
       const explicitU = new Set();
       for (const n in TC) for (const e of TC[n].e) if (uniqById[e[0]]) explicitU.add(e[0]);   // e.g. Sunder charms (spawnable=0 but dropped explicitly)
-      for (const u of D.uniques) if ((u.sp || explicitU.has(u.id)) && !u.dis && dropConditionOK(u.dc, 2)) out.push({ kind: 'unique', id: u.id, code: u.code, label: u.id + ' - unique ' + (items[u.code] ? items[u.code].n : u.code) + ' (lvl ' + u.lvl + ')', name: u.id });
-      for (const s of D.sets) if (s.sp && !s.dis) out.push({ kind: 'set', id: s.id, code: s.code, label: s.id + ' - set ' + (items[s.code] ? items[s.code].n : s.code) + ' (' + s.set + ', lvl ' + s.lvl + ')', name: s.id });
+      for (const u of D.uniques) if ((u.sp || explicitU.has(u.id)) && !u.dis && dropConditionOK(u.dc, 2)) { const label = u.n + ' - unique ' + (items[u.code] ? items[u.code].n : u.code) + ' (lvl ' + u.lvl + ')'; out.push({ kind: 'unique', id: u.id, code: u.code, label, search: label + ' ' + u.id, name: u.n }); }
+      for (const s of D.sets) if (s.sp && !s.dis) { const label = s.n + ' - set ' + (items[s.code] ? items[s.code].n : s.code) + ' (' + s.sn + ', lvl ' + s.lvl + ')'; out.push({ kind: 'set', id: s.id, code: s.code, label, search: label + ' ' + s.id + ' ' + s.set, name: s.n }); }
       return out;
     }
 
@@ -1060,7 +1071,7 @@
     return {
       CONFIG, data: D, DIFFS, items, types, getCtx, playersN, adjNoDrop, dist, upgradeTC,
       mode, heraldsAvailable, sunderChance, sunderPaths, isSunder, adjQuality, heraldSpawnPct, quality, qualityTotals, sources, srcDist, chanceFor, baseQualityChance, affixLevel, minIlvlForAlvl, eligible, affixProb, minLevels,
-      statList, affixSearch, searchIndex, baseTypes, metaCache, uniqById, setById, uniqByCode, setByCode, prettyId, tzLevel,
+      statList, describe, affixSearch, searchIndex, baseTypes, metaCache, uniqById, setById, uniqByCode, setByCode, prettyId, tzLevel,
       eligibleUniques, eligibleSets, condProb, trialsFor,
     };
   }

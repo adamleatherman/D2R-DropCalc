@@ -43,6 +43,40 @@ def check_extract():
 check_extract()
 
 
+def load_strings():
+    """English string tables extracted by tools/extract_tables.py (excel/strings/*.json, shared by both modes).
+    -> {file: {lower-cased key: enUS text}}.  The game compares keys case-insensitively, the first row of a key wins."""
+    need = ("item-names", "item-nameaffixes", "item-modifiers", "monsters", "levels", "skills")
+    d = os.path.join(SRC, "strings")
+    missing = [n for n in need if not os.path.isfile(os.path.join(d, n + ".json"))]
+    if missing:
+        sys.exit("missing string tables in %s: %s\n  Re-run tools/extract_tables.py --force (it extracts data/local/lng/strings/*.json into excel/strings/)." % (
+            d, ", ".join(n + ".json" for n in missing)))
+    out = {}
+    for n in need:
+        with open(os.path.join(d, n + ".json"), encoding="utf-8-sig") as f:
+            rows = json.load(f)
+        m = {}
+        for r in rows:
+            k, v = r.get("Key"), r.get("enUS")
+            if k and v is not None:
+                m.setdefault(k.lower(), v)
+        out[n] = m
+    return out
+
+
+STR = load_strings()
+
+
+def name_of(table, key, default=None):
+    """Display name of a table key from string file `table` (None/empty key or no string -> default, which falls back to the key)."""
+    if key:
+        v = STR[table].get(key.lower())
+        if v:
+            return v.strip()
+    return default if default is not None else key
+
+
 def rd(name):
     """Read a tab separated table of the mode being built (TDIR) -> list of dicts (header names as keys)."""
     path = os.path.join(TDIR, name + ".txt")
@@ -134,7 +168,7 @@ def build(mode):
                 elif r.get("ultracode") == code:
                     tier = 2
             it = {
-                "n": r.get("name", code).strip(),
+                "n": name_of("item-names", r.get("namestr"), r.get("name", code).strip()),   # display name (string table); the code stays the id
                 "k": kind,
                 "t": t,
                 "anc": anc,
@@ -213,7 +247,7 @@ def build(mode):
 
         monl = trio("MonLvlEx")
         levels[str(lid)] = {
-            "name": r.get("LevelName") or r.get("Name", str(lid)),
+            "name": name_of("levels", r.get("LevelName"), r.get("LevelName") or r.get("Name", str(lid))),
             "act": num(r.get("Act")) + 1,
             "lvl": monl,
             "sx": sz("SizeX"),
@@ -238,7 +272,7 @@ def build(mode):
         if not mid:
             continue
         m = {
-            "n": r.get("NameStr", mid),
+            "n": name_of("monsters", r.get("NameStr"), r.get("NameStr", mid)),
             "lv": [num(r.get("Level")), num(r.get("Level(N)")), num(r.get("Level(H)"))],
             "boss": num(r.get("boss")),
             "nr": num(r.get("noRatio")),
@@ -271,7 +305,7 @@ def build(mode):
             continue
         su.append({
             "id": name,
-            "n": r.get("Name", name),
+            "n": name_of("monsters", r.get("Name"), r.get("Name", name)),   # id stays the table key
             "cls": r["Class"],
             "tc": [r.get("TC", ""), r.get("TC(N)", ""), r.get("TC(H)", "")],
             "dtc": [r.get("TC Desecrated", ""), r.get("TC(N) Desecrated", ""), r.get("TC(H) Desecrated", "")],
@@ -332,6 +366,7 @@ def build(mode):
             continue
         uniques.append({
             "id": r["index"],
+            "n": name_of("item-names", r["index"]),
             "code": r["code"],
             "lvl": num(r.get("lvl")),
             "r": num(r.get("rarity"), 1),
@@ -349,8 +384,10 @@ def build(mode):
             continue
         setitems.append({
             "id": r["index"],
+            "n": name_of("item-names", r["index"]),
             "code": r["item"],
             "set": r.get("set", ""),
+            "sn": name_of("item-names", r.get("set", "")),
             "lvl": num(r.get("lvl")),
             "r": num(r.get("rarity"), 1),
             "sp": num(r.get("spawnable")),
@@ -375,46 +412,121 @@ def build(mode):
         })
 
     # ---------------------------------------------------------------- properties
-    SKILLTABS = {
-        0: "Bow and Crossbow", 1: "Passive and Magic", 2: "Javelin and Spear",
-        3: "Fire", 4: "Lightning", 5: "Cold",
-        6: "Curses", 7: "Poison and Bone", 8: "Summoning",
-        9: "Combat", 10: "Offensive Auras", 11: "Defensive Auras",
-        12: "Combat", 13: "Combat Masteries", 14: "Warcries",
-        15: "Summoning", 16: "Shape Shifting", 17: "Elemental",
-        18: "Traps", 19: "Shadow Disciplines", 20: "Martial Arts",
-    }
-    CLASSTAB = {}
-    for t in range(0, 21):
-        CLASSTAB[t] = ["Amazon", "Sorceress", "Necromancer", "Paladin", "Barbarian", "Druid", "Assassin"][t // 3]
+    # Stat descriptions are built the way the game does it: properties.txt (property code -> stats) -> itemstatcost.txt (descfunc, descstrpos,
+    # descstr2, dgrp*) -> string keys resolved in item-modifiers.json.  The value is written as "#" so a label doubles as the stat key
+    # ("+#% Faster Cast Rate"); the UI substitutes a value or a range.  Stats without usable description data fall back to the properties.txt
+    # *Tooltip (see FALLBACKS, reported by the build).
     props = {}
     for r in rd("properties"):
         code = r.get("code")
         if code:
-            tip = r.get("*Tooltip", "")
-            props[code] = {"f": num(r.get("func1")), "tip": tip}
+            props[code] = {"tip": r.get("*Tooltip", ""), "val1": r.get("val1", ""),
+                           "st": [(num(r.get("func%d" % i)), r["stat%d" % i]) for i in range(1, 8) if r.get("stat%d" % i)],
+                           "f": num(r.get("func1"))}
+    ISC = {r["Stat"]: r for r in rd("itemstatcost") if r.get("Stat")}
+    MOD = STR["item-modifiers"]
 
-    # ------------------------------------------------------------------ affixes
+    def ms(key):
+        return MOD.get(key.lower()) if key else None
+
     SKILLS = {}
+    SKILL_CLASS = {}   # skill name -> charclass code (for "(Sorceress Only)")
+    sdesc = {r["skilldesc"]: r for r in rd("skilldesc") if r.get("skilldesc")}
     for r in rd("skills"):
         if r.get("skill") and r.get("*Id"):
-            SKILLS[r["*Id"]] = r["skill"]
-            SKILLS[r["skill"]] = r["skill"]
+            dn = name_of("skills", (sdesc.get(r.get("skilldesc")) or {}).get("str name"), r["skill"])
+            SKILLS[r["*Id"]] = dn
+            SKILLS[r["skill"]] = dn
+            SKILL_CLASS[r["skill"]] = r.get("charclass", "")
+    # class order = charstats rows (the blank "Expansion" separator row has no strings and is skipped); class index * 3 + tab - 1 = skilltab id
+    CLASSES = [r for r in rd("charstats") if r.get("StrAllSkills")]
+    CLASS_CODES = {"ama": 0, "sor": 1, "nec": 2, "pal": 3, "bar": 4, "dru": 5, "ass": 6, "war": 7}
 
+    def tpl(fmt, args=()):
+        """printf style game string -> template: every %d/%i (also %+d) becomes '#' ('+#'), %s takes the next arg, %% -> %."""
+        it = iter(args)
+        def sub(m):
+            t = m.group(0)
+            if t == "%%":
+                return "%"
+            if t == "%s":
+                return next(it, "?")
+            return "+#" if "+" in t else "#"
+        return re.sub(r"%%|%s|%\+?[di]", sub, fmt)
+
+    def skill_name(par):
+        return SKILLS.get(str(par), str(par))
+
+    # time of day suffix of func 17 stats without a "(Based on Character Level)" string 2
+    TIMES = [re.sub(r"^%s \(Increases\s+(.*)\)$", r"", ms(k) or "") for k in ("ModStre9e", "ModStre9f", "ModStre9g", "ModStre9d")]
+    # damage stats the game combines into one "Adds #-# <element> damage" line when both halves are present (hard-coded in the game, the strings are ours)
+    RANGE = {"firemindam": "strModFireDamageRange", "lightmindam": "strModLightningDamageRange", "coldmindam": "strModColdDamageRange",
+             "magicmindam": "strModMagicDamageRange", "poisonmindam": "strModPoisonDamageRange", "mindamage": "strModMinDamageRange"}
+    # properties.txt funcs that name their stat implicitly (no stat column)
+    IMPLICIT = {5: "mindamage", 6: "maxdamage", 20: "item_indesctructible"}
+    # stats with no description row at all (extra halves of the damage ranges, sockets): readable fallbacks, listed in FALLBACKS
+    STAT_FALLBACK = {"coldlength": "Cold Damage Length (# frames)", "poisonlength": "Poison Damage Length (# frames)"}
+    FALLBACKS = {}
+
+    def stat_text(stat, par, val1):
+        """Description template of one stat (the game's descfunc rules), or None when the data has none."""
+        d = ISC.get(stat)
+        if not d or not d.get("descfunc") or not ms(d.get("descstrpos")):
+            return None
+        fn = num(d["descfunc"])
+        s1, s2 = ms(d["descstrpos"]), ms(d.get("descstr2"))
+        if fn == 13:   # +# to <Class> Skill Levels
+            c = num(val1, -1)
+            return tpl(ms(CLASSES[c]["StrAllSkills"])) if 0 <= c < len(CLASSES) else None
+        if fn == 14:   # +# to <skill tab> Skills (<Class> Only)
+            t = num(par, -1)
+            c, k = t // 3, t % 3
+            if not 0 <= c < len(CLASSES):
+                return None
+            return tpl(ms(CLASSES[c]["StrSkillTab%d" % (k + 1)])) + " " + (ms(CLASSES[c]["StrClassOnly"]) or "")
+        if fn in (15, 16, 24, 28):   # skill on event / aura / charged / non-class skill: the skill name comes from the parameter
+            return tpl(s1, [skill_name(par)])
+        if fn == 27:   # +# to <skill> (<Class> Only)
+            cc = SKILL_CLASS.get(skill_name(par), SKILL_CLASS.get(str(par), ""))
+            ci = [i for i, c in enumerate(CLASSES) if (c.get("class") or "")[:3].lower() == cc]
+            return tpl(s1, [skill_name(par), (ms(CLASSES[ci[0]]["StrClassOnly"]) if ci else "") or ""]).strip()
+        if fn in (23, 29) or fn > 29 or fn < 1:
+            return None   # reanimate (needs a monster), damage resist: not implemented, tooltip fallback
+        if "%" in s1:
+            out = tpl(s1)   # D2R strings carry their own format (descfunc 19 is plain sprintf; the old value layouts are folded into the string)
+        else:   # classic layout: value text before (descval 1, default) or after (2) the string, 0 = no value
+            vt = {1: "+#", 6: "+#", 12: "+#", 2: "#%", 7: "#%", 3: "#", 9: "#", 4: "+#%", 8: "+#%", 5: "#%", 10: "#%", 20: "-#%", 21: "-#", 22: "#%"}.get(fn, "")
+            dv = d.get("descval", "")
+            out = s1 if dv == "0" or not vt else (s1 + " " + vt if dv == "2" else vt + " " + s1)
+        if fn == 17 and not s2:
+            out += " (Increases " + " / ".join(TIMES) + ")"
+        elif s2:
+            out += " " + s2
+        return out
 
     def label_for(code, par):
-        """Human readable label for a stat (property code + parameter).  The label doubles as the stat key."""
-        p = props.get(code, {})
-        tip = p.get("tip") or code
-        tip = re.sub(r"\s+", " ", tip).strip()
-        if code == "skilltab":
-            t = num(par, -1)
-            nm = SKILLTABS.get(t, "tab %s" % par)
-            cl = CLASSTAB.get(t, "")
-            return "+# to %s Skills (%s only)" % (nm, cl)
+        """Human readable description template for a property (code + parameter).  The label doubles as the stat key."""
+        p = props.get(code)
+        if p is None:
+            return code
+        stats = [s for _, s in p["st"]] or ([IMPLICIT[p["f"]]] if p["f"] in IMPLICIT else [])
+        text = None
+        if p["f"] == 7 and not p["st"]:   # dmg%: the game shows min% and max% together as "Enhanced Damage"
+            text = ms("strModEnhancedDamage")
+            text = tpl(text) if text else None
+        elif len(stats) >= 2 and stats[0] in RANGE and stats[1].replace("min", "max") in ISC and ms(RANGE[stats[0]]):
+            text = tpl(ms(RANGE[stats[0]]))
+        elif len(stats) >= 2 and all(ISC.get(s, {}).get("dgrp") for s in stats) and len({ISC[s]["dgrp"] for s in stats}) == 1 and ms(ISC[stats[0]].get("dgrpstrpos")):
+            d = ISC[stats[0]]
+            text = tpl(ms(d["dgrpstrpos"])) + (" " + ms(d["dgrpstr2"]) if ms(d.get("dgrpstr2")) else "")
+        elif stats:
+            text = stat_text(stats[0], par, p["val1"])
+        if text:
+            return re.sub(r"\s+", " ", text).strip()
+        tip = re.sub(r"\s+", " ", p["tip"] or STAT_FALLBACK.get(stats[0] if stats else "", "") or code).strip()
         if "[Skill]" in tip:
-            nm = SKILLS.get(str(par), str(par))
-            tip = tip.replace("[Skill]", nm)
+            tip = tip.replace("[Skill]", skill_name(par))
+        FALLBACKS.setdefault(code, ("descfunc " + (ISC.get(stats[0], {}).get("descfunc") or "-") if p["st"] else "implicit func %s" % p["f"], tip))
         return tip
 
     def parse_affix(r):
@@ -426,6 +538,9 @@ def build(mode):
             par = r.get("mod%dparam" % i, "")
             mn = num(r.get("mod%dmin" % i), 0)
             mx = num(r.get("mod%dmax" % i), mn)
+            pr = props.get(c)
+            if pr and pr["st"] and num(ISC.get(pr["st"][0][1], {}).get("descfunc")) in (5, 10):   # descfunc 5/10 show value*100/128 (hit causes monster to flee: 32 -> 25%)
+                mn, mx = round(mn * 100 / 128), round(mx * 100 / 128)
             mods.append([c, par, mn, mx, label_for(c, par)])
         return mods
 
@@ -442,7 +557,7 @@ def build(mode):
             it = [r[k] for k in ("itype%d" % i for i in range(1, 8)) if k in r]
             et = [r[k] for k in ("etype%d" % i for i in range(1, 6)) if k in r]
             out.append({
-                "n": r["Name"], "k": kind, "sp": num(r.get("spawnable")), "rare": num(r.get("rare")),
+                "n": r["Name"], "dn": name_of("item-nameaffixes", r["Name"]), "k": kind, "sp": num(r.get("spawnable")), "rare": num(r.get("rare")),
                 "lvl": num(r.get("level")), "max": num(r.get("maxlevel"), 0) if r.get("maxlevel") else 0,
                 "lr": num(r.get("levelreq")),
                 "cs": 1 if r.get("classspecific") else 0, "cls": r.get("classspecific", ""),   # (the separate `class` column only names the class of the mod, it does not restrict the item)
@@ -455,6 +570,20 @@ def build(mode):
     prefixes = affix_rows("magicprefix", "p")
     suffixes = affix_rows("magicsuffix", "s")
     automagic = affix_rows("automagic", "a")
+
+    # coverage report: run every property code that any affix, automagic, unique or set item uses through label_for (fallbacks are collected in FALLBACKS)
+    used = set()
+    for L in (prefixes, suffixes, automagic):
+        for a in L:
+            used.update(m[0] for m in a["mods"])
+    for fname, cols in (("uniqueitems", ["prop%d" % i for i in range(1, 13)]),
+                        ("setitems", ["prop%d" % i for i in range(1, 10)] + ["aprop%da" % i for i in range(1, 6)] + ["aprop%db" % i for i in range(1, 6)]),
+                        ("sets", ["PCode%da" % i for i in range(2, 6)] + ["PCode%db" % i for i in range(2, 6)] + ["FCode%d" % i for i in range(1, 9)])):
+        for r in rd(fname):
+            used.update(r[c] for c in cols if r.get(c))
+    for c in sorted(used):
+        label_for(c, "0")
+    DESC_REPORT[mode] = {"checked": len(used), "fallback": dict(FALLBACKS)}
 
     # ----------------------------------------------------------- terror zones
     tz = {"bounds": [], "levels": {}, "zones": {}}
@@ -495,6 +624,7 @@ def build(mode):
     }
 
 
+DESC_REPORT = {}
 EXTRACT = {}
 try:
     with open(os.path.join(SRC, "extract.json"), encoding="utf-8") as f:
@@ -512,3 +642,6 @@ for mode, path in (("rotw", OUT), ("lod", OUT_LOD)):
     print("wrote %s (%.1f KB, mode %s): %d items, %d TCs, %d monsters, %d levels, %d uniques, %d sets, %d prefixes, %d suffixes" % (
         path, os.path.getsize(path) / 1024, mode, len(data["items"]), len(data["tc"]), len(data["monsters"]), len(data["levels"]),
         len(data["uniques"]), len(data["sets"]), len(data["prefixes"]), len(data["suffixes"])))
+    dr = DESC_REPORT[mode]
+    print("  descriptions: %d property codes checked, %d use the properties.txt tooltip as fallback: %s" % (
+        dr["checked"], len(dr["fallback"]), ", ".join("%s (%s)" % (k, v[0]) for k, v in sorted(dr["fallback"].items()))))
