@@ -126,6 +126,9 @@ def build(mode):
             "rar": num(r.get("Rarity")),
             "cls": r.get("Class", ""),
             "sm": r.get("StaffMods", ""),   # class code of the class skill bonuses this item type rolls (D2MOO ITEMS_GetStaffMods)
+            # max sockets by item level (ITEMS_GetMaxSockets): [MaxSockets1, threshold1, MaxSockets2, threshold2, MaxSockets3]; ilvl <= th1 -> 1, <= th2 -> 2, else 3
+            "ms": [num(r.get("MaxSockets1"), 0), num(r.get("MaxSocketsLevelThreshold1"), 0), num(r.get("MaxSockets2"), 0),
+                   num(r.get("MaxSocketsLevelThreshold2"), 0), num(r.get("MaxSockets3"), 0)],
         }
 
 
@@ -185,6 +188,10 @@ def build(mode):
                 "cs": 1 if cls_specific else 0,
                 "ap": num(r.get("auto prefix"), 0) if r.get("auto prefix") else 0,
                 "ver": num(r.get("version"), 0),
+                # socket capacity: the base's socket limit (armor/weapons gemsockets), 0 without an inventory (hasinv), and the inventory size
+                # (the sock property caps the count at width * height, ITEMMODS_PropertyFunc14)
+                "gs": num(r.get("gemsockets"), 0) if num(r.get("hasinv"), 0) else 0,
+                "sz": num(r.get("invwidth"), 0) * num(r.get("invheight"), 0),
             }
             if r.get("type2"):
                 it["t2"] = r["type2"]

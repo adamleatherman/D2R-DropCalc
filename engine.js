@@ -789,6 +789,14 @@
       for (let il = it.q; il <= 120; il++) if (affixLevel(il, it) >= alvl) return il;
       return null;
     }
+    /** most sockets the base can hold at an item level (ITEMS_GetMaxSockets, D2Common Items.cpp: the type's MaxSockets1/2/3 by level thresholds, capped by the
+     *  base's gemsockets; ITEMMODS_PropertyFunc14 also caps at inventory width * height). ilvl undefined = unlimited level. */
+    function maxSockets(code, ilvl) {
+      const it = items[code], ty = types[it.t];
+      if (!it.gs || !ty || !ty.ms) return 0;
+      const m = ty.ms, il = ilvl === undefined || ilvl === null ? 999 : Math.max(1, ilvl);
+      return Math.min(il <= m[1] ? m[0] : il <= m[3] ? m[2] : m[4], it.gs, it.sz);
+    }
     const eligCache = new Map();
     /** affix a may sit on base `it` (ITEMMODS_CanItemHaveMagicAffix, D2Common ItemMods.cpp: any etype of the item's chain -> no, an itype of the chain -> yes;
      *  ITEMMODS_AffixPlayerClassisCompatible, D2Game ItemsMagic.cpp: a class-specific base only takes its own class's affixes) */
@@ -804,8 +812,10 @@
     }
     /** eligible prefix/suffix lists for a base at a given affix level (rare=true: rare-flagged affixes only). The entries are the affix rows,
      *  with `f` replaced by the draw weight (frequency, or frequency * level on items with a magic level, CONFIG.affixWeightByLevel). */
-    function eligible(code, alvl, rare) {
-      const key = code + '|' + alvl + '|' + (rare ? 1 : 0);
+    function eligible(code, alvl, rare, ilvl) {
+      if (ilvl === undefined) ilvl = minIlvlForAlvl(items[code], alvl);
+      const ms = maxSockets(code, ilvl);
+      const key = code + '|' + alvl + '|' + (rare ? 1 : 0) + '|' + ms;
       let r = eligCache.get(key);
       if (r) return r;
       const it = items[code];
@@ -824,10 +834,16 @@
             if (rare && !a.rare) continue;
             if (a.lvl > alvl) continue;
             if (a.max && a.max < alvl) continue;
-            // the socket affixes (Jeweler's ...) are never rolled: ITEMMODS_CanItemHaveMagicAffix rejects a first property whose stat is item_numsockets
-            if (a.mods.length && a.mods[0][0] === 'sock') continue;
             if (!affixFits(a, it, cls)) continue;
-            res[kind].push(weighted(a));
+            // socket affixes (Mechanist's, Artificer's, Jeweler's): ITEMMODS_PropertyFunc14 rolls min..max (0 -> the param), clamped to 1..max sockets of the base
+            let w = weighted(a);
+            if (a.mods.length && a.mods[0][0] === 'sock') {
+              if (ms <= 0) continue;
+              const m = a.mods[0], par = +m[1] || 0;
+              const lo = Math.max(1, Math.min(m[2] || par, ms)), hi = Math.max(1, Math.min(m[3] || par, ms));
+              w = Object.assign({}, w, { mods: [[m[0], m[1], lo, hi, m[4]]].concat(a.mods.slice(1)) });
+            }
+            res[kind].push(w);
           }
         }
       }
@@ -936,9 +952,9 @@
     function affixProb(code, alvl, quality_, conds, opts) {
       const rolls = (opts && opts.rolls) || 200000;
       const seed = (opts && opts.seed) || 12345;
-      const el = eligible(code, alvl, quality_ === 'rare');
-      if (!el.sig) el.sig = el.p.map((a) => a.i + ':' + a.f).join(',') + '/' + el.s.map((a) => a.i + ':' + a.f).join(',') + '/' + el.auto.map((a) => a.g + a.n + ':' + a.f).join(',');
       const ilvl = opts && opts.ilvl !== undefined ? opts.ilvl : minIlvlForAlvl(items[code], alvl);
+      const el = eligible(code, alvl, quality_ === 'rare', ilvl);
+      if (!el.sig) el.sig = el.p.map((a) => a.i + ':' + a.f + (a.mods[0] && a.mods[0][0] === 'sock' ? 's' + a.mods[0][3] : '')).join(',') + '/' + el.s.map((a) => a.i + ':' + a.f + (a.mods[0] && a.mods[0][0] === 'sock' ? 's' + a.mods[0][3] : '')).join(',') + '/' + el.auto.map((a) => a.g + a.n + ':' + a.f).join(',');
       const sbase = staffBase(ilvl === null ? 99 : ilvl);
       const sd = staffDist(code, sbase, conds);
       const sk = sd.length === 1 && sd[0].mask === 0 ? '' : code + sbase;
@@ -1170,7 +1186,7 @@
           if (w <= 0) continue;
           pq += w;
           const alvl = affixLevel(src.mlvl, items[code]);
-          const pk = code + '|' + alvl + '|' + staffBase(src.mlvl);   // staff mods depend on the drop's item level, not the affix level
+          const pk = code + '|' + alvl + '|' + staffBase(src.mlvl) + '|' + maxSockets(code, src.mlvl);   // staff mods depend on the drop's item level, not the affix level
           parts.set(pk, (parts.get(pk) || 0) + w);
           need.set(pk, [code, alvl, src.mlvl]);
         }
@@ -1238,7 +1254,7 @@
 
     return {
       CONFIG, data: D, DIFFS, items, types, getCtx, playersN, adjNoDrop, dist, upgradeTC,
-      mode, heraldsAvailable, sunderChance, sunderPaths, isSunder, adjQuality, heraldSpawnPct, quality, qualityTotals, sources, srcDist, chanceFor, baseQualityChance, affixLevel, minIlvlForAlvl, eligible, affixProb, minLevels, staffDist, staffBase,
+      mode, heraldsAvailable, sunderChance, sunderPaths, isSunder, adjQuality, heraldSpawnPct, quality, qualityTotals, sources, srcDist, chanceFor, baseQualityChance, affixLevel, minIlvlForAlvl, eligible, maxSockets, affixProb, minLevels, staffDist, staffBase,
       statList, describe, affixSearch, searchIndex, baseTypes, metaCache, uniqById, setById, uniqByCode, setByCode, prettyId, tzLevel,
       eligibleUniques, eligibleSets, condProb, trialsFor,
     };

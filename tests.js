@@ -394,6 +394,19 @@
           two: E.affixProb(code, al, 'rare', [{ key: FIRE, min: 10 }, { key: MANA, min: 10 }], { ilvl: il, rolls: 200000 }) });
       }
     }
+    // ---- socket affixes (Mechanist's / Artificer's / Jeweler's): chance of >= N sockets by quality, base and item level
+    res.rules.sock = [];
+    {
+      const SK = 'Socketed (#)';
+      for (const [code, q, il, mn] of [['uit', 'magic', 80, 4], ['uit', 'magic', 80, 3], ['uit', 'magic', 60, 4], ['uit', 'magic', 60, 1], ['uit', 'magic', 60, 2], ['uit', 'magic', 40, 4], ['uit', 'rare', 80, 4], ['uit', 'rare', 60, 4], ['uit', 'rare', 60, 1], ['uit', 'rare', 60, 2],
+                                       ['cap', 'magic', 60, 2], ['cap', 'magic', 60, 3], ['cap', 'rare', 60, 2], ['ssd', 'magic', 60, 2],
+                                       ['ci0', 'magic', 20, 2], ['ci0', 'magic', 30, 2], ['ci0', 'rare', 20, 2], ['ci0', 'rare', 30, 2], ['gth', 'magic', 20, 3], ['gth', 'magic', 75, 4],
+                                       ['rin', 'magic', 80, 1], ['amu', 'magic', 80, 1], ['rin', 'rare', 80, 1], ['jew', 'magic', 80, 1], ['jew', 'rare', 80, 1]]) {
+        const al = E.affixLevel(il, E.items[code]);
+        res.rules.sock.push({ code, q, ilvl: il, min: mn, p: E.affixProb(code, al, q, [{ key: SK, min: mn }], { ilvl: il, rolls: 200000 }),
+          listed: E.statList([code], q).some((x) => x.key === SK), maxS: E.maxSockets(code, il) });
+      }
+    }
     res.sourcesCount = E.sources(ctxFor(1, 1)).length;
     res.config = E.CONFIG;
   } catch (e) { res.errors.push(String(e.stack || e)); }

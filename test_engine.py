@@ -100,11 +100,25 @@ class Ref:
             a += [x for x in self.anc(r["type2"]) if x not in a]
         return a
 
-    def affixes(self, code, alvl=99):
+    def max_sockets(self, code, ilvl=None):
+        """ITEMS_GetMaxSockets (D2Common Items.cpp) capped by the inventory size (ITEMMODS_PropertyFunc14): 0 when the base has no inventory
+        (hasinv 0). Item level > 25 uses MaxSockets2, > 40 MaxSockets3 (ilvl None = 120)."""
+        r = self.items[code]
+        if not n(r.get("hasinv")):
+            return 0
+        t = self.types.get(r.get("type", ""))
+        if not t:
+            return 0
+        il = 120 if ilvl is None else max(1, ilvl)
+        th1, th2 = n(t.get("MaxSocketsLevelThreshold1")), n(t.get("MaxSocketsLevelThreshold2"))
+        m = n(t.get("MaxSockets1")) if il <= th1 else n(t.get("MaxSockets2")) if il <= th2 else n(t.get("MaxSockets3"))
+        return min(m, n(r.get("gemsockets")), n(r.get("invwidth")) * n(r.get("invheight")))
+
+    def affixes(self, code, alvl=99, ilvl=None):
         """Eligible magic prefixes/suffixes ('name|class') for a base at an affix level, straight from the raw tables.
         Rule: type (or a parent) in itype, none in etype; a class tagged affix (classspecific) may appear on any matching base
-        except a class-specific base (type chain with a Class in itemtypes), which only takes its own class. Affixes whose first property is
-        `sock` (Mechanist's, Artificer's, Jeweler's) are never rolled (D2MOO ITEMMODS_CanItemHaveMagicAffix)."""
+        except a class-specific base (type chain with a Class in itemtypes), which only takes its own class. The socket affixes (Mechanist's,
+        Artificer's, Jeweler's) need a base that can hold sockets at this item level (max_sockets > 0; ilvl None = unlimited)."""
         anc = self.item_anc(code)
         cls = [self.types[t]["Class"] for t in anc if self.types[t].get("Class")]
         out = {}
@@ -121,7 +135,7 @@ class Ref:
                     continue
                 if a.get("classspecific") and cls and a["classspecific"] not in cls:
                     continue
-                if a.get("mod1code") == "sock":   # the socket affixes (Jeweler's ...) never roll: D2MOO ITEMMODS_CanItemHaveMagicAffix rejects item_numsockets
+                if a.get("mod1code") == "sock" and self.max_sockets(code, ilvl) <= 0:   # socket affixes need a socketable base
                     continue
                 res.append(a["Name"] + "|" + a.get("classspecific", ""))
             out[key] = sorted(res)
@@ -324,8 +338,9 @@ class Rules:
                 out.append((c, mn, mx))
         return out
 
-    def pool(self, code, alvl, rare):
-        key = (code, alvl, rare)
+    def pool(self, code, alvl, rare, ilvl=None):
+        ms = self.ref.max_sockets(code, ilvl)
+        key = (code, alvl, rare, ms)
         if key in self.pool_cache:
             return self.pool_cache[key]
         ref = self.ref
@@ -354,8 +369,13 @@ class Rules:
                 if a.get("classspecific") and cls and a["classspecific"] not in cls:
                     continue
                 m = self.mods(a)
-                if kind != "a" and m and m[0][0] == "sock":     # ITEMMODS_CanItemHaveMagicAffix: first property's stat item_numsockets
-                    continue
+                if m and m[0][0] == "sock":
+                    # ITEMMODS_PropertyFunc14: roll min..max (blank = the param), 0 -> param, clamped to 1..max sockets of the base at this item level
+                    if ms <= 0:
+                        continue
+                    par = n(a.get("mod1param"))
+                    lo, hi = (m[0][1], m[0][2]) if m[0][1] != m[0][2] else ((m[0][1] or par),) * 2
+                    m = [("sock", max(1, min(lo or par, ms)), max(1, min(hi or par, ms)))] + m[1:]
                 w = n(a["frequency"]) * (n(a["level"]) if ml else 1)    # ComputeAffixFrequency
                 res[kind].append({"w": w, "g": n(a.get("group")), "m": m})
         self.pool_cache[key] = res
@@ -376,7 +396,7 @@ class Rules:
 
     # --- magic items (sub_6FC4D5E0): prefix 1/2, suffix forced when no prefix else 1/2; exact over all affix pairs
     def magic(self, code, ilvl, conds):
-        pl = self.pool(code, self.alvl(code, ilvl), False)
+        pl = self.pool(code, self.alvl(code, ilvl), False, ilvl)
         P, S, A = pl["p"], pl["s"], pl["a"]
         if not P and not S:
             return 0.0
@@ -413,7 +433,7 @@ class Rules:
     def rare_mc(self, code, ilvl, conds, rolls, seed, counts=None):
         import bisect, random
         rng = random.Random(seed)
-        pl = self.pool(code, self.alvl(code, ilvl), True)
+        pl = self.pool(code, self.alvl(code, ilvl), True, ilvl)
         sides = {}
         for k in ("p", "s"):
             L = pl[k]
@@ -1235,6 +1255,35 @@ def main():
             pu = RU.rare_mc(c["code"], c["ilvl"], FIRE, N, 4243, counts=[3, 4, 5, 6])
             su = math.sqrt(max(pu * (1 - pu), 1e-12) / N)
             info("rare MC %s: the OLD assumption (uniform 3-6 affixes) would give" % tag, pu, c["one"], "engine is %.1f sigma away from it" % ((c["one"] - pu) / su))
+    # ---- socket affixes: ITEMMODS_PropertyFunc14 (count rolled 1-2 / fixed 3 / fixed 4, clamped to the base's max sockets at the item level)
+    for c in RUL["sock"]:
+        tag = "%s %s ilvl %d, >= %d sockets" % (c["code"], c["q"], c["ilvl"], c["min"])
+        SOCK = [("sock", c["min"])]
+        check("socket max %s ilvl %d == reference (gemsockets / MaxSockets by level / size)" % (c["code"], c["ilvl"]), c["maxS"], ref.max_sockets(c["code"], c["ilvl"]), 0)
+        if c["q"] == "magic":
+            check("socket %s: exact == reference" % tag, c["p"], RU.magic(c["code"], c["ilvl"], SOCK), 1e-9)
+        else:
+            N = 150000
+            pm = RU.rare_mc(c["code"], c["ilvl"], SOCK, N, 4244)
+            sd = math.sqrt(max(pm * (1 - pm), 1e-12) / N)
+            z = (c["p"] - pm) / sd
+            ROWS.append(("PASS" if abs(z) < 5 else "FAIL", "socket rare MC %s: engine vs Python game-loop simulation, |z| < 5" % tag, c["p"], pm, "z = %.2f, sigma = %.2e" % (z, sd)))
+            if abs(z) >= 5:
+                FAIL.append("socket rare MC " + tag)
+        info("socket %s: chance" % tag, "%.6g" % c["p"], "-", "listed in statList: %s" % c["listed"])
+    SKT = {(c["code"], c["q"], c["ilvl"], c["min"]): c for c in RUL["sock"]}
+    sk = lambda *k: SKT[k]["p"]
+    check("Monarch magic ilvl 80 (alvl 61): P(4 sockets) > 0 (Jeweler's) and P(3+) > P(4)", 1 if sk("uit", "magic", 80, 4) > 0 and sk("uit", "magic", 80, 3) > sk("uit", "magic", 80, 4) else 0, 1, 0)
+    check("Monarch magic ilvl 60 (alvl 36): Jeweler's (level 55) not yet possible, P(4 sockets) = 0", sk("uit", "magic", 60, 4), 0, 0)
+    check("Monarch rare: 4 sockets impossible (Jeweler's is not rare)", sk("uit", "rare", 80, 4), 0, 0)
+    check("Gothic Plate magic ilvl 75: 4 sockets possible (MaxSockets2 = 4, gemsockets 4)", 1 if sk("gth", "magic", 75, 4) > 0 else 0, 1, 0)
+    check("Monarch rare: 3+ sockets impossible (Artificer's is not rare)", 1 if sk("uit", "rare", 60, 2) > 0 and sk("uit", "rare", 60, 1) > 0 else 0, 1, 0)
+    check("Cap (gemsockets 2) magic: 3 sockets impossible", sk("cap", "magic", 60, 3), 0, 0)
+    check("Circlet ilvl 20 (MaxSockets1 = 1): 2 sockets impossible; ilvl 30 (MaxSockets2 = 2): possible",
+          1 if sk("ci0", "magic", 20, 2) == 0 and sk("ci0", "rare", 20, 2) == 0 and sk("ci0", "magic", 30, 2) > 0 and sk("ci0", "rare", 30, 2) > 0 else 0, 1, 0)
+    for k in (("rin", "magic", 80, 1), ("amu", "magic", 80, 1), ("rin", "rare", 80, 1), ("jew", "magic", 80, 1), ("jew", "rare", 80, 1)):
+        check("%s %s: no socket affix (no inventory / not socketable): P = 0, not offered as a stat" % (k[0], k[1]), SKT[k]["p"] + (1 if SKT[k]["listed"] else 0), 0, 0)
+    check("Monarch offers 'Socketed (#)' as a stat", 1 if SKT[("uit", "magic", 80, 4)]["listed"] else 0, 1, 0)
     # ---- print
     w = max(len(r[1]) for r in ROWS)
     for st, name, got, want, note in ROWS:
