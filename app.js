@@ -524,10 +524,14 @@
     if (v === undefined) { v = E.fitsCombo(fitIndex(), rowConds(r), wantQ(), selDiff()); fitCache.set(r.id, v); }
     return v;
   }
-  /** a family fits when some tier fits */
-  const fitOf = (f) => !bd.sel.length || f.rows.some(rowFits);
+  /** the pick a family cannot appear with: one of the same affix group on the same side (tiers like of Pacing / of Speed); null when none */
+  const groupClash = (f) => (f.g ? bd.picks.find((p) => p.id !== f.id && p.g === f.g && p.side === f.side) || null : null);
+  /** a family fits when it is in no picked affix's group and some tier fits */
+  const fitOf = (f) => !groupClash(f) && (!bd.sel.length || f.rows.some(rowFits));
   /** why a row does not fit: E.explainCombo for the wanted qualities (the qualities the row can occur on first, magic and rare before the white ones). Computed on hover: it sweeps every item level */
   function noFitWhy(r) {
+    const gc = groupClash(r);
+    if (gc) return "Doesn't fit with your picks: " + r.name + ' and ' + gc.name + ' are affixes of the same group, which never appear together on one item. Click to pick it instead of ' + gc.name + '.';
     fitSync();
     let w = whyCache.get(r.id);
     if (!w) {
@@ -551,7 +555,7 @@
   // ----- picked affix families (bd.picks: {id = family id, name, side, keys}) and their stats (bd.sel) -----
   /** the pick a stat belongs to; null when no pick has it (deep link) or several do */
   const pickOf = (key) => { const ps = bd.picks.filter((p) => p.keys.indexOf(key) >= 0); return ps.length === 1 ? ps[0] : null; };
-  const pickFromRow = (r) => ({ id: r.id, name: r.name, side: r.side, keys: r.mods.map((m) => m.key).filter((k) => bd.stats.has(k)) });
+  const pickFromRow = (r) => ({ id: r.id, name: r.name, side: r.side, g: r.g, keys: r.mods.map((m) => m.key).filter((k) => bd.stats.has(k)) });
   /** the family that owns a picked stat (its block); null for "Other stats" (no pick, or several picks share the stat) */
   const famOf = (key) => { const p = pickOf(key); return p ? bd.fams.get(p.id) || null : null; };
   /** the weakest value of a family stat: lowest minimum (ge) or highest maximum (le) over its tiers */
@@ -561,10 +565,15 @@
     bd.picks.push(pickFromRow(f));
     for (const m of f.mods) { const st = bd.stats.get(m.key); if (st && !bd.sel.some((s) => s.key === m.key)) addStat(m.key, weakest(f, m.key, st.le)); }
   }
-  function removePick(id) {
-    const i = bd.picks.findIndex((p) => p.id === id); if (i < 0) return;
+  /** a pick and the stats only it owns taken out (no redraw) */
+  function dropPick(id) {
+    const i = bd.picks.findIndex((p) => p.id === id); if (i < 0) return false;
     const [p] = bd.picks.splice(i, 1);
     bd.sel = bd.sel.filter((s) => p.keys.indexOf(s.key) < 0 || bd.picks.some((q) => q.keys.indexOf(s.key) >= 0));
+    return true;
+  }
+  function removePick(id) {
+    if (!dropPick(id)) return;
     updateRanges(); renderSel(); refit(true); changed();
   }
   function removeStat(i) {
@@ -881,6 +890,7 @@
   function onPickRow(r) {
     if (!r) return;
     if (bd.picks.some((p) => p.id === r.id)) { removePick(r.id); return; }   // clicking a picked row takes it out again
+    const gc = groupClash(r); if (gc) dropPick(gc.id);   // another tier of a picked group replaces it (an item never has both)
     addPick(r);
     updateRanges(); renderSel(); refit(true); changed();
   }
@@ -974,7 +984,7 @@
     bd.sel = []; bd.picks = []; fitIdx = null;
     const byRow = new Map(); for (const f of bd.fams.values()) for (const id of f.ids) byRow.set(id, f);
     for (const id of qs.getAll('p')) {   // ?p=<family id>: the picked affixes; an old link's tier row id (p12) maps to its family; links without p: the stats show under "Other stats"
-      const f = bd.fams.get(id) || byRow.get(id); if (!f || bd.picks.some((p) => p.id === f.fid)) continue;
+      const f = bd.fams.get(id) || byRow.get(id); if (!f || bd.picks.some((p) => p.id === f.fid) || groupClash(f)) continue;
       if (!pickFromRow(f).keys.length) continue;
       addPick(f);
     }
