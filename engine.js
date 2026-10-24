@@ -81,6 +81,9 @@
     },
     // --- monster rank level offsets (data guide: "The unique monster bonus can go over [the TZ max]") ---
     champOffset: 2, uniqueOffset: 3, minionOffset: 3,
+    // terror zone act bosses: the unique bonus on top of the zone level (Basin wiki / Zax: min(max(own level, clvl + 5), 99) in Hell; Andariel 93 at clvl 88), and
+    // Radament, Griswold and Nihlathak (bosses that are also super uniques) a further +3 after that cap, so they reach 102 (Basin wiki "Terror Zone")
+    tzBossExtra: { radament: 3, griswold: 3, nihlathakboss: 3 },
     // --- ladder: current ladder season used for first/lastLadderSeason gating (Season 15 began 2026-08-21 with patch 3.3; bump each season) ---
     currentSeason: 15,
     // --- terror zones ---
@@ -839,7 +842,7 @@
           if (A.ho && d < 2) continue;
           const inTz = tzOn && D.tz.levels[String(lid)] !== undefined;
           const base = m.lv[d];
-          const mlvl = inTz ? tzLevel(base, s.clvl, d) : base;
+          const mlvl = inTz ? Math.max(base, tzLevel(0, s.clvl, d) + CONFIG.uniqueOffset) + (CONFIG.tzBossExtra[id] || 0) : base;   // own level is the floor; Colossal Ancients (110) stay
           let tcn = pickTC(m, d, 'regular', inTz);
           const qtc = s.quest && m.qtc && m.qtc[d] && TC[m.qtc[d]] && (!inTz || CONFIG.questOverridesTz) ? m.qtc[d] : null;
           if (qtc) tcn = qtc;

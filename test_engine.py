@@ -1398,6 +1398,11 @@ def main():
     ok = abs(js["lod"]["hcAndariel"] - js["lod"]["hcAndarielRotw"]) > 1e-9
     ROWS.append(("PASS" if ok else "FAIL", "Hell Andariel P(Harlequin Crest) differs between modes", js["lod"]["hcAndariel"], js["lod"]["hcAndarielRotw"], ""))
     if not ok: FAIL.append("andariel hc modes")
+    TB = js["tzBoss"]
+    for name, got, want in [("TZ Hell Andariel at clvl 88 (Zax: 93)", TB["and88"], 93), ("TZ Hell Andariel at clvl 99 (unique cap 99)", TB["and99"], 99), ("Hell Andariel outside a terror zone", TB["and0"], 75),
+                            ("TZ Hell Diablo at clvl 85 keeps his own 94", TB["dia85"], 94), ("TZ Hell Diablo at clvl 99", TB["dia99"], 99), ("TZ Hell Baal at clvl 99", TB["baal99"], 99),
+                            ("TZ Hell Nihlathak at clvl 99: 99 + 3 (Basin)", TB["nih99"], 102), ("Hell Nihlathak outside a terror zone", TB["nih0"], 92), ("TZ Hell Radament at clvl 95: 99 + 3", TB["rad95"], 102), ("TZ Hell Summoner at clvl 99 (no extra)", TB["sum99"], 99)]:
+        check(name, got, want)
     LD = js["ladder"]
     for name, cond in [("RotW Bane Ash drops on ladder (season %d)" % LD["season"], LD["baneL"] > 0), ("RotW Bane Ash cannot drop on non-ladder in season 15", LD["baneNL"] == 0),
                        ("RotW Angelic Halo drops on ladder", LD["haloL"] > 0), ("RotW Angelic Halo cannot drop on non-ladder in season 15", LD["haloNL"] == 0),

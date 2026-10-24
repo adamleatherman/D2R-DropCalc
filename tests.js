@@ -166,6 +166,10 @@
       res.lod.hcAndariel = EL.chanceFor(ctx, s, { kind: 'unique', id: 'Harlequin Crest' }, 0).target;
       const ctxR = E.getCtx({ players: 1, party: 1, ladder: true, tz: false, mf: 0 }), sR = E.sources(ctxR).find((x) => x.name === 'Andariel' && x.diff === 2 && x.rank === 'boss');
       res.lod.hcAndarielRotw = E.chanceFor(ctxR, sR, { kind: 'unique', id: 'Harlequin Crest' }, 0).target; }
+    // terror zone act boss levels: max(own, min(clvl + 2, cap) + 3), Radament / Griswold / Nihlathak +3 more (can pass 99); outside a terror zone their own level
+    { const lv = (tz, clvl, mon) => { const s = E.sources(E.getCtx({ players: 1, party: 1, ladder: true, tz, clvl, mf: 0 })).find((x) => x.rank === 'boss' && x.mon === mon && x.diff === 2); return s && s.mlvl; };
+      res.tzBoss = { and88: lv(true, 88, 'andariel'), and99: lv(true, 99, 'andariel'), and0: lv(false, 88, 'andariel'), dia85: lv(true, 85, 'diablo'), dia99: lv(true, 99, 'diablo'), baal99: lv(true, 99, 'baalcrab'),
+        nih99: lv(true, 99, 'nihlathakboss'), nih0: lv(false, 99, 'nihlathakboss'), rad95: lv(true, 95, 'radament'), sum99: lv(true, 99, 'summoner') }; }
     // ladder season gating (CONFIG.currentSeason): RotW season-15 uniques are ladder-only, the Angelic set too (15-16), Sunders (2-2) open to non-ladder; LoD has no gating
     { const hell = (Em, ladder) => { const ctx = Em.getCtx({ players: 1, party: 1, ladder, tz: false, mf: 0 }); return [ctx, Em.sources(ctx).find((x) => x.name === 'Andariel' && x.diff === 2 && x.rank === 'boss')]; };
       const p = (Em, ladder, tg) => { const [ctx, s] = hell(Em, ladder); return Em.chanceFor(ctx, s, tg, 0).target; };
