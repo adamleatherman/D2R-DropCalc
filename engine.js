@@ -1558,7 +1558,7 @@
       rareMemo.set(rk, acc);
       return acc;
     }
-    /** Odds for the builder's item card, over the bases `codes` at item level ilvl (each at max(ilvl, its own level), like the affix table): for every quality
+    /** Odds for the builder's item card, over the bases `codes` that can drop at item level ilvl (dropsAt; a base above it is skipped, like in the affix table): for every quality
      *  the chance that an item of that quality carries all `conds` (total), each single condition (perCond[i]) and each group of condition indices
      *  (o.groups = [[0, 2], ...] -> perGroup). Mean over the bases, or sum(w p) / sum(w) with `weights` (Map / object code -> weight; weight 0 bases are skipped).
      *  Magic and the plain qualities are exact (affixProb); rare is reweighted from the recorded samples (o.rolls per pool, default 50000, o.seed, o.diff). */
@@ -1566,7 +1566,7 @@
       o = o || {};
       const rolls = o.rolls || 50000, groups = o.groups || [], nc = conds.length;
       const wget = (c) => (weights ? (weights instanceof Map ? weights.get(c) : weights[c]) || 0 : 1);
-      const ws = codes.map(wget), W = ws.reduce((a, b) => a + b, 0);
+      const ws = codes.map((c) => (dropsAt(c, ilvl) ? wget(c) : 0)), W = ws.reduce((a, b) => a + b, 0);
       const mk = () => Object.fromEntries(qualities.map((q) => [q, 0]));
       const total = mk(), perCond = conds.map(mk), perGroup = groups.map(mk);
       if (!(W > 0) || !nc) return { total, perCond, perGroup };
@@ -1771,6 +1771,8 @@
     }
     const staffMaxVal = () => Math.max.apply(null, CONFIG.staffMods.value.map((v) => v[1]));
     const ilOf = (code, ilvl) => Math.max(ilvl, items[code].q, 1);   // a base never drops below its own level in the builder
+    /** can the base drop at this item level? (treasure classes only pick bases up to the monster level; the odds at an item level skip the others) */
+    const dropsAt = (code, ilvl) => items[code].q <= Math.max(ilvl, 1);
     const affId = (a) => a.k + a.i;   // 'p12' / 's7' / 'a3' (automagic row); staff mod skills are 'k' + stat key
 
     let btCache = null;
@@ -2043,9 +2045,10 @@
     }
 
     /** The builder's affix table for a set of bases at an item level: catalogue rows with availability at that level and appearance odds for magic (exact)
-     *  and rare (Monte Carlo, o.rolls per base). Odds are the mean over the bases (a base that cannot roll the affix counting 0), every base counted equally,
+     *  and rare (Monte Carlo, o.rolls per base). Only bases that can drop at ilvl (dropsAt) count, for the odds and for availability (nOn).
+     *  Odds are the mean over those bases (a base that cannot roll the affix counting 0), every base counted equally,
      *  or with o.weights (Map / object code -> weight, e.g. baseDropWeights) the weighted mean sum(w * p) / sum(w). Each row also carries the per-base odds
-     *  (pb.m / pb.r, in the order of `codes`) for the hover. */
+     *  (pb.m / pb.r, in the order of `codes`; 0 for a base above ilvl) for the hover. */
     function builderAffixTable(codes, ilvl, o) {
       o = o || {};
       const cat = builderCatalog(codes, ilvl);
@@ -2053,21 +2056,21 @@
       const per = {};
       for (const q of QUALS) per[q] = new Map();
       for (const code of codes) {
+        if (!dropsAt(code, ilvl)) continue;
         const il = ilOf(code, ilvl);
         for (const q of quals) per[q].set(code, affixAppearance(code, il, q, o.rolls, o.seed, o.diff));
       }
       const wget = (c) => (o.weights ? (o.weights instanceof Map ? o.weights.get(c) : o.weights[c]) || 0 : 1);
-      const ws = codes.map(wget), W = ws.reduce((a, b) => a + b, 0);
+      const ws = codes.map((c) => (dropsAt(c, ilvl) ? wget(c) : 0)), W = ws.reduce((a, b) => a + b, 0);
       const mean = (q, id) => { if (!(W > 0)) return 0; let t = 0; codes.forEach((c, i) => { const m = per[q].get(c); if (m && ws[i]) t += ws[i] * (m.get(id) || 0); }); return t / W; };
       const rows = [];
       for (const r of cat.values()) {
         let lo = null, hi = null, nOn = 0;
         for (const [code, [a, b]] of r.per) {
           lo = lo === null ? a : Math.min(lo, a); hi = hi === null ? b : Math.max(hi, b);
-          const il = ilOf(code, ilvl);
-          if (il >= a && il <= b) nOn++;
+          if (dropsAt(code, ilvl) && ilvl >= a && ilvl <= b) nOn++;
         }
-        const pbOf = (q) => codes.map((c) => { const m = per[q].get(c); return m ? m.get(r.id) || 0 : 0; });
+        const pbOf = (q) => codes.map((c) => { const m = dropsAt(c, ilvl) && per[q].get(c); return m ? m.get(r.id) || 0 : 0; });
         rows.push({ id: r.id, fid: familyIdOf(r), side: r.side, name: r.name, mods: r.mods, desc: r.mods.map((m) => describe(m.key, m.min, m.max, m.v)).join(' / '), lvl: r.lvl, lr: r.lr, cls: r.cls, rare: r.rare,
           g: r.g, groupName: r.groupName, maxLvl: r.maxLvl, tier: r.tier || 0, minIl: lo, maxIl: hi, nBases: r.per.size, nOn, avail: nOn > 0,
           magic: mean('magic', r.id), rareP: r.rare ? mean('rare', r.id) : 0, quals: r.quals,

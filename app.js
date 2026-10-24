@@ -422,14 +422,18 @@
     get: (r) => (r.ap && r.ap[q]) || 0, fmt: (r) => odds((r.ap && r.ap[q]) || 0), tip: (r) => oddsTip(r, q) })));
   /** how the odds columns were averaged over the bases (plain average, or weighted by drop rate in the chosen area / monster) */
   function avgNote() {
-    return bd.wts ? 'Weighted by drop rate in ' + bd.wlabel + ': each base counts with its share of the type\'s drops there (global difficulty, players, terror zone and mode apply); bases that cannot drop there count 0.'
-      : 'Average over the ' + bd.codes.length + ' base' + (bd.codes.length === 1 ? '' : 's') + ' of the selection (each base counted equally; a base that cannot roll the affix counts 0).';
+    const nd = bd.codes.filter(dropsAt).length, skip = nd < bd.codes.length ? ' Bases above item level ' + bd.tableIl + ' cannot drop there and are left out (' + nd + ' of ' + bd.codes.length + ' can).' : '';
+    return (bd.wts ? 'Weighted by drop rate in ' + bd.wlabel + ': each base counts with its share of the type\'s drops there (global difficulty, players, terror zone and mode apply); bases that cannot drop there count 0.'
+      : 'Average over the ' + bd.codes.length + ' base' + (bd.codes.length === 1 ? '' : 's') + ' of the selection (each base counted equally; a base that cannot roll the affix counts 0).') + skip;
   }
+  /** can the base drop at the item level the table was computed for? (a base never drops above the monster level; E.builderAffixTable skips the others) */
+  const dropsAt = (c) => E.items[c].q <= (bd.tableIl || 99);
   /** hover text of an odds cell: the odds on each base (and its weight in weighted mode), best first */
   function oddsTip(r, q) {
     const arr = r.pb && r.pb.q && r.pb.q[q];
     if (!arr) return 'This row cannot occur on a ' + QCOLN[q] + ' item.';
-    const L = bd.codes.map((c, i) => ({ n: baseName(c), p: arr[i], w: bd.wts ? bd.wts[i] : 0 }));
+    const L = bd.codes.map((c, i) => ({ n: baseName(c), p: arr[i], w: bd.wts ? bd.wts[i] : 0, c })).filter((x) => dropsAt(x.c));
+    if (!L.length) return 'No base of the selection drops at item level ' + bd.tableIl + '.';
     L.sort((a, b) => (b.p - a.p) || a.n.localeCompare(b.n));
     const MAXL = 30;
     const out = [bd.wts ? 'Per base: odds (weight = share of the type\'s drops in ' + bd.wlabel + ')' : 'Per base (each counted equally): odds'];
@@ -448,8 +452,9 @@
   function renderTable() {
     if (!showOdds() && TA.key.charAt(0) === 'o') { TA.key = 'il'; TA.dir = 1; }
     TA.rows = filterRows();
-    const r = TA.render();
-    $('tinfo2').textContent = bd.codes.length ? r.total + ' of ' + bd.rows.length + ' affixes (showing ' + r.shown + ')' + (nofitHidden ? '; ' + nofitHidden + ' hidden because they do not fit your picks' : '') + (showOdds() ? '; odds at item level ' + effIlvl() + ', ' : '. ') +
+    const r = TA.render(), nd = bd.codes.filter(dropsAt).length;
+    $('tinfo2').textContent = bd.codes.length ? r.total + ' of ' + bd.rows.length + ' affixes (showing ' + r.shown + ')' +
+      (nd === bd.codes.length ? '' : nd ? '; ' + nd + ' of ' + bd.codes.length + ' bases can drop at item level ' + bd.tableIl + ' (the others only count above their own level)' : '; no base of the selection can drop at item level ' + bd.tableIl + ', so every row is dimmed') + (nofitHidden ? '; ' + nofitHidden + ' hidden because they do not fit your picks' : '') + (showOdds() ? '; odds at item level ' + effIlvl() + ', ' : '. ') +
       (!showOdds() ? '' : bd.wts ? (bd.wts.some((w) => w > 0) ? 'weighted by drop rate in ' + bd.wlabel + ' (bases that cannot drop there count 0)' : 'no base of the selection drops in ' + bd.wlabel + ' with the current selectors, so every odds figure is "-"')
         : 'average over the ' + bd.codes.length + ' base' + (bd.codes.length === 1 ? '' : 's') + ' of the selection (each base counted equally)') +
       (showOdds() ? '. Hover an odds cell for the per-base odds.' : '') + ' Click a row to add or remove it. Dimmed rows cannot roll at the item level set under Advanced; rows marked "doesn\'t fit" cannot be combined with your picks (hover for why).' : '';
@@ -488,7 +493,7 @@
     };
     runJob('table', { type: 'table', codes, ilvl, rolls, ctx: ctxS, wopts, qualities: quals, diff }, null, (rows, err, m) => {
       if (!rows) { $('tinfo2').textContent = 'Error: ' + err; return; }
-      bd.tierRows = rows; bd.rows = E.familyTable(rows, bd.fams); bd.wts = wopts ? (m ? m.wts : rows.wts) : null; bd.wlabel = wlabel;
+      bd.tierRows = rows; bd.tableIl = ilvl; bd.rows = E.familyTable(rows, bd.fams); bd.wts = wopts ? (m ? m.wts : rows.wts) : null; bd.wlabel = wlabel;
       renderTable();
     }, local);
   }
@@ -694,7 +699,7 @@
     for (const el of box.querySelectorAll('.od')) el.innerHTML = o ? oddsLine(o, el.dataset.k) : '';
     const n = box.querySelector('.odn');
     if (n) n.textContent = !o ? (oddsBusy ? 'Computing odds...' : '') : 'Chance that an item of that quality on the selection drops with these stats (at least the values set), at item level ' + o.ilvl + '. ' +
-      (o.wlabel ? 'Weighted by drop rate in ' + o.wlabel + '.' : 'Average over the ' + o.nb + ' base' + (o.nb === 1 ? '' : 's') + ' of the selection.') + (o.list.some((x) => x.q === 'rare' && x.ok) ? ' Rare is a Monte Carlo estimate (a few percent noise).' : '') + (oddsBusy ? ' Updating...' : '');
+      (o.wlabel ? 'Weighted by drop rate in ' + o.wlabel + '.' : 'Average over the ' + o.nb + ' base' + (o.nb === 1 ? '' : 's') + ' of the selection.') + (o.nd < o.nb ? ' Only ' + o.nd + ' of its ' + o.nb + ' bases can drop at item level ' + o.ilvl + '; the others are left out.' : '') + (o.list.some((x) => x.q === 'rare' && x.ok) ? ' Rare is a Monte Carlo estimate (a few percent noise).' : '') + (oddsBusy ? ' Updating...' : '');
   }
   /** schedule a recompute (throttled to one per 70 ms while dragging; now = immediately) */
   function requestOdds(now) {
@@ -715,7 +720,7 @@
     runJob('odds', { type: 'odds', codes, conds, ilvl, qualities: quals, ctx: ctxS, wopts, diff, groups }, null, (res, err, m) => {
       oddsBusy = false;
       if (!res) { oddsSig = ''; paintOdds(); return; }
-      bd.odds = { keys, gsig, list, res, nb: codes.length, ilvl, wlabel, wts: res.wts || null };
+      bd.odds = { keys, gsig, list, res, nb: codes.length, nd: codes.filter((c) => E.items[c].q <= ilvl).length, ilvl, wlabel, wts: res.wts || null };
       paintOdds();
     }, local);
   }

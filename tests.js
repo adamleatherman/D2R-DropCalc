@@ -654,7 +654,7 @@
     }
     // ---- item card odds (cardOdds: exact magic; rare reweighted from recorded samples) vs affixProb averaged over the bases ----
     { const T = E.builderTypes(), card = res.card = { cases: [], mono: [], ms: {} }, ilOf = (c, il) => Math.max(il, E.items[c].q, 1);
-      const avg = (codes, q, cs, il, rolls, w) => { let t = 0, W = 0; for (const c of codes) { const wi = w ? w.get(c) || 0 : 1; if (!wi) continue; const l = ilOf(c, il); t += wi * E.affixProb(c, E.affixLevel(l, E.items[c]), q, cs, { ilvl: l, rolls }); W += wi; } return W ? t / W : 0; };
+      const avg = (codes, q, cs, il, rolls, w) => { let t = 0, W = 0; for (const c of codes) { const wi = w ? w.get(c) || 0 : 1; if (!wi || E.items[c].q > il) continue; const l = ilOf(c, il); t += wi * E.affixProb(c, E.affixLevel(l, E.items[c]), q, cs, { ilvl: l, rolls }); W += wi; } return W ? t / W : 0; };
       const kf = (st, re) => st.find((x) => re.test(x.text));
       const mkc = (st, res_) => res_.map((re) => { const x = typeof re === 'string' ? st.find((s) => s.key === re) : kf(st, re); return { key: x.key, min: x.min }; });
       const cases = [
