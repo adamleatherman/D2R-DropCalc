@@ -1867,6 +1867,50 @@ def main():
     FT = js["fit"]
     check("affix table fit test (fitsCombo) agrees with the full sweep (feasibleAny) on %d row/pick combinations: never says no to a feasible one, never says yes to an infeasible one" % FT["n"], FT["missed"] + 10 * FT["extra"], 0, 0, str(FT["bad"]))
     info("affix table fit pass on broad types (ms: fitIndex once, then one pass over all rows with 2 picks)", str(FT["ms"]), "-")
+    CD = js["card"]
+    for c in CD["cases"]:
+        for q, d in c["q"].items():
+            tag = "item card odds, %s ilvl %d (%d bases, %d picks), %s" % (c["name"], c["ilvl"], c["n"], c["conds"], q)
+            check(tag + ": total == affixProb averaged over the bases" + (" (exact)" if q != "rare" else " (rare: sample-reweighted, same seed and rolls)"), d["got"], d["want"], 1e-12 if q != "rare" else 1e-9)
+            check(tag + ": every single stat and group figure == affixProb averaged", 1 if all((abs(a - b) <= (1e-12 if q != "rare" else 1e-9) * max(abs(b), 1e-300) if b else abs(a) < 1e-12) for a, b in d["cond"] + d["grp"]) else 0, 1, 0)
+            check(tag + ": total <= every single stat and group figure", d["ord"], 1, 0)
+            check(tag + ": raising a threshold never raises the odds", d["mono"], 1, 0)
+    # ---- affix families and per-character-level stats ----
+    FM = js["fam"]
+    check("family grouping: Bronze on small charm is ONE family (prefix, +Attack Rating) with its two tier rows", FM["bronze"]["n"] * 10 + FM["bronze"]["ids"], 12, 0)
+    check("family tiers of Bronze on small charm: [[1,2,4],[21,6,12]] ([affix level, min, max])", 1 if FM["bronze"]["tiers"] == [[1, 2, 4], [21, 6, 12]] else 0, 1, 0, str(FM["bronze"]["tiers"]))
+    check("every tier row id of a family maps back to the family (old ?p=<row id> links)", 1 if FM["idsMap"] else 0, 1, 0)
+    check("allowed values of Bronze on small charm: 2,3,4,6..12 (5 is skipped); a conditional range of 7+ keeps 7..12; a range with no tier value falls back to the family set",
+          1 if FM["allowed"]["all"] == [2, 3, 4, 6, 7, 8, 9, 10, 11, 12] and FM["allowed"]["lo7"] == [7, 8, 9, 10, 11, 12] and FM["allowed"]["none"] == FM["allowed"]["all"] else 0, 1, 0, str(FM["allowed"]))
+    al = FM["allowed"]
+    check("snapping over the gap: ge 5 -> 6, ge 4 -> 4, ge 13 -> 12 (clamped); le 5 -> 4, le 1 -> 2 (clamped)", 1 if (al["ge5"], al["ge4"], al["ge13"], al["le5"], al["le1"]) == (6, 4, 12, 4, 2) else 0, 1, 0, str(al))
+    tr = FM["tier"]
+    check("tier note: the cheapest tier whose max reaches the threshold (>=3 and >=4: lvl 1 tier; >=6, >=12: lvl 21 tier, req. level 15; >=13: none)",
+          1 if (tr["t3"], tr["t4"], tr["t6"], tr["t12"], tr["t13"]) == ([1, 1], [1, 1], [21, 15], [21, 15], None) else 0, 1, 0, str(tr))
+    check("fixed: Of Acceleration on boots is a single tier with the single value 40 (+40% Faster Run/Walk)", 1 if FM["accel"] and all(a["vals"] == [[40, 40]] and a["tiers"] == 1 for a in FM["accel"]) else 0, 1, 0, str(FM["accel"]))
+    check("no family has two groups on one base, over every type (so its tiers exclude each other and the appearance odds add up)", FM["groupBad"], 0, 0)
+    for o in FM["odds"]:
+        tag = "family odds %s / %s (%s, %d tier rows)" % (o["t"], o["name"], o["side"], o["n"])
+        check(tag + ": magic == sum of the tier rows", o["fam"], min(1.0, o["tierSum"]), 1e-12)
+        check(tag + ": magic == affixProb of a condition only this family can meet (exact)", o["fam"], o["ref"], 1e-9)
+        if o["refR"] > 0.003:
+            check(tag + ": rare (sum of tier picks) within 6% of the rare estimate of a condition only this family can meet", 1 if abs(o["famR"] - o["refR"]) <= 0.06 * o["refR"] else 0, 1, 0, "%.5f vs %.5f" % (o["famR"], o["refR"]))
+    check("family odds checked on %d single-stat families of 4 types" % len(FM["odds"]), 1 if len(FM["odds"]) >= 20 else 0, 1, 0)
+    L = FM["lvl"]
+    check("per-level stats: the parameter is the value (Fool's: max damage 4, Attack Rating 33; min = max = parameter)", 1 if L["has"] and [[m[1], m[2], m[3]] for m in L["fool"]] == [["4", 4, 4], ["33", 33, 33]] else 0, 1, 0, str(L["fool"]))
+    check("per-level condition: Fool's (4) meets max-damage-per-level >= 4 but not >= 5; Grinding (6) meets >= 5 but not >= 7", 1 if (L["p4"], L["p5"], L["g5"], L["g7"]) == (1, 0, 1, 0) else 0, 1, 0, str((L["p4"], L["p5"], L["g5"], L["g7"])))
+    check("per-level condition: Fool's meets Attack Rating per level >= 33, not >= 34; Hawkeye (12) does not meet >= 33", 1 if (L["a33"], L["a34"], L["h33"]) == (1, 0, 0) else 0, 1, 0, str((L["a33"], L["a34"], L["h33"])))
+    check("per-level odds (magic, sword): P(max dmg/level >= 5) < P(>= 4), > 0, and P(>= 7) = 0 (Fool's 4 and Grinding 6 are the only tiers; before the fix every tier met every threshold)", 1 if L["pm5"] < L["pm4"] and L["pm5"] > 0 and L["pm7"] == 0 else 0, 1, 0, str((L["pm4"], L["pm5"], L["pm7"])))
+    check("builder feasibility (magic, sword): Fool's pair (max dmg/level 4 + AR/level 33) is feasible; max dmg/level 5 + AR/level 33 is not (one prefix: Fool's has 4, Grinding has no AR) but is as a rare (two prefixes); 5 alone is feasible (Grinding)",
+          1 if (L["f4"], L["f5"], L["f5r"], L["f5b"]) == (True, False, True, True) else 0, 1, 0, str((L["f4"], L["f5"], L["f5r"], L["f5b"])))
+    check("per-level display: 4 -> '+0.5 to Maximum Damage per Character Level', 33 AR -> '+16.5 ... per Character Level', +42 max damage at character level 85", 1 if (L["desc"], L["desc2"], L["at"]) == ("+0.5 to Maximum Damage per Character Level", "+16.5 to Attack Rating per Character Level", 42) else 0, 1, 0, str((L["desc"], L["desc2"], L["at"])))
+    # per-level divisor = 2^(op param) of the ItemStatCost rows (item_*_perlevel), read from the raw table
+    isc = [r for r in rd("itemstatcost") if r.get("Stat", "").endswith("_perlevel") and r.get("op param") != ""]
+    par_tohit = {n(r["op param"]) for r in isc if "tohit" in r["Stat"]}
+    par_rest = {n(r["op param"]) for r in isc if "tohit" not in r["Stat"]}
+    check("ItemStatCost per-level rows: the Attack Rating stats (item_tohit_perlevel, item_tohitpercent_perlevel) have op param 1, all %d others op param 3" % len([r for r in isc if "tohit" not in r["Stat"]]), 1 if par_tohit == {1} and par_rest == {3} else 0, 1, 0, str((par_tohit, par_rest)))
+    check("engine perLevelDiv == 2^op param: /2 for the %d Attack Rating per-level labels, /8 for the %d others; 0 for ordinary stats" % (len([k for k, d in FM["lvlKeys"] if "Attack Rating" in k]), len([k for k, d in FM["lvlKeys"] if "Attack Rating" not in k])),
+          1 if FM["lvlKeys"] and all(d == (2 ** 1 if "Attack Rating" in k else 2 ** 3) for k, d in FM["lvlKeys"]) and L["div"] == [8, 2, 0] else 0, 1, 0, str(FM["lvlKeys"]))
     check("old deep link ?q2=Monarch&ql=magic&c=Socketed (#):4 resolves in the page: magic result, rare impossible", 1 if ("Magic" in js["deeplink"] and "77" in js["deeplink"] and "not possible" in js["deeplink"] and "sources" in js["deeplink"]) else 0, 1, 0, js["deeplink"][:160].replace(chr(10), " "))
     # ---- low / normal / superior items: sockets, ethereal, superior bonus (independent reference from the raw tables and the D2MOO rules) ----
     WH = js["white"]

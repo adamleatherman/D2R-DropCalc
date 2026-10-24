@@ -1006,6 +1006,11 @@
     for (const a of allAffixes) {
       for (const t of a.it) (affByType[a.k][t] = affByType[a.k][t] || []).push(a);
     }
+    /** Per-character-level stats ("... (Based on Character Level)"): the data keeps the rate in the mod's parameter (m[1]) and min = max = 0, so every tier looked alike.
+     *  The rate is the value: min = max = parameter, in units of 1/perLevelDiv(key) per character level. The divisor is 2^(op param) of the ItemStatCost row
+     *  (item_*_perlevel: op 2/4/5, op param 3 -> /8; the two Attack Rating stats item_tohit_perlevel / item_tohitpercent_perlevel have op param 1 -> /2). */
+    const perLevelDiv = (key) => (key.indexOf('(Based on Character Level)') < 0 ? 0 : key.indexOf('Attack Rating') >= 0 ? 2 : 8);
+    for (const a of allAffixes.concat(D.automagic)) for (const m of a.mods) if (perLevelDiv(m[4]) && m[1] !== '' && m[1] !== undefined) { m[2] = m[3] = +m[1]; }
     D.automagic.forEach((a, i) => { a.i = i; });   // identity of an automagic row (the item builder lists them by index)
     const autoByGroup = {};
     for (const a of D.automagic) (autoByGroup[a.g] = autoByGroup[a.g] || []).push(a);
@@ -1433,6 +1438,151 @@
       return acc / rolls;
     }
 
+    /** "Sample once, reweight many" rare path. The rare loop's draws do not depend on the conditions (only on weights, groups, counts), so the sampled
+     *  affix sets of a pool are recorded once (same RNG order as rareMC: identical sets), deduplicated with counts; any combination of conditions is then
+     *  a cheap reweighting with condProb. Cache per pool (el.sig + jewel + rolls + seed), bounded. */
+    const sampCache = new Map(), SAMP_MAX = 96, rareMemo = new Map();
+    function rareSamples(code, el, rolls, seed) {
+      const jw = items[code].t === 'jewl';
+      const ck = (jw ? 'J' : '') + rolls + '|' + seed + '|' + el.sig;
+      let sm = sampCache.get(ck);
+      if (sm) return sm;
+      const rng = mulberry32(seed), nP = el.p.length;
+      function side(list) {
+        const cum = new Float64Array(list.length);
+        let t = 0;
+        for (let i = 0; i < list.length; i++) { t += list[i].f; cum[i] = t; }
+        return { list, cum, total: t, groups: list.map((a) => a.g) };
+      }
+      const P = side(el.p), S = side(el.s), counts = jw ? CONFIG.rareJewelCounts : CONFIG.rareAffixCounts, used = [], uniq = new Map();
+      function draw(Sd) {   // as rareMC
+        if (!Sd.list.length) return -1;
+        for (let tries = 0; tries < 40; tries++) {
+          const r = rng() * Sd.total;
+          let lo = 0, hi = Sd.cum.length - 1;
+          while (lo < hi) { const mid = (lo + hi) >> 1; if (Sd.cum[mid] > r) hi = mid; else lo = mid + 1; }
+          if (used.indexOf(Sd.groups[lo]) < 0) return lo;
+        }
+        let tot = 0;
+        for (let i = 0; i < Sd.list.length; i++) if (used.indexOf(Sd.groups[i]) < 0) tot += Sd.list[i].f;
+        if (tot <= 0) return -1;
+        let r = rng() * tot;
+        for (let i = 0; i < Sd.list.length; i++) if (used.indexOf(Sd.groups[i]) < 0 && (r -= Sd.list[i].f) < 0) return i;
+        return -1;
+      }
+      if (nP || S.list.length) for (let n = 0; n < rolls; n++) {
+        const count = counts[floor(rng() * counts.length)], pick = [];
+        used.length = 0;
+        let np = 0, ns = 0, pFull = false, sFull = false, k = 0;
+        while (k < count && !(pFull && sFull)) {
+          const suffix = !sFull && (pFull || !(rng() < CONFIG.rarePrefixChance));
+          const Sd = suffix ? S : P;
+          const idx = draw(Sd);
+          if (idx < 0) { if (suffix) sFull = true; else pFull = true; continue; }
+          used.push(Sd.groups[idx]);
+          pick.push(suffix ? nP + idx : idx);
+          if (suffix) { if (++ns >= CONFIG.rareMaxPerSide) sFull = true; } else if (++np >= CONFIG.rareMaxPerSide) pFull = true;
+          k++;
+        }
+        pick.sort((a, b) => a - b);
+        const key = pick.join(','), u = uniq.get(key);
+        if (u) u.n++; else uniq.set(key, { n: 1, pick });
+      }
+      let tot = 0; for (const u of uniq.values()) tot += u.pick.length;
+      const off = new Uint32Array(uniq.size + 1), cnt = new Float64Array(uniq.size), data = new Int16Array(tot);
+      let j = 0, o = 0;
+      for (const u of uniq.values()) { cnt[j] = u.n; data.set(u.pick, o); o += u.pick.length; off[++j] = o; }
+      // inverted index: affix -> samples that contain it (a reweighting then only visits samples with a picked affix that matters to the conditions)
+      const na = nP + S.list.length, ioff = new Uint32Array(na + 1), idat = new Int32Array(tot);
+      for (let k = 0; k < tot; k++) ioff[data[k] + 1]++;
+      for (let a = 0; a < na; a++) ioff[a + 1] += ioff[a];
+      const fill = ioff.slice(0, na);
+      for (let u = 0; u < uniq.size; u++) for (let k = off[u]; k < off[u + 1]; k++) idat[fill[data[k]]++] = u;
+      sm = { rolls, na, off, cnt, data, ioff, idat, stamp: new Int32Array(uniq.size), gen: 0, size: uniq.size };
+      if (sampCache.size >= SAMP_MAX) sampCache.delete(sampCache.keys().next().value);
+      sampCache.set(ck, sm);
+      return sm;
+    }
+    /** P(item of rare quality has all conditions) from the recorded samples; same inputs and result as affixProb(code, alvl, 'rare', conds, opts)
+     *  (staff mods, extras and the automagic row handled alike), the threshold only enters through condProb / staffDist / the auto list. */
+    function rareProbFromSamples(code, alvl, conds, opts) {
+      const rolls = (opts && opts.rolls) || 200000, seed = (opts && opts.seed) || 12345;
+      const ilvl = opts && opts.ilvl !== undefined ? opts.ilvl : minIlvlForAlvl(items[code], alvl);
+      const el = eligible(code, alvl, true, ilvl);
+      if (!el.sig) el.sig = el.p.map((a) => a.i + ':' + a.f + (a.mods[0] && a.mods[0][0] === 'sock' ? 's' + a.mods[0][3] : '')).join(',') + '/' + el.s.map((a) => a.i + ':' + a.f + (a.mods[0] && a.mods[0][0] === 'sock' ? 's' + a.mods[0][3] : '')).join(',') + '/' + el.auto.map((a) => a.g + a.n + ':' + a.f).join(',');
+      if (!el.p.length && !el.s.length) return 0;
+      const sd0 = staffDist(code, staffBase(ilvl === null ? 99 : ilvl), conds, false);
+      const ex = extrasDist(code, 'rare', ilvl === null ? 99 : ilvl, opts && opts.diff, conds);
+      const sd = ex.dist.length === 1 && ex.dist[0].mask === 0 ? sd0 : orConv(sd0, ex.dist);
+      const nc = conds.length;
+      let autoList;
+      if (el.auto.length) { let W = 0; for (const a of el.auto) W += a.f; autoList = el.auto.map((a) => ({ w: a.f / W, c: conds.map((c) => condProb(a, c)) })); }
+      else autoList = [{ w: 1, c: new Array(nc).fill(0) }];
+      const sk = (sd0.length === 1 && sd0[0].mask === 0 ? '' : code + staffBase(ilvl === null ? 99 : ilvl)) + '|' + ex.sig;   // as affixProb's key: identical pools share one result
+      const rk = [items[code].t === 'jewl' ? 'J' : '', items[code].cs ? code : '', rolls, seed, JSON.stringify(conds), el.sig, sk].join('|');
+      if (rareMemo.has(rk)) return rareMemo.get(rk);
+      const sm = rareSamples(code, el, rolls, seed);
+      const cps = el.p.concat(el.s).map((a) => conds.map((c) => condProb(a, c)));
+      const miss = new Float64Array(nc);
+      const val = () => {   // P(all conditions) given the running miss[] of this sample
+        let q = 0;
+        for (const au of autoList) {
+          for (const st of sd) {
+            let z = st.p;
+            for (let i = 0; i < nc; i++) if (!((st.mask >> i) & 1)) z *= 1 - miss[i] * (1 - au.c[i]);
+            q += au.w * z;
+          }
+        }
+        return q;
+      };
+      miss.fill(1);
+      const q0 = val();   // a sample with no relevant affix
+      let acc = 0, seen = 0;
+      const gen = ++sm.gen, stamp = sm.stamp;
+      for (let a = 0; a < sm.na; a++) {
+        const ca = cps[a]; let rel = false;
+        for (let i = 0; i < nc; i++) if (ca[i] > 0) { rel = true; break; }
+        if (!rel) continue;
+        for (let k = sm.ioff[a]; k < sm.ioff[a + 1]; k++) {
+          const u = sm.idat[k];
+          if (stamp[u] === gen) continue;
+          stamp[u] = gen;
+          for (let i = 0; i < nc; i++) miss[i] = 1;
+          for (let j = sm.off[u]; j < sm.off[u + 1]; j++) { const c = cps[sm.data[j]]; for (let i = 0; i < nc; i++) miss[i] *= 1 - c[i]; }
+          acc += sm.cnt[u] * val(); seen += sm.cnt[u];
+        }
+      }
+      acc += (sm.rolls - seen) * q0;
+      acc /= sm.rolls;
+      if (rareMemo.size >= 5000) rareMemo.delete(rareMemo.keys().next().value);
+      rareMemo.set(rk, acc);
+      return acc;
+    }
+    /** Odds for the builder's item card, over the bases `codes` at item level ilvl (each at max(ilvl, its own level), like the affix table): for every quality
+     *  the chance that an item of that quality carries all `conds` (total), each single condition (perCond[i]) and each group of condition indices
+     *  (o.groups = [[0, 2], ...] -> perGroup). Mean over the bases, or sum(w p) / sum(w) with `weights` (Map / object code -> weight; weight 0 bases are skipped).
+     *  Magic and the plain qualities are exact (affixProb); rare is reweighted from the recorded samples (o.rolls per pool, default 50000, o.seed, o.diff). */
+    function cardOdds(codes, conds, ilvl, qualities, weights, o) {
+      o = o || {};
+      const rolls = o.rolls || 50000, groups = o.groups || [], nc = conds.length;
+      const wget = (c) => (weights ? (weights instanceof Map ? weights.get(c) : weights[c]) || 0 : 1);
+      const ws = codes.map(wget), W = ws.reduce((a, b) => a + b, 0);
+      const mk = () => Object.fromEntries(qualities.map((q) => [q, 0]));
+      const total = mk(), perCond = conds.map(mk), perGroup = groups.map(mk);
+      if (!(W > 0) || !nc) return { total, perCond, perGroup };
+      const sets = [[total, conds]].concat(conds.map((c, i) => [perCond[i], [c]]), groups.map((g, i) => [perGroup[i], g.map((j) => conds[j])]));
+      codes.forEach((code, bi) => {
+        if (!ws[bi]) return;
+        const it = items[code], il = ilOf(code, ilvl), al = affixLevel(il, it), w = ws[bi] / W;
+        for (const q of qualities) for (const [dst, cs] of sets) {
+          if (!cs.length) { dst[q] += w; continue; }   // an empty group requires nothing
+          const op = { ilvl: il, diff: o.diff, rolls, seed: o.seed };
+          dst[q] += w * (q === 'rare' ? rareProbFromSamples(code, al, cs, op) : affixProb(code, al, q, cs, op));
+        }
+      });
+      return { total, perCond, perGroup };
+    }
+
     /** For each condition: lowest affix level (and monster level) at which some eligible affix, the automagic row or a staff mod skill on the
      *  base can reach it */
     function minLevels(code, quality_, conds) {
@@ -1480,6 +1630,12 @@
         return head + rest.replace(/#/g, () => st(v[k++]));
       }
       if (at < 0) return tpl;
+      const dv = perLevelDiv(tpl);
+      if (dv) {   // per character level: the rate is mn / dv per level
+        const f = (x) => String(Math.round(x / dv * 1000) / 1000);
+        const val = mn === mx ? f(mn) : f(mn) + '-' + f(mx);
+        return (tpl.slice(0, at) + val + tpl.slice(at + 1)).replace('(Based on Character Level)', 'per Character Level');
+      }
       const val = mn === mx ? String(mn) : (mn < 0 || mx < 0 ? mn + ' to ' + mx : mn + '-' + mx);
       const signed = at > 0 && tpl[at - 1] === '+';
       return tpl.slice(0, signed && val[0] === '-' ? at - 1 : at) + val + tpl.slice(at + 1);
@@ -1712,6 +1868,102 @@
       return Array.from(m.values()).sort((a, b) => a.text.localeCompare(b.text));
     }
 
+    // ---------------- affix families ----------------
+    /** Family id of a catalogue row: the same side + display name + stat keys (prefix / suffix / automagic rows; every other row is its own family).
+     *  Short and stable (FNV-1a of the key, base 36), used in the builder URL. */
+    function familyIdOf(r) {
+      if (r.side !== 'prefix' && r.side !== 'suffix' && r.side !== 'auto') return r.id;
+      const k = r.side + '|' + r.name + '|' + r.mods.map((m) => m.key).join('|');
+      let h = 0x811c9dc5;
+      for (let i = 0; i < k.length; i++) { h ^= k.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; }
+      return 'f' + h.toString(36);
+    }
+    /** integer intervals merged: [[2,4],[6,12],[5,5]] -> [[2,12]] (touching or overlapping ones join) */
+    const mergeIv = (L) => { const o = []; for (const [a, b] of L.slice().sort((x, y) => x[0] - y[0] || x[1] - y[1])) { const l = o[o.length - 1]; if (l && a <= l[1] + 1) l[1] = Math.max(l[1], b); else o.push([a, b]); } return o; };
+    /** The affix families of a set of bases: Map familyId -> {fid, side, name, keys, tiers, vals, ids, codes, lvl, lr, cls, rare, g, groupName, maxLvl, tier, quals, minIl, maxIl}.
+     *  tiers: one per distinct (affix level, level requirement, ranges), lowest first: {lvl, lr, mods: [{key, min, max, v}], ids (catalogue rows), codes (bases),
+     *  minIl / maxIl (item levels at which some base can roll it)}. vals: stat key -> merged integer intervals of the values some tier can roll (the gaps are values no tier
+     *  rolls, e.g. small charm Bronze 2-4, 6-12). No family has two groups on one base, so its tiers exclude each other and their appearance odds add up. */
+    function builderFamilies(codes, ilvl) {
+      const fams = new Map();
+      for (const r of builderCatalog(codes, ilvl).values()) {
+        const fid = familyIdOf(r);
+        let f = fams.get(fid);
+        if (!f) { f = { id: fid, fid, side: r.side, name: r.name, keys: r.mods.map((m) => m.key), tiers: [], vals: {}, ids: [], codes: new Set(), lvl: r.lvl, lr: r.lr, cls: r.cls, rare: false, g: r.g, groupName: r.groupName, maxLvl: r.maxLvl, tier: r.tier || 0, quals: [], minIl: null, maxIl: null }; fams.set(fid, f); }
+        f.ids.push(r.id); f.rare = f.rare || r.rare;
+        for (const q of r.quals) if (f.quals.indexOf(q) < 0) f.quals.push(q);
+        let lo = null, hi = null;
+        for (const [code, [a, b]] of r.per) { f.codes.add(code); lo = lo === null ? a : Math.min(lo, a); hi = hi === null ? b : Math.max(hi, b); }
+        if (lo !== null) { f.minIl = f.minIl === null ? lo : Math.min(f.minIl, lo); f.maxIl = f.maxIl === null ? hi : Math.max(f.maxIl, hi); }
+        const sig = r.lvl + '/' + r.lr + '/' + r.mods.map((m) => m.min + ':' + m.max).join(',');
+        let t = f.tiers.find((x) => x.sig === sig);
+        if (!t) { t = { sig, lvl: r.lvl, lr: r.lr, mods: r.mods.map((m) => ({ key: m.key, min: m.min, max: m.max, v: m.v })), ids: [], codes: [], minIl: lo, maxIl: hi }; f.tiers.push(t); }
+        t.ids.push(r.id); for (const c of r.per.keys()) if (t.codes.indexOf(c) < 0) t.codes.push(c);
+        if (lo !== null) { t.minIl = t.minIl === null ? lo : Math.min(t.minIl, lo); t.maxIl = t.maxIl === null ? hi : Math.max(t.maxIl, hi); }
+        if (r.lvl !== null && (f.lvl === null || r.lvl < f.lvl)) f.lvl = r.lvl;
+        if (r.lr !== null && (f.lr === null || r.lr < f.lr)) f.lr = r.lr;
+      }
+      for (const f of fams.values()) {
+        f.tiers.sort((a, b) => (a.lvl || 0) - (b.lvl || 0) || a.mods[0].min - b.mods[0].min);
+        for (const t of f.tiers) delete t.sig;
+        f.mods = f.keys.map((k) => {   // union of the tiers' ranges per stat
+          const ms = f.tiers.map((t) => t.mods.find((m) => m.key === k)).filter(Boolean);
+          f.vals[k] = mergeIv(ms.map((m) => [m.min, m.max]));
+          return { key: k, min: Math.min.apply(null, ms.map((m) => m.min)), max: Math.max.apply(null, ms.map((m) => m.max)), v: ms.reduce((a, m) => mergeSlots(a, m.v), null) };
+        });
+        f.desc = f.mods.map((m) => describe(m.key, m.min, m.max, m.v)).join(' / ');
+      }
+      return fams;
+    }
+    /** Allowed threshold values of a family stat: the values of `iv` (merged intervals) inside [lo, hi], ascending; the whole family set when none is left (the other
+     *  picks squeeze the range off every tier). null when there would be more than `cap` (the caller then uses a plain range). */
+    function allowedValues(iv, lo, hi, cap) {
+      cap = cap || 4000;
+      const fill = (a, b) => { const out = []; for (const [x, y] of iv) for (let v = Math.max(x, a); v <= Math.min(y, b); v++) { out.push(v); if (out.length > cap) return null; } return out; };
+      const out = fill(lo, hi);
+      return out && !out.length ? fill(iv[0][0], iv[iv.length - 1][1]) : out;
+    }
+    /** snap v to the allowed values: ge stats go up to the next one (none above: the highest), le stats down to the previous one (none below: the lowest) */
+    function snapValue(vals, v, le) {
+      if (!vals || !vals.length) return v;
+      if (le) { for (let i = vals.length - 1; i >= 0; i--) if (vals[i] <= v) return vals[i]; return vals[0]; }
+      for (const x of vals) if (x >= v) return x;
+      return vals[vals.length - 1];
+    }
+    /** the cheapest tier of a family whose range reaches the threshold of `key` (max >= thr for ge, min <= thr for le; lowest item level first), or null */
+    function tierFor(f, key, thr, le) {
+      let best = null;
+      for (const t of f.tiers) {
+        const m = t.mods.find((x) => x.key === key);
+        if (!m || (le ? m.min > thr : m.max < thr)) continue;
+        if (!best || (t.minIl === null ? 999 : t.minIl) < (best.minIl === null ? 999 : best.minIl)) best = t;
+      }
+      return best;
+    }
+    /** value of a per-character-level stat at a character level (the game truncates): thr / divisor per level */
+    const perLevelAt = (key, thr, clvl) => { const d = perLevelDiv(key); return d ? Math.trunc(thr * clvl / d) : thr; };
+    /** Affix table rows (builderAffixTable, one per tier row) merged into one row per family (builderFamilies). Appearance odds add up: tiers are distinct rows of one
+     *  group (checked in the tests), so an item has at most one of them. Fields as the tier rows plus fid, tiers, vals, rows (the tier rows) and the union ranges in mods / desc. */
+    function familyTable(rows, fams) {
+      const by = new Map();
+      for (const r of rows) { const fid = familyIdOf(r); if (!by.has(fid)) by.set(fid, []); by.get(fid).push(r); }
+      const out = [], minOf = (L, k) => L.reduce((a, r) => r[k] === null ? a : a === null ? r[k] : Math.min(a, r[k]), null), maxOf = (L, k) => L.reduce((a, r) => r[k] === null ? a : a === null ? r[k] : Math.max(a, r[k]), null);
+      for (const [fid, L] of by) {
+        const f = fams.get(fid), r0 = L[0];
+        const mods = f ? f.mods : r0.mods;
+        const sum = (get) => Math.min(1, L.reduce((a, r) => a + get(r), 0));
+        const qs = Object.keys(r0.ap || {}), rare = L.some((r) => r.rare);
+        const pbSum = (get) => { const arrs = L.map(get).filter(Boolean); return arrs.length ? arrs[0].map((_, i) => Math.min(1, arrs.reduce((a, x) => a + x[i], 0))) : null; };
+        out.push({ id: fid, fid, side: r0.side, name: r0.name, mods, desc: f ? f.desc : r0.desc, tiers: f ? f.tiers : [], vals: f ? f.vals : null, rows: L,
+          lvl: f ? f.lvl : r0.lvl, lr: f ? f.lr : r0.lr, cls: r0.cls, rare, g: r0.g, groupName: r0.groupName, maxLvl: r0.maxLvl, tier: r0.tier || 0,
+          minIl: minOf(L, 'minIl'), maxIl: maxOf(L, 'maxIl'), nBases: f ? f.codes.size : r0.nBases, nOn: Math.max.apply(null, L.map((r) => r.nOn)), avail: L.some((r) => r.avail),
+          magic: sum((r) => r.magic), rareP: rare ? sum((r) => r.rareP) : 0, quals: f ? f.quals : r0.quals,
+          ap: Object.fromEntries(qs.map((q) => [q, sum((r) => (r.ap && r.ap[q]) || 0)])),
+          pb: { m: pbSum((r) => r.pb.m), r: pbSum((r) => r.pb.r), q: Object.fromEntries(qs.map((q) => [q, pbSum((r) => r.pb.q && r.pb.q[q])])) } });
+      }
+      return out;
+    }
+
     /** P(each affix row appears) on one base of a given item level and quality: Map id -> p. Magic: exact (the magic split + group exclusion,
      *  same model as affixProb); rare: the rare loop Monte Carlo (rareMC) counting picks; automagic rows and staff mod skills as in affixProb. */
     function affixAppearance(code, ilvl, quality_, rolls, seed, diff) {
@@ -1816,7 +2068,7 @@
           if (il >= a && il <= b) nOn++;
         }
         const pbOf = (q) => codes.map((c) => { const m = per[q].get(c); return m ? m.get(r.id) || 0 : 0; });
-        rows.push({ id: r.id, side: r.side, name: r.name, mods: r.mods, desc: r.mods.map((m) => describe(m.key, m.min, m.max, m.v)).join(' / '), lvl: r.lvl, lr: r.lr, cls: r.cls, rare: r.rare,
+        rows.push({ id: r.id, fid: familyIdOf(r), side: r.side, name: r.name, mods: r.mods, desc: r.mods.map((m) => describe(m.key, m.min, m.max, m.v)).join(' / '), lvl: r.lvl, lr: r.lr, cls: r.cls, rare: r.rare,
           g: r.g, groupName: r.groupName, maxLvl: r.maxLvl, tier: r.tier || 0, minIl: lo, maxIl: hi, nBases: r.per.size, nOn, avail: nOn > 0,
           magic: mean('magic', r.id), rareP: r.rare ? mean('rare', r.id) : 0, quals: r.quals,
           ap: Object.fromEntries(quals.map((q) => [q, r.quals.indexOf(q) >= 0 ? mean(q, r.id) : 0])),
@@ -2091,10 +2343,10 @@
 
     return {
       CONFIG, data: D, DIFFS, items, types, getCtx, playersN, adjNoDrop, dist, upgradeTC, areaSources, DUP_OF, areaRun, areaRolls, listShares, bossPacks,
-      mode, heraldsAvailable, sunderChance, sunderPaths, isSunder, adjQuality, heraldSpawnPct, quality, qualityTotals, sources, srcDist, chanceFor, baseQualityChance, affixLevel, minIlvlForAlvl, eligible, maxSockets, affixProb, minLevels, staffDist, staffBase,
+      mode, heraldsAvailable, sunderChance, sunderPaths, isSunder, adjQuality, heraldSpawnPct, quality, qualityTotals, sources, srcDist, chanceFor, baseQualityChance, affixLevel, minIlvlForAlvl, eligible, maxSockets, affixProb, rareProbFromSamples, cardOdds, minLevels, staffDist, staffBase,
       statList, describe, describeAt, sliderWhat, affixSearch, searchIndex, baseTypes, metaCache, uniqById, setById, uniqByCode, setByCode, prettyId, tzLevel,
       eligibleUniques, eligibleSets, condProb, trialsFor,
-      builderTypes, builderBases, builderCatalog, builderStats, builderAffixTable, baseDropWeights, affixAppearance, planCombo, comboForBase, comboAnalysis, feasibleAny, fitIndex, fitsCombo, statRange, explainCombo, groupName,
+      builderTypes, builderBases, builderCatalog, builderStats, builderFamilies, familyTable, familyIdOf, allowedValues, snapValue, tierFor, perLevelDiv, perLevelAt, builderAffixTable, baseDropWeights, affixAppearance, planCombo, comboForBase, comboAnalysis, feasibleAny, fitIndex, fitsCombo, statRange, explainCombo, groupName,
       qualityPossible, ethItem, ethChance, plainSocketMax, plainSocketDist, extrasDist, QUALS, QLABEL, SOCK_KEY, ETH_KEY,
     };
   }

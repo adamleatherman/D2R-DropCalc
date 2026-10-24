@@ -652,6 +652,90 @@
         fit.ms[tn] = { bases: codes.length, rows: cat.length, unfit, index: Math.round(t1 - t0), pass: Math.round(performance.now() - t1) };
       }
     }
+    // ---- item card odds (cardOdds: exact magic; rare reweighted from recorded samples) vs affixProb averaged over the bases ----
+    { const T = E.builderTypes(), card = res.card = { cases: [], mono: [], ms: {} }, ilOf = (c, il) => Math.max(il, E.items[c].q, 1);
+      const avg = (codes, q, cs, il, rolls, w) => { let t = 0, W = 0; for (const c of codes) { const wi = w ? w.get(c) || 0 : 1; if (!wi) continue; const l = ilOf(c, il); t += wi * E.affixProb(c, E.affixLevel(l, E.items[c]), q, cs, { ilvl: l, rolls }); W += wi; } return W ? t / W : 0; };
+      const kf = (st, re) => st.find((x) => re.test(x.text));
+      const mkc = (st, res_) => res_.map((re) => { const x = typeof re === 'string' ? st.find((s) => s.key === re) : kf(st, re); return { key: x.key, min: x.min }; });
+      const cases = [
+        ['Boots', 85, ['magic'], [/Faster Run/, /Fire Resist/], null], ['Small Charm', 85, ['magic'], [/Attack Rating/, /Maximum Damage/, /to Life/], null],
+        ['Boots', 85, ['rare', 'magic'], [/Faster Run/, /Fire Resist/], null], ['Circlet', 60, ['rare', 'magic', 'normal'], [/Fire Resist/, /Cold Resist/], null],
+        ['Staff', 80, ['rare', 'magic'], ['staff'], null], ['Wand', 40, ['rare', 'magic'], ['staff', /to Life/], null], ['Any Armor', 85, ['rare', 'magic', 'sup'], [/Fire Resist/, /to Life/, /Cold Resist/], 'w'],
+      ];
+      for (const [tn, il, quals, res_, wt] of cases) {
+        const ty = T.find((t) => t.name === tn), codes = E.builderBases(ty.code, -1), st = E.builderStats(codes);
+        let cs;
+        if (res_[0] === 'staff') { const x = st.filter((s) => s.staff).sort((a, b) => a.text.localeCompare(b.text))[0]; cs = [{ key: x.key, min: Math.min(x.max, 2) }].concat(mkc(st, res_.slice(1))); }
+        else cs = mkc(st, res_);
+        let w = null; if (wt) { w = new Map(); codes.forEach((c, i) => w.set(c, i % 3 ? 1 + (i % 5) : 0)); }
+        const rolls = 20000, ix = cs.map((c, i) => i), groups = cs.length > 1 ? [ix.slice(0, 2), ix.slice(1)] : [ix];
+        const t0 = performance.now(), r = E.cardOdds(codes, cs, il, quals, w, { rolls, groups }), t1 = performance.now();
+        const c = { name: tn, ilvl: il, n: codes.length, conds: cs.length, ms: Math.round(t1 - t0), q: {} };
+        for (const q of quals) {
+          const want = avg(codes, q, cs, il, rolls, w), wantC = cs.map((x) => avg(codes, q, [x], il, rolls, w)), wantG = groups.map((g) => avg(codes, q, g.map((i) => cs[i]), il, rolls, w));
+          c.q[q] = { got: r.total[q], want, cond: r.perCond.map((x, i) => [x[q], wantC[i]]), grp: r.perGroup.map((x, i) => [x[q], wantG[i]]),
+            ord: r.total[q] <= Math.min.apply(null, r.perGroup.map((x) => x[q]).concat(r.perCond.map((x) => x[q]))) + 1e-15 ? 1 : 0 };
+          // raising the first threshold never raises the odds
+          const hi = cs.map((x, i) => i ? x : Object.assign({}, x, { min: x.min + Math.max(1, Math.round((st.find((s) => s.key === x.key).max - x.min) / 3)) }));
+          const p1 = E.cardOdds(codes, hi, il, [q], w, { rolls }).total[q]; c.q[q].mono = p1 <= r.total[q] + 1e-15 ? 1 : 0;
+        }
+        card.cases.push(c);
+      }
+    }
+    // ---- affix families (builderFamilies / familyTable), per-character-level stats ----
+    {
+      const T = E.builderTypes(), codesOf = (n) => E.builderBases(T.find((t) => t.name === n).code, -1), fam = {};
+      const famsOf = (n) => Array.from(E.builderFamilies(codesOf(n)).values());
+      const sc = codesOf('Small Charm'), F = famsOf('Small Charm'), br = F.filter((f) => f.name === 'Bronze');
+      fam.bronze = { n: br.length, tiers: br.length ? br[0].tiers.map((t) => [t.lvl, t.mods[0].min, t.mods[0].max]) : [], vals: br.length ? br[0].vals[br[0].keys[0]] : [], ids: br.length ? br[0].ids.length : 0 };
+      const cat = E.builderCatalog(sc);
+      fam.idsMap = br.length ? br[0].ids.every((id) => E.familyIdOf(cat.get(id)) === br[0].fid) : false;
+      const K = br[0].keys[0], iv = br[0].vals[K];
+      const av = E.allowedValues(iv, 2, 36);
+      fam.allowed = { all: av, lo7: E.allowedValues(iv, 7, 36), none: E.allowedValues(iv, 20, 30), ge5: E.snapValue(av, 5, false), ge13: E.snapValue(av, 13, false), le5: E.snapValue(av, 5, true), le1: E.snapValue(av, 1, true), ge4: E.snapValue(av, 4, false) };
+      const tf = (v) => { const t = E.tierFor(br[0], K, v, false); return t ? [t.lvl, t.lr] : null; };
+      fam.tier = { t3: tf(3), t4: tf(4), t6: tf(6), t12: tf(12), t13: tf(13) };
+      const bo = famsOf('Boots').filter((f) => /^of Acceleration$/i.test(f.name));
+      fam.accel = bo.map((f) => ({ keys: f.keys, vals: f.vals[f.keys[0]], tiers: f.tiers.length }));
+      // a family never has two groups on one base (tier odds add up), over every type
+      let bad = 0;
+      const allc = new Set(); for (const t of T) for (const c of t.codes) allc.add(c);
+      for (const c of allc) {
+        const g = new Map();
+        for (const r of E.builderCatalog([c]).values()) { if (r.side !== 'prefix' && r.side !== 'suffix') continue; const k = E.familyIdOf(r), s = g.get(k) || new Set(); s.add(r.g); g.set(k, s); }
+        for (const s of g.values()) if (s.size > 1) bad++;
+      }
+      fam.groupBad = bad;
+      // family odds: the table's family row == affixProb of a condition only this family can meet, averaged over the bases (magic exact; rare close), tier rows add up
+      fam.odds = [];
+      for (const [tn, ilvl] of [['Small Charm', 85], ['Boots', 85], ['Ring', 60], ['Sword', 85]]) {
+        const codes = codesOf(tn), fams = E.builderFamilies(codes), rows = E.builderAffixTable(codes, ilvl, { rolls: 20000, qualities: ['magic', 'rare'] }), ft = E.familyTable(rows, fams);
+        const keyCount = new Map(); for (const f of fams.values()) for (const k of f.keys) keyCount.set(k, (keyCount.get(k) || 0) + 1);
+        for (const f of ft) {
+          if ((f.side !== 'prefix' && f.side !== 'suffix') || f.keys === undefined && f.mods.length !== 1) continue;
+          if (f.mods.length !== 1 || keyCount.get(f.mods[0].key) !== 1 || f.mods[0].key.split('#').length !== 2) continue;
+          const c = [{ key: f.mods[0].key, min: f.mods[0].min }];
+          let m = 0, r = 0; for (const code of codes) { const il = Math.max(ilvl, E.items[code].q, 1), al = E.affixLevel(il, E.items[code]); m += E.affixProb(code, al, 'magic', c, { ilvl: il }); r += E.rareProbFromSamples(code, al, c, { ilvl: il, rolls: 20000 }); }
+          const tierSum = f.rows.reduce((a, x) => a + x.magic, 0), tierSumR = f.rows.reduce((a, x) => a + x.rareP, 0);
+          fam.odds.push({ t: tn, name: f.name, side: f.side, n: f.rows.length, fam: f.magic, ref: m / codes.length, tierSum, famR: f.rareP, refR: r / codes.length, tierSumR });
+        }
+      }
+      // per-character-level stats: the parameter is the value
+      const sw = codesOf('Sword'), K1 = '+# to Maximum Damage (Based on Character Level)', K2 = '+# to Attack Rating (Based on Character Level)';
+      const al = E.affixLevel(99, E.items[sw[0]]), el = E.eligible(sw[0], al, true, 99), by = (n) => el.p.find((a) => (a.dn || a.n) === n);
+      const fool = by("Fool's"), grind = by('Grinding');
+      const hf = famsOf('Sword').find((f) => f.name === 'Hawkeye'), hc = hf ? hf.tiers[0].codes[0] : null;
+      const hawk = hc ? E.eligible(hc, E.affixLevel(hf.tiers[0].minIl, E.items[hc]), false, hf.tiers[0].minIl).p.find((a) => (a.dn || a.n) === 'Hawkeye') : null;
+      fam.lvl = { has: !!(fool && grind && hawk), fool: fool ? fool.mods.map((m) => [m[4], m[1], m[2], m[3]]) : [],
+        p4: E.condProb(fool, { key: K1, min: 4 }), p5: E.condProb(fool, { key: K1, min: 5 }), g5: E.condProb(grind, { key: K1, min: 5 }), g7: E.condProb(grind, { key: K1, min: 7 }),
+        a33: E.condProb(fool, { key: K2, min: 33 }), a34: E.condProb(fool, { key: K2, min: 34 }), h33: E.condProb(hawk, { key: K2, min: 33 }),
+        div: [E.perLevelDiv(K1), E.perLevelDiv(K2), E.perLevelDiv('+#% Enhanced Damage')], at: E.perLevelAt(K1, 4, 85), desc: E.describe(K1, 4, 4), desc2: E.describeAt(K2, 33),
+        f4: E.feasibleAny(sw, [{ key: K1, min: 4 }, { key: K2, min: 33 }], ['magic']), f5: E.feasibleAny(sw, [{ key: K1, min: 5 }, { key: K2, min: 33 }], ['magic']), f5r: E.feasibleAny(sw, [{ key: K1, min: 5 }, { key: K2, min: 33 }], ['rare']), f5b: E.feasibleAny(sw, [{ key: K1, min: 5 }], ['magic']),
+        pm4: E.affixProb(sw[0], al, 'magic', [{ key: K1, min: 4 }], { ilvl: 99 }), pm5: E.affixProb(sw[0], al, 'magic', [{ key: K1, min: 5 }], { ilvl: 99 }), pm7: E.affixProb(sw[0], al, 'magic', [{ key: K1, min: 7 }], { ilvl: 99 }) };
+      const lk = Array.from(new Set([].concat(...[...allc].map((c) => E.builderStats([c]).map((s) => s.key))))).filter((k) => k.indexOf('(Based on Character Level)') >= 0);
+      fam.lvlKeys = lk.map((k) => [k, E.perLevelDiv(k)]);
+      res.fam = fam;
+    }
     res.sourcesCount = E.sources(ctxFor(1, 1)).length;
     res.config = E.CONFIG;
   } catch (e) { res.errors.push(String(e.stack || e)); }

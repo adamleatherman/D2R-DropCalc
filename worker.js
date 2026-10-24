@@ -1,6 +1,6 @@
 /* Web Worker: runs the item builder's heavy parts (farm search, affix appearance table; exact for magic, Monte Carlo for rare) off the UI thread. */
 importScripts('engine.js');
-const engines = {};   // one engine per data file (data.json = RotW, data-lod.json = LoD), loaded on first use
+const engines = {}, wcache = new Map();   // one engine per data file (data.json = RotW, data-lod.json = LoD), loaded on first use
 
 async function engineFor(file) {
   file = file || 'data.json';
@@ -26,6 +26,13 @@ self.onmessage = async (ev) => {
       const w = m.wopts ? E.baseDropWeights(E.getCtx(m.ctx), m.codes, m.wopts) : null;
       const rows = E.builderAffixTable(m.codes, m.ilvl, { rolls: m.rolls, qualities: m.qualities, diff: m.diff, weights: w, rare: w ? m.codes.some((c) => w.get(c) > 0) : true });
       self.postMessage({ type: 'result', id: m.id, rows, wts: w ? m.codes.map((c) => w.get(c) || 0) : null });
+    } else if (m.type === 'odds') {
+      // item card odds: area weights are remembered, the rare samples stay in this engine's cache between requests
+      let w = null;
+      if (m.wopts) { const k = m.file + JSON.stringify([m.ctx, m.wopts, m.codes]); w = wcache.get(k); if (!w) { w = E.baseDropWeights(E.getCtx(m.ctx), m.codes, m.wopts); if (wcache.size > 20) wcache.clear(); wcache.set(k, w); } }
+      const rows = E.cardOdds(m.codes, m.conds, m.ilvl, m.qualities, w, { diff: m.diff, groups: m.groups });
+      rows.wts = w ? m.codes.map((c) => w.get(c) || 0) : null;
+      self.postMessage({ type: 'result', id: m.id, rows });
     } else if (m.type === 'stats') {
       self.postMessage({ type: 'stats', id: m.id, stats: E.statList(m.codes, m.quality) });
     }

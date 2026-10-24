@@ -310,8 +310,8 @@
   /** difficulty for the structural checks (sockets of white items depend on it): the global selector, Hell when it says all */
   const selDiff = () => { const d = parseInt($('s_diff').value, 10); return d >= 0 ? d : 2; };
   let T2 = null, TA = null, TYPEOPTS = [];
-  let bd = { type: null, codes: [], stats: new Map(), sel: [], picks: [], rows: [], an: null, farm: null, farmQ: [], wts: null, wlabel: '' };
-  let tableWorker = null, farmWorker = null, tableId = 0, farmId = 0;
+  let bd = { type: null, codes: [], stats: new Map(), fams: new Map(), tierRows: [], sel: [], picks: [], rows: [], an: null, farm: null, farmQ: [], wts: null, wlabel: '' };
+  let tableWorker = null, farmWorker = null, oddsWorker = null, tableId = 0, farmId = 0, oddsId = 0;
   /** remember a checkbox in localStorage (try/catch: storage can be blocked) */
   const lsGet = (k) => { try { return localStorage.getItem(k) === '1'; } catch (e) { return false; } };
   const lsSet = (k, v) => { try { localStorage.setItem(k, v ? '1' : '0'); } catch (e) { /* ignore */ } };
@@ -334,7 +334,12 @@
   const baseName = (c) => E.items[c].n;
   const tierName = (c) => ['', 'exceptional', 'elite'][E.items[c].tier] || '';
   const condsOf = () => bd.sel.map((s) => { const st = bd.stats.get(s.key); return st && st.le ? { key: s.key, min: s.thr, le: true } : { key: s.key, min: s.thr }; });
-  const statText = (s) => { const st = bd.stats.get(s.key); return E.describeAt(s.key, s.thr, st && st.v) + (st && st.flag ? '' : st && st.le ? '  (or lower)' : '  (or more)'); };
+  /** the stat line of a row: "+0.5 to Maximum Damage per Character Level (+42 at your level 85) (or more)"; "+40% Faster Run/Walk . fixed" when a single value is allowed */
+  const statText = (s) => {
+    const st = bd.stats.get(s.key), fx = st && !st.flag ? fixedOf(s) : null, d = E.perLevelDiv(s.key), cl = clampInt($('s_clvl'), 1, 99);
+    return E.describeAt(s.key, s.thr, st && st.v) + (d ? ' (+' + E.perLevelAt(s.key, s.thr, cl) + ' at your level ' + cl + ')' : '') +
+      (st && st.flag ? '' : fx ? ' \u00b7 fixed' + (fx.squeezed ? ' by your other picks' : '') : st && st.le ? '  (or lower)' : '  (or more)');
+  };
 
   function pctx() {
     const sel = S = readSel();
@@ -347,6 +352,7 @@
   }
   /** run a job on a dedicated worker, replacing (terminating) one that is still busy with a stale request */
   function runJob(kind, msg, onProgress, onDone, fallback) {
+    if (kind === 'odds') return runOddsJob(msg, onDone, fallback);
     const id = kind === 'farm' ? ++farmId : ++tableId;
     let w = kind === 'farm' ? farmWorker : tableWorker;
     if (w && w.busy) { w.terminate(); w = null; }
@@ -363,16 +369,51 @@
     return id;
   }
 
+  /** the card-odds job: one long-lived worker (it keeps the rare sample cache, so a busy one is never terminated); a request that arrives while it works waits as `next`
+   *  (only the newest is kept) and only the newest id is delivered */
+  function runOddsJob(msg, onDone, fallback) {
+    const id = ++oddsId;
+    const w = oddsWorker || (oddsWorker = newWorker());
+    if (!w) { setTimeout(() => { if (id === oddsId) onDone(fallback()); }, 20); return id; }
+    const send = (job) => { w.busy = true; w.job = job; w.postMessage(Object.assign({ id: job.id, file: DATAFILE[E.mode] }, job.msg)); };
+    w.onmessage = (ev) => {
+      const m = ev.data, job = w.job; if (!job || m.id !== job.id) return;
+      w.busy = false; w.job = null;
+      const nx = w.next; w.next = null; if (nx) send(nx);
+      if (job.id === oddsId) { if (m.type === 'result') job.onDone(m.rows, null, m); else job.onDone(null, m.message); }
+    };
+    if (w.busy) w.next = { id, msg, onDone }; else send({ id, msg, onDone });
+    return id;
+  }
+
   // ----- the affix table (every prefix / suffix / automagic row / staff skill that can roll on the type) -----
   const POIS_TIP = 'Poison damage is the total the item tooltip shows (per-frame value x frames / 256). Poison from several sources adds the damage per frame, but the lengths are summed and divided by the number of poison sources when you hit (LoD 1.10-1.14 decompilation), so with two sources you get (sum of both per-frame values) x (half the summed length), usually well below the summed tooltip total.';
   const sideTag = (r) => '<span class="side ' + r.side + '">' + r.side + '</span>';
   const lvWindow = (r) => r.minIl === null ? '-' : r.maxIl >= 99 ? 'from ilvl ' + r.minIl : 'ilvl ' + r.minIl + ' to ' + r.maxIl;
+  /** a stat value as the data keeps it, shown as the game does (per-character-level rates in their units: 4 -> 0.5) */
+  const valTxt = (key, v) => { const d = E.perLevelDiv(key); return d ? String(Math.round(v / d * 1000) / 1000) : String(v); };
+  const rngTxt = (t) => t.mods.map((m) => m.min === m.max ? valTxt(m.key, m.min) : valTxt(m.key, m.min) + '-' + valTxt(m.key, m.max)).join(' / ');
+  /** tiers of a family: "ilvl 28 [2-4]; ilvl 35 [6-12]" (lowest item level at which some base rolls the tier, and its range) */
+  const tierText = (f) => f.tiers.map((t) => 'ilvl ' + (t.minIl === null ? '?' : t.minIl) + ' [' + rngTxt(t) + ']').join('; ');
+  /** hover of the tiers cell: affix level and level requirement of each tier, and (bases differ: broad types) the tiers each base can roll */
+  function tierTip(f) {
+    const out = f.tiers.map((t) => 'ilvl ' + t.minIl + (t.maxIl !== null && t.maxIl < 99 ? ' to ' + t.maxIl : '+') + ': ' + rngTxt(t) + ' (affix level ' + t.lvl + ', req. level ' + t.lr + ')'), codes = Array.from(new Set([].concat(...f.tiers.map((t) => t.codes))));
+    if (f.tiers.some((t) => t.codes.length !== codes.length)) {
+      out.push('', 'Per base:');
+      const MAXL = 30;
+      for (const c of codes.slice(0, MAXL)) out.push(baseName(c) + ': ' + f.tiers.filter((t) => t.codes.indexOf(c) >= 0).map((t) => '[' + rngTxt(t) + '] from ilvl ' + t.minIl).join('; '));
+      if (codes.length > MAXL) out.push('... and ' + (codes.length - MAXL) + ' more');
+    }
+    out.push('', 'Rows: ' + f.rows.map((r) => r.id).join(', '));
+    return out.join('\n');
+  }
   const colsA = [
     { k: 'name', label: 'Name', l: 1, get: (r) => r.name.toLowerCase(), html: (r) => esc(r.name) + ' ' + sideTag(r) + (pickIds().has(r.id) ? ' <span class="picked-tag">picked</span>' : fitOf(r) ? '' : ' <span class="nofit-tag">doesn\'t fit</span>') },
     { k: 'desc', label: 'Description (all tiers)', l: 1, get: (r) => r.desc.toLowerCase(), html: (r) => r.desc.indexOf('poison damage over') >= 0 ? '<span title="' + esc(POIS_TIP) + '">' + esc(r.desc) + '</span>' : esc(r.desc) },
     { k: 'il', label: 'Can roll at', note: 'Item levels at which some base of the type can roll this affix: "from ilvl 18" or a window "ilvl 24 to 35" (affix max level, staff skill tiers).', get: (r) => r.minIl === null ? 999 : r.minIl, fmt: lvWindow },
-    { k: 'lvl', label: 'Affix lvl', note: 'Affix level. Staff skills have a tier instead.', get: (r) => r.lvl === null ? r.tier : r.lvl, fmt: (r) => r.lvl === null ? (r.tier ? 'tier ' + r.tier : '-') : r.lvl },
-    { k: 'lr', label: 'Req lvl', note: 'Character level the affix requires (levelreq).', get: (r) => r.lr === null ? 0 : r.lr, fmt: (r) => r.lr === null ? '-' : r.lr },
+    { k: 'tiers', label: 'Tiers', l: 1, note: 'One entry per tier of the affix: the lowest item level at which some base can roll it and its range. Hover for the affix level and level requirement of each tier (and, for broad types, the tiers each base can roll).', get: (r) => r.tiers.length, html: (r) => esc(tierText(r)), tip: tierTip },
+    { k: 'lvl', label: 'Affix lvl', note: 'Affix level (of the lowest tier). Staff skills have a tier instead.', get: (r) => r.lvl === null ? r.tier : r.lvl, fmt: (r) => r.lvl === null ? (r.tier ? 'tier ' + r.tier : '-') : r.lvl },
+    { k: 'lr', label: 'Req lvl', note: 'Character level the affix requires (levelreq; of the lowest tier).', get: (r) => r.lr === null ? 0 : r.lr, fmt: (r) => r.lr === null ? '-' : r.lr },
     { k: 'cls', label: 'Class', l: 1, get: (r) => r.cls, fmt: (r) => r.cls ? (CLASSN[r.cls] || r.cls) + ' only' : '' },
     { k: 'grp', label: 'Excludes', l: 1, note: 'Affixes of the same group never appear together on one item. The group is named after its first stat.', get: (r) => r.groupName, fmt: (r) => r.g ? r.groupName : '' },
     { k: 'qual', label: 'Quality', l: 1, note: 'Qualities the row can occur on: L low quality, N normal, S superior, M magic, R rare.', get: (r) => r.quals.length * 10 + (r.rare ? 1 : 0), fmt: (r) => r.quals.map((q) => QAB[q]).join(' ') },
@@ -434,6 +475,7 @@
     if (rows.some((s) => s.key === cur)) mo.value = cur;
   }
   function requestTable() {
+    requestOdds();
     if (!bd.codes.length) { bd.rows = []; renderTable(); return; }
     const ilvl = effIlvl(), codes = bd.codes.slice(), quals = oddsQ(), diff = selDiff();
     const rolls = Math.min(parseInt($('mc2').value, 10), Math.max(4000, Math.floor(1000000 / codes.length)));
@@ -446,7 +488,7 @@
     };
     runJob('table', { type: 'table', codes, ilvl, rolls, ctx: ctxS, wopts, qualities: quals, diff }, null, (rows, err, m) => {
       if (!rows) { $('tinfo2').textContent = 'Error: ' + err; return; }
-      bd.rows = rows; bd.wts = wopts ? (m ? m.wts : rows.wts) : null; bd.wlabel = wlabel;
+      bd.tierRows = rows; bd.rows = E.familyTable(rows, bd.fams); bd.wts = wopts ? (m ? m.wts : rows.wts) : null; bd.wlabel = wlabel;
       renderTable();
     }, local);
   }
@@ -472,18 +514,19 @@
     if (sig !== fitSig) { fitSig = sig; fitCache = new Map(); whyCache = new Map(); }
   }
   /** does the row fit the current picks on some base at some item level (and quality)? Always true with no picks */
-  function fitOf(r) {
-    if (!bd.sel.length) return true;
+  function rowFits(r) {
     let v = fitCache.get(r.id);
     if (v === undefined) { v = E.fitsCombo(fitIndex(), rowConds(r), wantQ(), selDiff()); fitCache.set(r.id, v); }
     return v;
   }
+  /** a family fits when some tier fits */
+  const fitOf = (f) => !bd.sel.length || f.rows.some(rowFits);
   /** why a row does not fit: E.explainCombo for the wanted qualities (the qualities the row can occur on first, magic and rare before the white ones). Computed on hover: it sweeps every item level */
   function noFitWhy(r) {
     fitSync();
     let w = whyCache.get(r.id);
     if (!w) {
-      const cs = rowConds(r), wq = wantQ(), pick = (L) => L.filter((q) => wq.indexOf(q) >= 0);
+      const cs = rowConds(r.rows.slice().sort((a, b) => (a.lvl || 0) - (b.lvl || 0))[0]), wq = wantQ(), pick = (L) => L.filter((q) => wq.indexOf(q) >= 0);
       const mine = pick(['magic', 'rare', 'sup', 'normal', 'low']).filter((q) => r.quals.indexOf(q) >= 0), qs = mine.length ? mine.slice(0, 2) : pick(['magic', 'rare']).length ? pick(['magic', 'rare']) : pick(['sup', 'normal', 'low']).slice(0, 1);
       const ex = qs.map((q) => [q, E.explainCombo(bd.codes, cs, q, selDiff())]), real = ex.filter((x) => !/is not possible for this type/.test(x[1][0]));
       const use = real.length ? real : ex.slice(0, 1);
@@ -500,10 +543,19 @@
     if (now) renderTable(); else fitTimer = setTimeout(renderTable, 250);
   }
 
-  // ----- picked affixes (bd.picks: {id, name, side, keys}) and their stats (bd.sel) -----
+  // ----- picked affix families (bd.picks: {id = family id, name, side, keys}) and their stats (bd.sel) -----
   /** the pick a stat belongs to; null when no pick has it (deep link) or several do */
   const pickOf = (key) => { const ps = bd.picks.filter((p) => p.keys.indexOf(key) >= 0); return ps.length === 1 ? ps[0] : null; };
   const pickFromRow = (r) => ({ id: r.id, name: r.name, side: r.side, keys: r.mods.map((m) => m.key).filter((k) => bd.stats.has(k)) });
+  /** the family that owns a picked stat (its block); null for "Other stats" (no pick, or several picks share the stat) */
+  const famOf = (key) => { const p = pickOf(key); return p ? bd.fams.get(p.id) || null : null; };
+  /** the weakest value of a family stat: lowest minimum (ge) or highest maximum (le) over its tiers */
+  const weakest = (f, key, le) => { const iv = f && f.vals[key]; return !iv ? undefined : le ? iv[iv.length - 1][1] : iv[0][0]; };
+  /** a family and its stats added to the picks (a stat another pick already has keeps its threshold) */
+  function addPick(f) {
+    bd.picks.push(pickFromRow(f));
+    for (const m of f.mods) { const st = bd.stats.get(m.key); if (st && !bd.sel.some((s) => s.key === m.key)) addStat(m.key, weakest(f, m.key, st.le)); }
+  }
   function removePick(id) {
     const i = bd.picks.findIndex((p) => p.id === id); if (i < 0) return;
     const [p] = bd.picks.splice(i, 1);
@@ -528,7 +580,25 @@
   // ----- selected stats with sliders -----
   /** slider range of a picked stat: what is achievable with the other picked stats (s.lo / s.hi, set by updateRanges), else the catalogue range */
   const rngOf = (s) => { const st = bd.stats.get(s.key); return { lo: s.lo !== undefined ? s.lo : st.min, hi: s.hi !== undefined ? s.hi : st.max }; };
-  const rngNote = (s) => { const st = bd.stats.get(s.key), r = rngOf(s); return r.lo + ' to ' + r.hi + (st.what ? ' ' + st.what : ''); };
+  const rngNote = (s) => {
+    const st = bd.stats.get(s.key), r = rngOf(s), d = E.perLevelDiv(s.key), v = valsOf(s), lo = v ? v[0] : r.lo, hi = v ? v[v.length - 1] : r.hi;
+    const gaps = []; if (v) for (let x = lo; x <= hi && gaps.length < 8; x++) if (v.indexOf(x) < 0) gaps.push(x);
+    return lo + ' to ' + hi + (gaps.length ? ' (no ' + gaps.join(', ') + (gaps.length === 8 ? ', ...' : '') + ')' : '') + (st.what ? ' ' + st.what : '') + (d ? ' (units of 1/' + d + ' per level)' : '');
+  };
+  /** values a picked stat can take: null = any integer of its range (no family owns it); else the values some tier of the owning family rolls inside the conditional range
+   *  (the family's whole set when the other picks leave none), ascending */
+  function valsOf(s) {
+    const f = famOf(s.key), st = bd.stats.get(s.key); if (!f || !f.vals[s.key] || st.flag) return null;
+    const r = rngOf(s); return E.allowedValues(f.vals[s.key], r.lo, r.hi);
+  }
+  /** "fixed" = a single allowed value; squeezed = the family itself has several (the other picks leave one) */
+  const fixedOf = (s) => { const v = valsOf(s); if (!v || v.length !== 1) return null; const all = E.allowedValues(famOf(s.key).vals[s.key], -1e9, 1e9); return { squeezed: !!all && all.length > 1 }; };
+  /** which tier the threshold needs: "needs the tier at ilvl 35 (req. level 15)", with several bases "from ilvl 35"; '' for one-tier families */
+  function tierNote(s) {
+    const f = famOf(s.key), st = bd.stats.get(s.key); if (!f || f.tiers.length < 2 || st.flag) return '';
+    const t = E.tierFor(f, s.key, s.thr, st.le); if (!t) return '';
+    return (st.le ? '<= ' : '>= ') + valTxt(s.key, s.thr) + ': needs the tier ' + (bd.codes.length > 1 ? 'from ' : 'at ') + 'ilvl ' + t.minIl + ' (req. level ' + t.lr + ')';
+  }
   /** per picked stat: range achievable while the others hold (E.statRange); clamps the thresholds into it */
   function updateRanges() {
     const cs = condsOf(), o = { qualities: wantQ(), diff: selDiff() };
@@ -536,18 +606,28 @@
       const st = bd.stats.get(s.key); if (st.flag) return;
       const r = E.statRange(bd.codes, cs, i, o);
       s.lo = r.min; s.hi = r.max; s.thr = Math.max(s.lo, Math.min(s.hi, s.thr));
+      const v = valsOf(s); if (v) s.thr = E.snapValue(v, s.thr, st.le);   // a family stat only takes values some tier rolls
     });
   }
-  /** after a threshold moved: refresh the other rows in place (range, value, text) without re-rendering the box */
+  /** a stat row's slider and number box set to its allowed values / range (family stats: the slider steps through the allowed values by index) */
+  function fillCtl(row, s) {
+    const vals = valsOf(s), r = rngOf(s), n = row.querySelector('.thr'), sl = row.querySelector('.thrr'); if (!n) return;
+    n.value = s.thr;
+    if (vals) { n.min = vals[0]; n.max = vals[vals.length - 1]; sl.min = 0; sl.max = vals.length - 1; sl.value = Math.max(0, vals.indexOf(s.thr)); } else { n.min = sl.min = r.lo; n.max = sl.max = r.hi; sl.value = s.thr; }
+  }
+  /** after a threshold moved: refresh the other rows in place (range, value, text); a row that became fixed (or stopped being) is redrawn */
   function syncRows(j) {
     updateRanges();
-    for (const row of $('sel2').querySelectorAll('.selrow')) {
+    let redraw = false;
+    for (const row of Array.from($('sel2').querySelectorAll('.selrow'))) {
       const i = +row.dataset.i, s = bd.sel[i], st = bd.stats.get(s.key); if (i === j || st.flag) continue;
-      const r = rngOf(s);
-      for (const inp of row.querySelectorAll('.thr, .thrr')) { inp.min = r.lo; inp.max = r.hi; inp.value = s.thr; }
-      row.querySelector('.note').textContent = rngNote(s);
+      if (!!fixedOf(s) !== (row.dataset.fx === '1')) { row.outerHTML = rowHtml(s, i); redraw = true; continue; }
+      fillCtl(row, s);
+      const note = row.querySelector('.rn'); if (note) note.textContent = rngNote(s);
+      const tn = row.querySelector('.tn'); if (tn) tn.textContent = tierNote(s);
       row.querySelector('.nm span').textContent = statText(s);
     }
+    if (redraw) paintOdds();
   }
   function addStat(key, thr) {
     const st = bd.stats.get(key); if (!st) return false;
@@ -558,27 +638,86 @@
     updateRanges();
     return true;
   }
-  /** the item card: base and quality, the slot counter, then one block per picked affix with the sliders of its stats; stats no pick owns go under "Other stats" */
+  /** one stat row: text, (not fixed) number box and slider, tier note, odds slot */
+  function rowHtml(s, i) {
+    const st = bd.stats.get(s.key), r = rngOf(s), fx = fixedOf(s), vals = valsOf(s);
+    const sl = vals ? ' min="0" max="' + (vals.length - 1) + '" value="' + Math.max(0, vals.indexOf(s.thr)) + '" data-idx="1"' : ' min="' + r.lo + '" max="' + r.hi + '" value="' + s.thr + '"';
+    const lo = vals ? vals[0] : r.lo, hi = vals ? vals[vals.length - 1] : r.hi;
+    return '<div class="selrow" data-i="' + i + '"' + (fx ? ' data-fx="1"' : '') + '><div class="nm"><span>' + esc(statText(s)) + '</span><button class="rm" title="remove this stat">x</button></div>' + (st.flag || fx ? '' :
+      '<div class="ctl"><span>' + (st.le ? '&lt;=' : '&gt;=') + '</span><input type="number" class="thr" value="' + s.thr + '" min="' + lo + '" max="' + hi + '">' +
+      '<input type="range" class="thrr" step="1"' + sl + '><small class="note rn">' + rngNote(s) + '</small></div>') +
+      (vals && !fx ? '<small class="note tn">' + esc(tierNote(s)) + '</small>' : '') + '<div class="od" data-k="c' + i + '"></div></div>';
+  }
+  /** the item card: base and quality, the slot counter, then one block per picked affix family with the sliders of its stats; stats no pick owns go under "Other stats" */
   function renderSel() {
     const box = $('sel2');
     if (!bd.type) { box.className = 'note'; box.textContent = 'Pick an item type or base first.'; return; }
     box.className = '';
-    const row = (s, i) => {
-      const st = bd.stats.get(s.key), r = rngOf(s);
-      return '<div class="selrow" data-i="' + i + '"><div class="nm"><span>' + esc(statText(s)) + '</span><button class="rm" title="remove this stat">x</button></div>' + (st.flag ? '' :
-        '<div class="ctl"><span>' + (st.le ? '&lt;=' : '&gt;=') + '</span><input type="number" class="thr" value="' + s.thr + '" min="' + r.lo + '" max="' + r.hi + '">' +
-        '<input type="range" class="thrr" min="' + r.lo + '" max="' + r.hi + '" step="1" value="' + s.thr + '"><small class="note">' + rngNote(s) + '</small></div>') + '</div>';
-    };
-    const own = new Set(), blocks = bd.picks.map((p) => {
-      const mine = []; bd.sel.forEach((s, i) => { if (pickOf(s.key) === p) { mine.push(row(s, i)); own.add(i); } });
-      return '<div class="pk"><div class="pkh"><span><b>' + esc(p.name) + '</b> ' + sideTag(p) + '</span><button class="rmp" data-id="' + esc(p.id) + '" title="remove this affix and its stats">remove</button></div>' +
-        (mine.join('') || '<div class="note">its stats are also picked by another affix (see below)</div>') + '</div>';
+    const HINT = 'Higher tiers and other affixes with this stat also count.';
+    const own = new Set(), blocks = bd.picks.map((p, pi) => {
+      const mine = []; bd.sel.forEach((s, i) => { if (pickOf(s.key) === p) { mine.push(rowHtml(s, i)); own.add(i); } });
+      const f = bd.fams.get(p.id);
+      return '<div class="pk" title="' + esc(HINT) + '"><div class="pkh"><span><b>' + esc(p.name) + '</b> ' + sideTag(p) + (f ? ' &middot; ' + esc(f.desc) : '') + '</span><button class="rmp" data-id="' + esc(p.id) + '" title="remove this affix and its stats">remove</button></div>' +
+        (mine.length ? '<div class="od" data-k="g' + pi + '"></div>' : '') + (mine.join('') || '<div class="note">its stats are also picked by another affix (see below)</div>') + '</div>';
     });
-    const other = bd.sel.map((s, i) => own.has(i) ? '' : row(s, i)).join('');
+    const other = bd.sel.map((s, i) => own.has(i) ? '' : rowHtml(s, i)).join('');
     if (other) blocks.push('<div class="pk"><div class="pkh"><b>Other stats</b></div>' + other + '</div>');
     const q = $('ql2').value;
-    box.innerHTML = '<div class="card"><div class="chd"><b>' + esc(bd.type.name) + '</b><span>' + (q ? QN[q] : 'Any quality') + '</span></div><div class="slots">' + slotLine() + '</div>' +
+    box.innerHTML = '<div class="card"><div class="chd"><b>' + esc(bd.type.name) + '</b><span>' + (q ? QN[q] : 'Any quality') + '</span></div><div class="slots">' + slotLine() + '</div>' + (bd.sel.length ? '<div class="odt"><b>All picks:</b> <span class="od" data-k="t"></span></div><div class="note odn"></div>' : '') +
       (blocks.join('') || '<div class="note">Click an affix in the table to add it. Each of its stats gets a minimum value you can move with the slider.</div>') + '</div>';
+    paintOdds(); requestOdds();
+  }
+
+  // ----- odds in the item card: per stat, per affix block, all picks (E.cardOdds: magic exact, rare reweighted from recorded samples, done in the worker) -----
+  // The last answer stays on screen, dimmed, while a new one is pending. bd.odds = {keys, gsig, list: [{q, ok, why}], res, nb, ilvl, wlabel, wts}.
+  let oddsTimer = null, oddsSig = '', oddsBusy = false;
+  const pickIdx = (p) => { const r = []; bd.sel.forEach((s, i) => { if (pickOf(s.key) === p) r.push(i); }); return r; };
+  /** qualities to show: the forced one, else magic and rare, plus normal / superior / low when a pick makes them possible; ok = the combination can exist at all */
+  function oddsList() {
+    const f = $('ql2').value, an = bd.an, ok = (q) => !an || an[q].ok, why = (q) => (an && an[q].why) || [];
+    return (f ? [f] : ['magic', 'rare'].concat(['normal', 'sup', 'low'].filter((q) => an && an[q].ok))).map((q) => ({ q, ok: ok(q), why: why(q) }));
+  }
+  const oddsFresh = () => { const o = bd.odds; return o && o.keys === bd.sel.map((s) => s.key).join('|') && o.gsig === JSON.stringify(bd.picks.map(pickIdx)) ? o : null; };
+  /** the shown figures of one slot ('t' total, 'c3' stat 3, 'g1' block 1) */
+  function oddsLine(o, k) {
+    const m = k === 't' ? o.res.total : k[0] === 'c' ? o.res.perCond[+k.slice(1)] : o.res.perGroup[+k.slice(1)];
+    if (!m) return '';
+    return o.list.map((x) => {
+      const p = x.ok ? m[x.q] || 0 : 0, none = o.wts && !o.wts.some((w) => w > 0);
+      const tip = p > 0 ? '' : !x.ok ? x.why.join(' ') : none ? 'No base of the selection drops in ' + o.wlabel + ' with the current selectors.' : 'No base of the selection can roll this at this quality and item level.';
+      return '<span' + (tip ? ' title="' + esc(tip) + '"' : '') + '>' + QCOLN[x.q] + ' ' + odds(p) + '</span>';
+    }).join(' &middot; ');
+  }
+  function paintOdds() {
+    const box = $('sel2'), o = oddsFresh(), card = box.querySelector('.card'); if (!card) return;
+    card.classList.toggle('odstale', oddsBusy);
+    for (const el of box.querySelectorAll('.od')) el.innerHTML = o ? oddsLine(o, el.dataset.k) : '';
+    const n = box.querySelector('.odn');
+    if (n) n.textContent = !o ? (oddsBusy ? 'Computing odds...' : '') : 'Chance that an item of that quality on the selection drops with these stats (at least the values set), at item level ' + o.ilvl + '. ' +
+      (o.wlabel ? 'Weighted by drop rate in ' + o.wlabel + '.' : 'Average over the ' + o.nb + ' base' + (o.nb === 1 ? '' : 's') + ' of the selection.') + (o.list.some((x) => x.q === 'rare' && x.ok) ? ' Rare is a Monte Carlo estimate (a few percent noise).' : '') + (oddsBusy ? ' Updating...' : '');
+  }
+  /** schedule a recompute (throttled to one per 70 ms while dragging; now = immediately) */
+  function requestOdds(now) {
+    if (now) { clearTimeout(oddsTimer); oddsTimer = null; runOdds(); return; }
+    if (!oddsTimer) oddsTimer = setTimeout(() => { oddsTimer = null; runOdds(); }, 70);
+  }
+  function runOdds() {
+    if (!bd.type || !bd.codes.length || !bd.sel.length) { bd.odds = null; oddsSig = ''; oddsBusy = false; paintOdds(); return; }
+    const list = oddsList(), quals = list.filter((x) => x.ok).map((x) => x.q), { sel, ctxS } = pctx(), wopts = weightOpts(sel), ilvl = effIlvl(), diff = selDiff(), conds = condsOf(), groups = bd.picks.map(pickIdx), codes = bd.codes.slice();
+    const sig = JSON.stringify([E.mode, codes, conds, ilvl, quals, wopts, wopts ? ctxS : 0, diff, groups]);
+    if (sig === oddsSig) return;   // nothing changed: keep what is shown
+    oddsSig = sig; oddsBusy = true; paintOdds();
+    const keys = bd.sel.map((s) => s.key).join('|'), gsig = JSON.stringify(groups), wlabel = wopts ? weightLabel() : '';
+    const local = () => {   // no worker: the same computation on the main thread
+      const w = wopts ? E.baseDropWeights(E.getCtx(ctxS), codes, wopts) : null;
+      return Object.assign(E.cardOdds(codes, conds, ilvl, quals, w, { diff, groups }), { wts: w ? codes.map((c) => w.get(c) || 0) : null });
+    };
+    runJob('odds', { type: 'odds', codes, conds, ilvl, qualities: quals, ctx: ctxS, wopts, diff, groups }, null, (res, err, m) => {
+      oddsBusy = false;
+      if (!res) { oddsSig = ''; paintOdds(); return; }
+      bd.odds = { keys, gsig, list, res, nb: codes.length, ilvl, wlabel, wts: res.wts || null };
+      paintOdds();
+    }, local);
   }
   let anTimer = null, farmTimer = null;
   function changed(opt) {
@@ -597,8 +736,8 @@
     clearTimeout(anTimer);
     const res = $('res2');
     bd.an = null; bd.farmQ = [];
-    if (!bd.codes.length) { res.innerHTML = '<div class="note">No bases for this type / tier.</div>'; return; }
-    if (!bd.sel.length) { res.innerHTML = '<div class="note">Select at least one affix to see the item levels and farm sources.</div>'; T2.rows = []; T2.render(); $('finfo2').textContent = ''; return; }
+    if (!bd.codes.length) { res.innerHTML = '<div class="note">No bases for this type / tier.</div>'; requestOdds(true); return; }
+    if (!bd.sel.length) { requestOdds(true); res.innerHTML = '<div class="note">Select at least one affix to see the item levels and farm sources.</div>'; T2.rows = []; T2.render(); $('finfo2').textContent = ''; return; }
     const an = bd.an = E.comboAnalysis(bd.codes, condsOf(), { diff: selDiff() });
     const forced = $('ql2').value, qs = wantQ();
     bd.farmQ = qs.filter((q) => an[q].ok);
@@ -634,6 +773,7 @@
     renderHead();
     if (!bd.farmQ.length) { T2.rows = []; T2.render(); $('finfo2').textContent = ''; }
     showShares();
+    requestOdds(true);   // the set of qualities follows bd.an
   }
   /** why no wanted quality works: the explanation of the most permissive one (rare, then magic, ...) */
   const whyNot = (an) => { const q = ['rare', 'magic', 'sup', 'normal', 'low'].filter((x) => wantQ().indexOf(x) >= 0 && an[x].why.length && !/is not possible for this type/.test(an[x].why[0]))[0] || wantQ()[0]; return an[q].why; };
@@ -725,10 +865,10 @@
   }
   function refreshBuilder() {
     bd.codes = curCodes();
-    bd.stats = new Map(E.builderStats(bd.codes).map((s) => [s.key, s]));
+    bd.stats = new Map(E.builderStats(bd.codes).map((s) => [s.key, s])); bd.fams = E.builderFamilies(bd.codes);
     bd.sel = bd.sel.filter((s) => bd.stats.has(s.key));
     for (const p of bd.picks) p.keys = p.keys.filter((k) => bd.stats.has(k));
-    bd.picks = bd.picks.filter((p) => p.keys.length);
+    bd.picks = bd.picks.filter((p) => p.keys.length && bd.fams.has(p.id));
     for (const s of bd.sel) addStat(s.key, s.thr);
     bd.farm = null; fitIdx = null;
     renderSel(); requestTable(); changed();
@@ -736,11 +876,7 @@
   function onPickRow(r) {
     if (!r) return;
     if (bd.picks.some((p) => p.id === r.id)) { removePick(r.id); return; }   // clicking a picked row takes it out again
-    bd.picks.push(pickFromRow(r));
-    for (const m of r.mods) {
-      const st = bd.stats.get(m.key);
-      if (st && !bd.sel.some((s) => s.key === m.key)) addStat(m.key, st.le ? m.max : m.min);
-    }
+    addPick(r);
     updateRanges(); renderSel(); refit(true); changed();
   }
   function findTypeOption(w) {
@@ -799,16 +935,22 @@
       if (ev.target.classList.contains('rmp')) { removePick(ev.target.dataset.id); return; }
       if (ev.target.classList.contains('rm')) removeStat(+ev.target.closest('.selrow').dataset.i);
     });
+    selbox.addEventListener('change', (ev) => {   // a typed number shows the value it snapped to
+      const row = ev.target.closest('.selrow'); if (row && ev.target.classList.contains('thr')) ev.target.value = bd.sel[+row.dataset.i].thr;
+    });
     selbox.addEventListener('input', (ev) => {
       const row = ev.target.closest('.selrow'); if (!row) return;
-      const s = bd.sel[+row.dataset.i], r = rngOf(s);
+      const s = bd.sel[+row.dataset.i], r = rngOf(s), vals = valsOf(s), st = bd.stats.get(s.key);
       let v = parseFloat(ev.target.value); if (isNaN(v)) return;
-      v = Math.max(r.lo, Math.min(r.hi, Math.round(v)));
+      if (vals && ev.target.classList.contains('thrr')) v = vals[Math.max(0, Math.min(vals.length - 1, Math.round(v)))];   // the slider steps through the allowed values
+      else v = Math.max(r.lo, Math.min(r.hi, Math.round(v)));
+      if (vals) v = E.snapValue(vals, v, st.le);   // typed values snap to the next value some tier rolls
       s.thr = v;
-      if (ev.target.classList.contains('thrr')) row.querySelector('.thr').value = v; else row.querySelector('.thrr').value = v;
+      if (ev.target.classList.contains('thrr')) row.querySelector('.thr').value = v; else row.querySelector('.thrr').value = vals ? Math.max(0, vals.indexOf(v)) : v;
       row.querySelector('.nm span').textContent = statText(s);
+      const tn = row.querySelector('.tn'); if (tn) tn.textContent = tierNote(s);
       syncRows(+row.dataset.i);
-      changed(); refit();
+      changed(); refit(); requestOdds();
     });
   }
   /** apply the builder part of the URL (new ?t2/?b2/?a, or the old ?q2=&ql=&c= deep link); true when it set a type */
@@ -823,14 +965,13 @@
     const q = qs.get('q') || qs.get('ql'); if (q) $('ql2').value = q;
     $('q2').value = opt.label;
     bd.type = opt; bd.codes = curCodes();
-    bd.stats = new Map(E.builderStats(bd.codes).map((s) => [s.key, s]));
+    bd.stats = new Map(E.builderStats(bd.codes).map((s) => [s.key, s])); bd.fams = E.builderFamilies(bd.codes);
     bd.sel = []; bd.picks = []; fitIdx = null;
-    const cat = E.builderCatalog(bd.codes);   // ?p=<affix id>: the picked affixes (old links have none: their stats show under "Other stats")
-    for (const id of qs.getAll('p')) {
-      const r = cat.get(id); if (!r || bd.picks.some((p) => p.id === id)) continue;
-      const pk = pickFromRow(r); if (!pk.keys.length) continue;
-      bd.picks.push(pk);
-      for (const m of r.mods) { const st = bd.stats.get(m.key); if (st && !bd.sel.some((s) => s.key === m.key)) addStat(m.key, st.le ? m.max : m.min); }
+    const byRow = new Map(); for (const f of bd.fams.values()) for (const id of f.ids) byRow.set(id, f);
+    for (const id of qs.getAll('p')) {   // ?p=<family id>: the picked affixes; an old link's tier row id (p12) maps to its family; links without p: the stats show under "Other stats"
+      const f = bd.fams.get(id) || byRow.get(id); if (!f || bd.picks.some((p) => p.id === f.fid)) continue;
+      if (!pickFromRow(f).keys.length) continue;
+      addPick(f);
     }
     for (const c of qs.getAll('a').concat(qs.getAll('c'))) { const i = c.lastIndexOf(':'); addStat(c.slice(0, i), parseFloat(c.slice(i + 1))); }
     renderSel(); requestTable(); syncUrl(); updateAnalysis(); runFarm();
@@ -910,6 +1051,7 @@
       saveSel(); updGame();
       if (k === 's_mode') { switchMode($('s_mode').value).catch((e) => { $('info1').textContent = 'Could not load data: ' + e; }); return; }
       if (k === 's_diff' && bd.sel.length) { updateRanges(); renderSel(); refit(true); }
+      if (k === 's_clvl' && bd.sel.length) renderSel();   // per-level stats show their value at this level
       updTier(); if (target1) runTab1(); if (bd.an) { syncUrl(); runFarm(); }
       if (bd.type && $('ar2').value) { fillMonsters(); requestTable(); }
     });
