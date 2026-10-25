@@ -31,7 +31,7 @@
     //       a roll that finds no eligible affix (ITEMS_RollMagicAffixesNew returns 0) marks that side full and does NOT use up one of the
     //       count steps (--nCounter), so the item still gets its full count when the other side has room;
     //     * every pick is a fresh weighted draw from the affixes whose `group` is not on the item yet (prefix AND suffix groups share the check,
-    //       ITEMMODS_HasAffixWithGroup both ways) - equivalent to the rejection draw rareMC uses.
+    //       ITEMMODS_HasAffixWithGroup both ways) - rareExact sums this loop over its outcomes.
     rareAffixCounts: [3, 4, 4, 5, 5, 5, 6, 6], rareJewelCounts: [3, 4], rarePrefixChance: 0.5, rareMaxPerSide: 3,
     // --- affix weight. D2MOO ItemsMagic.cpp ComputeAffixFrequency: items.txt `magic lvl` > 0 (staves, wands, orbs, circlets) weight every
     //     affix by frequency * affix level instead of frequency. ASSUMPTION: D2R keeps this (only D2MOO / 1.10 confirms it). false = plain frequency.
@@ -138,14 +138,6 @@
 
   // small helpers ------------------------------------------------------
   const floor = Math.floor;
-  function mulberry32(a) {
-    return function () {
-      a |= 0; a = (a + 0x6D2B79F5) | 0;
-      let t = Math.imul(a ^ (a >>> 15), 1 | a);
-      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-    };
-  }
 
   function create(data) {
     const D = data;
@@ -1274,11 +1266,9 @@
 
     /** P(item of given quality has all conditions) for the given base at alvl. A condition can be met by an affix, the automagic row or a
      *  staff mod skill (opts.ilvl = the drop's item level; staff mods depend on it, not on alvl).
-     *  magic: exact enumeration. rare: seeded Monte Carlo (Rao-Blackwellised over the rolled values). */
+     *  magic: exact enumeration. rare: exact too (rareExact; opts.rareSteps = the one-state variant, for the tests). */
     const affCache = new Map();
     function affixProb(code, alvl, quality_, conds, opts) {
-      const rolls = (opts && opts.rolls) || 200000;
-      const seed = (opts && opts.seed) || 12345;
       const ilvl = opts && opts.ilvl !== undefined ? opts.ilvl : minIlvlForAlvl(items[code], alvl);
       const el = eligible(code, alvl, quality_ === 'rare', ilvl);
       if (!el.sig) el.sig = el.p.map((a) => a.i + ':' + a.f + (a.mods[0] && a.mods[0][0] === 'sock' ? 's' + a.mods[0][3] : '')).join(',') + '/' + el.s.map((a) => a.i + ':' + a.f + (a.mods[0] && a.mods[0][0] === 'sock' ? 's' + a.mods[0][3] : '')).join(',') + '/' + el.auto.map((a) => a.g + a.n + ':' + a.f).join(',');
@@ -1288,7 +1278,7 @@
       const sd = ex.dist.length === 1 && ex.dist[0].mask === 0 ? sd0 : orConv(sd0, ex.dist);
       const sk = (sd0.length === 1 && sd0[0].mask === 0 ? '' : code + sbase) + '|' + ex.sig;
       // identical affix pools (different alvl) share one result
-      const ck = [items[code].t === 'jewl' ? 'J' : '', items[code].cs ? code : '', quality_, rolls, seed, JSON.stringify(conds), el.sig, sk].join('|');
+      const ck = [items[code].t === 'jewl' ? 'J' : '', items[code].cs ? code : '', quality_, quality_ === 'rare' && opts && opts.rareSteps ? 'steps' : '', JSON.stringify(conds), el.sig, sk].join('|');
       if (affCache.has(ck)) return affCache.get(ck);
       let res;
       // auto affix
@@ -1352,7 +1342,7 @@
         }
         res = total;
       } else {
-        res = rareMC(code, el, conds, autoList, rolls, seed, sd);
+        res = (opts && opts.rareSteps ? rareSteps : rareExact)(code, el, conds, autoList, sd);
       }
       affCache.set(ck, res);
       return res;
@@ -1373,198 +1363,272 @@
       return out;
     }
 
-    /** Rare item: the game's loop (CONFIG.rareAffixCounts ...) simulated with a seeded RNG; the expected value over the rolled affix
-     *  values and over the automagic row / staff mods is taken analytically. */
-    function rareMC(code, el, conds, autoList, rolls, seed, sd, hits) {
-      const it = items[code];
-      const rng = mulberry32(seed);
-      const nc = conds.length;
-      function side(list) {
-        const cum = new Float64Array(list.length);
-        let t = 0;
-        for (let i = 0; i < list.length; i++) { t += list[i].f; cum[i] = t; }
-        const cps = list.map((a) => conds.map((c) => condProb(a, c)));
-        return { list, cum, total: t, cps, groups: list.map((a) => a.g) };
+    /** Rare item, exact (CONFIG.rareAffixCounts ...: the game's loop summed over its outcomes), split by side: a side's draws only see its own pool, so each side is stepped alone (at most rareMaxPerSide draws,
+     *  every group of the side its own state when the weights differ) and the sides meet through the order of the prefix / suffix draws. A group on both sides
+     *  (RotW 307) couples them: a side's tables are also kept by the draw before which the other side took it (r) and the draw at which it took it itself (i).
+     *  Given the draw order the sides are independent, so a side's table keeps the chance of each set of conditions its affixes meet (a few sets: at most three
+     *  affixes, each meeting a condition with its own value roll), and the sides join over pairs of sets; every term is positive, so tiny odds keep their digits.
+     *  Pools where a side could run out of groups, with more than one shared group or more than 30 affix conditions go through rareSteps (both sides in one state). */
+    function rareExact(code, el, conds, autoList, sd, hits) {
+      const counts = items[code].t === 'jewl' ? CONFIG.rareJewelCounts : CONFIG.rareAffixCounts, nc = conds.length, maxSide = CONFIG.rareMaxPerSide, pre = CONFIG.rarePrefixChance;
+      const sides = [el.p, el.s], cps = sides.map((L) => L.map((a) => conds.map((c) => condProb(a, c))));
+      const G = new Map();
+      sides.forEach((L, s) => L.forEach((a, i) => {
+        let g = G.get(a.g); if (!g) G.set(a.g, (g = { w: [0, 0], rel: false, mem: [[], []] }));
+        g.w[s] += a.f; g.mem[s].push(i); if (cps[s][i].some((x) => x > 0)) g.rel = true;
+      }));
+      const groups = Array.from(G.values()), shared = groups.filter((g) => g.w[0] > 0 && g.w[1] > 0);
+      // conditions some prefix / suffix can meet (the others only through staff mods, extras or the automagic row: no subset dimension for them)
+      const A = []; for (let i = 0; i < nc; i++) if (cps[0].some((c) => c[i] > 0) || cps[1].some((c) => c[i] > 0)) A.push(i);
+      if (shared.length > 1 || A.length > 30 || [0, 1].some((s) => groups.filter((g) => g.w[s] > 0).length - shared.length < maxSide)) return rareSteps(code, el, conds, autoList, sd, hits);
+      const gs = shared[0] || null, na = A.length, RN = maxSide + 1;   // r = RN: the other side never takes the shared group
+      // fin(U): chance that the rest (automagic row, staff mods, extras) meets every condition the affixes left open, U = the A-conditions the affixes met
+      const inA = new Uint8Array(nc), rest = [];
+      for (const i of A) inA[i] = 1;
+      for (const au of autoList) for (const st of sd) {
+        let z = au.w * st.p, open = 0;
+        for (let i = 0; i < nc; i++) if (!inA[i] && !((st.mask >> i) & 1)) z *= au.c[i];
+        for (let b = 0; b < na; b++) if (!((st.mask >> A[b]) & 1)) open |= 1 << b;
+        if (z > 0) rest.push({ z, open, c: A.map((i) => au.c[i]) });
       }
-      const P = side(el.p), S = side(el.s);
-      if (!P.list.length && !S.list.length) return 0;
-      const counts = (it.t === 'jewl') ? CONFIG.rareJewelCounts : CONFIG.rareAffixCounts;
-      const miss = new Float64Array(nc);   // running product of (1 - p) per condition
-      const used = [];                     // groups already on the item (prefix and suffix share the check)
-      /** weighted draw among the affixes whose group is not used yet; -1 = none left */
-      function draw(Sd) {
-        if (!Sd.list.length) return -1;
-        for (let tries = 0; tries < 40; tries++) {
-          const r = rng() * Sd.total;
-          let lo = 0, hi = Sd.cum.length - 1;
-          while (lo < hi) { const mid = (lo + hi) >> 1; if (Sd.cum[mid] > r) hi = mid; else lo = mid + 1; }
-          if (used.indexOf(Sd.groups[lo]) < 0) return lo;
-        }
-        let tot = 0;
-        for (let i = 0; i < Sd.list.length; i++) if (used.indexOf(Sd.groups[i]) < 0) tot += Sd.list[i].f;
-        if (tot <= 0) return -1;
-        let r = rng() * tot;
-        for (let i = 0; i < Sd.list.length; i++) if (used.indexOf(Sd.groups[i]) < 0 && (r -= Sd.list[i].f) < 0) return i;
-        return -1;
-      }
-      let acc = 0;
-      for (let n = 0; n < rolls; n++) {
-        const count = counts[floor(rng() * counts.length)];
-        used.length = 0;
-        for (let i = 0; i < nc; i++) miss[i] = 1;
-        let np = 0, ns = 0, pFull = false, sFull = false, k = 0;
-        while (k < count && !(pFull && sFull)) {
-          const suffix = !sFull && (pFull || !(rng() < CONFIG.rarePrefixChance));
-          const Sd = suffix ? S : P;
-          const idx = draw(Sd);
-          if (idx < 0) { if (suffix) sFull = true; else pFull = true; continue; }   // nothing eligible: the side is closed, the step is not used up
-          used.push(Sd.groups[idx]);
-          if (hits) (suffix ? hits.s : hits.p)[idx]++;   // per-affix appearance counting (builder table)
-          const cps = Sd.cps[idx];
-          for (let i = 0; i < nc; i++) miss[i] *= 1 - cps[i];
-          if (suffix) { if (++ns >= CONFIG.rareMaxPerSide) sFull = true; } else if (++np >= CONFIG.rareMaxPerSide) pFull = true;
-          k++;
-        }
-        let q = 0;
-        for (const au of autoList) {
-          for (const st of sd) {
-            let z = st.p;
-            for (let i = 0; i < nc; i++) if (!((st.mask >> i) & 1)) z *= 1 - miss[i] * (1 - au.c[i]);
-            q += au.w * z;
+      const finMemo = new Map();
+      const fin = (U) => {
+        let v = finMemo.get(U);
+        if (v !== undefined) return v;
+        v = 0;
+        for (const x of rest) { let z = x.z; const need = x.open & ~U; for (let b = 0; need >> b && z > 0; b++) if ((need >> b) & 1) z *= x.c[b]; v += z; }
+        finMemo.set(U, v);
+        return v;
+      };
+      /** one side: tab[n][r][i] = {M (E[prod_S miss] times the chance, per subset S), H (affix appearance, times the chance)} after n draws */
+      function sideTables(s) {
+        const L = sides[s], tr = [], chs = [], cl = [];
+        for (const g of groups) {
+          if (!g.w[s]) continue;
+          if (g.rel || g === gs) {
+            const t = tr.length, by = new Map();
+            tr.push({ g, w: g.w[s] });
+            for (const i of g.mem[s]) { const k = cps[s][i].join(','); const c = by.get(k); if (c) { c.w += L[i].f; c.mem.push(i); } else by.set(k, { t, w: L[i].f, c: cps[s][i], mem: [i] }); }
+            for (const c of by.values()) chs.push(c);
+          } else {
+            let c = cl.find((x) => x.w === g.w[s]);
+            if (!c) cl.push((c = { w: g.w[s], n: 0, mem: [] }));
+            c.n++; for (const i of g.mem[s]) c.mem.push(i);
           }
         }
-        acc += q;
+        const gt = gs ? tr.findIndex((t) => t.g === gs) : -1, nC = cl.length, nT = tr.length;
+        const tab = [];
+        for (let n = 0; n <= maxSide; n++) { tab.push([]); for (let r = 0; r <= RN; r++) tab[n].push([]); }
+        const record = (n, r, cur) => {
+          const byI = new Map();
+          for (const x of cur.values()) {
+            let e = byI.get(x.gi);
+            if (!e) byI.set(x.gi, (e = { keys: new Map(), H: hits ? new Float64Array(L.length) : null }));
+            const k = x.chosen.join(','), v = e.keys.get(k);
+            if (v) v.p += x.p; else e.keys.set(k, { chosen: x.chosen, p: x.p });
+            if (hits) {   // which affix of a lumped class: a given group of the class is gone with chance m / n
+              for (let c = 0; c < nC; c++) if (x.m[c]) { const f = x.p * x.m[c] / cl[c].n / cl[c].w; for (const i of cl[c].mem) e.H[i] += f * L[i].f; }
+              for (const k2 of x.chosen) { const f = x.p / chs[k2].w; for (const i of chs[k2].mem) e.H[i] += f * L[i].f; }
+            }
+          }
+          for (const [gi, e] of byI) {
+            const D = new Map();   // set of A-conditions met (bits) -> chance; a drawn affix meets each condition independently (its own value roll)
+            let tot = 0;
+            for (const v of e.keys.values()) {
+              let sure = 0; const unc = [], q = [];
+              for (let b = 0; b < na; b++) {
+                let m = 1; for (const k2 of v.chosen) m *= 1 - chs[k2].c[A[b]];
+                if (m === 0) sure |= 1 << b; else if (m < 1) { unc.push(b); q.push(m); }
+              }
+              for (let u = 0; u < 1 << unc.length; u++) {
+                let pp = v.p, bits = sure;
+                for (let j = 0; j < unc.length; j++) if ((u >> j) & 1) { pp *= 1 - q[j]; bits |= 1 << unc[j]; } else pp *= q[j];
+                D.set(bits, (D.get(bits) || 0) + pp);
+              }
+              tot += v.p;
+            }
+            tab[n][r][gi] = { D: Array.from(D), tot, H: e.H };
+          }
+        };
+        for (let r = gt >= 0 ? 1 : RN; r <= RN; r++) {
+          let cur = new Map([['', { m: new Uint8Array(nC), chosen: [], used: new Uint8Array(nT), gi: 0, p: 1 }]]);
+          for (let n = 0; n <= maxSide; n++) {
+            record(n, r, cur);
+            if (n === maxSide) break;
+            const next = new Map();
+            const add = (m, chosen, used, gi, p) => {
+              const key = chosen.join(',') + '|' + m.join(',') + '|' + gi, x = next.get(key);
+              if (x) x.p += p; else next.set(key, { m, chosen, used, gi, p });
+            };
+            for (const x of cur.values()) {
+              const off = gt >= 0 && !x.used[gt] && n + 1 >= r;   // the other side took the shared group before this draw
+              let R = 0;
+              for (let c = 0; c < nC; c++) R += (cl[c].n - x.m[c]) * cl[c].w;
+              for (let t = 0; t < nT; t++) if (!x.used[t] && !(off && t === gt)) R += tr[t].w;
+              for (let c = 0; c < nC; c++) {
+                const left = cl[c].n - x.m[c]; if (left <= 0) continue;
+                const m = x.m.slice(); m[c]++;
+                add(m, x.chosen, x.used, x.gi, x.p * left * cl[c].w / R);
+              }
+              for (let k = 0; k < chs.length; k++) {
+                const c = chs[k];
+                if (x.used[c.t] || (off && c.t === gt)) continue;
+                const used = x.used.slice(); used[c.t] = 1;
+                add(x.m, x.chosen.concat([k]).sort((a, b) => a - b), used, c.t === gt ? n + 1 : x.gi, x.p * c.w / R);
+              }
+            }
+            cur = next;
+          }
+        }
+        return tab;
       }
-      return acc / rolls;
+      const TP = sideTables(0), TS = sideTables(1);
+      // the prefix / suffix order of the draws (sides never run out here): weight per pair of tables
+      const pairs = new Map();
+      const pair = (nP, rP, iP, nS, rS, iS, w) => { const k = nP + ',' + rP + ',' + iP + ',' + nS + ',' + rS + ',' + iS; pairs.set(k, (pairs.get(k) || 0) + w); };
+      const seq = (K, posP, posS, p) => {
+        const k = posP.length + posS.length;
+        if (k === K) {
+          const nP = posP.length, nS = posS.length;
+          pair(nP, RN, 0, nS, RN, 0, p);
+          if (gs) {
+            for (let i = 1; i <= nP; i++) pair(nP, RN, i, nS, 1 + posS.filter((x) => x < posP[i - 1]).length, 0, p);
+            for (let j = 1; j <= nS; j++) pair(nP, 1 + posP.filter((x) => x < posS[j - 1]).length, 0, nS, RN, j, p);
+          }
+          return;
+        }
+        const oP = posP.length < maxSide, oS = posS.length < maxSide;
+        if (oP) seq(K, posP.concat([k]), posS, p * (oS ? pre : 1));
+        if (oS) seq(K, posP, posS.concat([k]), p * (oP ? 1 - pre : 1));
+      };
+      for (const K of counts) seq(Math.min(K, 2 * maxSide), [], [], 1 / counts.length);
+      let total = 0;
+      for (const [k, w] of pairs) {
+        const [nP, rP, iP, nS, rS, iS] = k.split(',').map(Number), a = TP[nP][rP][iP], b = TS[nS][rS][iS];
+        if (!a || !b) continue;
+        let v = 0;
+        for (const [ua, pa] of a.D) for (const [ub, pb] of b.D) v += pa * pb * fin(ua | ub);
+        total += w * v;
+        if (hits) {
+          for (let i = 0; i < a.H.length; i++) hits.p[i] += w * a.H[i] * b.tot;
+          for (let i = 0; i < b.H.length; i++) hits.s[i] += w * b.H[i] * a.tot;
+        }
+      }
+      return Math.min(1, total);
+    }
+    /** rareExact with both sides in one state (any pool; slow when many groups have distinct weights, so only for the pools rareExact hands over). A draw takes an affix with chance f / (weight of the side's affixes whose group
+     *  is still free): the game draws again when it hits a group already on the item. Groups that matter (an affix meets a condition, or the group is on both sides) are
+     *  tracked one by one, with which affix of them was drawn (affixes of a group with the same condition chances merged); every other group only changes the
+     *  remaining weight, so those are lumped per side by group weight and only "how many of that weight are gone" is kept: groups of one class are interchangeable.
+     *  The draws do not depend on the affix count, so the states are stepped one draw at a time and count k is weighed in after k draws.
+     *  hits ({p, s} arrays over el.p / el.s, optional): adds each affix's chance to appear (within a class, a given group is still free with chance left / n). */
+    function rareSteps(code, el, conds, autoList, sd, hits) {
+      const counts = items[code].t === 'jewl' ? CONFIG.rareJewelCounts : CONFIG.rareAffixCounts, nc = conds.length, maxSide = CONFIG.rareMaxPerSide, pre = CONFIG.rarePrefixChance;
+      const maxK = Math.max.apply(null, counts), pK = new Float64Array(maxK + 2);
+      for (const k of counts) pK[k] += 1 / counts.length;
+      const pMore = new Float64Array(maxK + 2);   // P(count > j)
+      for (let j = maxK; j >= 0; j--) pMore[j] = pMore[j + 1] + pK[j + 1];
+      const sides = [el.p, el.s], cps = sides.map((L) => L.map((a) => conds.map((c) => condProb(a, c))));
+      const G = new Map();
+      sides.forEach((L, s) => L.forEach((a, i) => {
+        let g = G.get(a.g); if (!g) G.set(a.g, (g = { w: [0, 0], rel: false, mem: [[], []] }));
+        g.w[s] += a.f; g.mem[s].push(i); if (cps[s][i].some((x) => x > 0)) g.rel = true;
+      }));
+      // tracked groups and their choices; the other groups as classes {s, w, n, mem}
+      const T = [], ch = [], cls = [];
+      for (const g of G.values()) {
+        if (g.rel || (g.w[0] > 0 && g.w[1] > 0)) {
+          const t = T.length; T.push(g);
+          for (let s = 0; s < 2; s++) {
+            const by = new Map();
+            for (const i of g.mem[s]) { const k = cps[s][i].join(','); const c = by.get(k); if (c) c.w += sides[s][i].f; else by.set(k, { t, s, w: sides[s][i].f, c: cps[s][i] }); }
+            for (const c of by.values()) ch.push(c);
+          }
+        } else {
+          const s = g.w[0] > 0 ? 0 : 1;
+          let c = cls.find((x) => x.s === s && x.w === g.w[s]);
+          if (!c) cls.push((c = { s, w: g.w[s], n: 0, mem: [] }));
+          c.n++; for (const i of g.mem[s]) c.mem.push(i);
+        }
+      }
+      const nC = cls.length, nT = T.length;
+      const valMemo = new Map(), miss = new Float64Array(nc);
+      const val = (chosen) => {   // P(all conditions) with these choices drawn (the value of one item)
+        const key = chosen.join(',');
+        let v = valMemo.get(key);
+        if (v !== undefined) return v;
+        miss.fill(1);
+        for (const x of chosen) { const c = ch[x].c; for (let i = 0; i < nc; i++) miss[i] *= 1 - c[i]; }
+        v = 0;
+        for (const au of autoList) for (const st of sd) {
+          let z = st.p;
+          for (let i = 0; i < nc; i++) if (!((st.mask >> i) & 1)) z *= 1 - miss[i] * (1 - au.c[i]);
+          v += au.w * z;
+        }
+        valMemo.set(key, v);
+        return v;
+      };
+      // a state: m (removed groups per class), chosen (choice indices, ascending), used (tracked group taken), p
+      let cur = new Map([['|', { m: new Uint8Array(nC), chosen: [], used: new Uint8Array(nT), p: 1 }]]);
+      const add = (map, m, chosen, used, p) => {
+        const key = chosen.join(',') + '|' + m.join('');
+        const x = map.get(key);
+        if (x) x.p += p; else map.set(key, { m, chosen, used, p });
+      };
+      let total = 0;
+      const R = [0, 0], cnt = [0, 0];
+      for (let j = 0; j <= maxK; j++) {
+        if (pK[j] > 0) { let v = 0; for (const x of cur.values()) v += x.p * val(x.chosen); total += pK[j] * v; }
+        if (j === maxK || pMore[j] <= 0) break;
+        const next = new Map();
+        for (const x of cur.values()) {
+          R[0] = R[1] = 0; cnt[0] = cnt[1] = 0;
+          for (let c = 0; c < nC; c++) { R[cls[c].s] += (cls[c].n - x.m[c]) * cls[c].w; cnt[cls[c].s] += x.m[c]; }
+          for (let t = 0; t < nT; t++) if (!x.used[t]) { R[0] += T[t].w[0]; R[1] += T[t].w[1]; }
+          for (const i of x.chosen) cnt[ch[i].s]++;
+          const open0 = cnt[0] < maxSide && R[0] > 0, open1 = cnt[1] < maxSide && R[1] > 0;
+          if (!open0 && !open1) { add(next, x.m, x.chosen, x.used, x.p); continue; }   // both sides closed: the item is done
+          const ps = [open0 ? (open1 ? pre : 1) : 0, open1 ? (open0 ? 1 - pre : 1) : 0];
+          for (let s = 0; s < 2; s++) {
+            if (!ps[s]) continue;
+            const q = x.p * ps[s] / R[s];
+            for (let c = 0; c < nC; c++) {
+              const C = cls[c], left = C.n - x.m[c];
+              if (C.s !== s || left <= 0) continue;
+              if (hits) { const h = hits[s ? 's' : 'p'], f = pMore[j] * q * left / C.n; for (const i of C.mem) h[i] += f * sides[s][i].f; }
+              const m = x.m.slice(); m[c]++;
+              add(next, m, x.chosen, x.used, q * left * C.w);
+            }
+            for (let t = 0; t < nT; t++) {
+              if (x.used[t] || !T[t].w[s]) continue;
+              if (hits) { const h = hits[s ? 's' : 'p'], f = pMore[j] * q; for (const i of T[t].mem[s]) h[i] += f * sides[s][i].f; }
+            }
+            for (let k = 0; k < ch.length; k++) {
+              const c = ch[k];
+              if (c.s !== s || x.used[c.t]) continue;
+              const used = x.used.slice(); used[c.t] = 1;
+              const chosen = x.chosen.concat([k]).sort((a, b) => a - b);
+              add(next, x.m, chosen, used, q * c.w);
+            }
+          }
+        }
+        cur = next;
+      }
+      return total;
     }
 
-    /** "Sample once, reweight many" rare path. The rare loop's draws do not depend on the conditions (only on weights, groups, counts), so the sampled
-     *  affix sets of a pool are recorded once (same RNG order as rareMC: identical sets), deduplicated with counts; any combination of conditions is then
-     *  a cheap reweighting with condProb. Cache per pool (el.sig + jewel + rolls + seed), bounded. */
-    const sampCache = new Map(), SAMP_MAX = 96, rareMemo = new Map();
-    function rareSamples(code, el, rolls, seed) {
-      const jw = items[code].t === 'jewl';
-      const ck = (jw ? 'J' : '') + rolls + '|' + seed + '|' + el.sig;
-      let sm = sampCache.get(ck);
-      if (sm) return sm;
-      const rng = mulberry32(seed), nP = el.p.length;
-      function side(list) {
-        const cum = new Float64Array(list.length);
-        let t = 0;
-        for (let i = 0; i < list.length; i++) { t += list[i].f; cum[i] = t; }
-        return { list, cum, total: t, groups: list.map((a) => a.g) };
-      }
-      const P = side(el.p), S = side(el.s), counts = jw ? CONFIG.rareJewelCounts : CONFIG.rareAffixCounts, used = [], uniq = new Map();
-      function draw(Sd) {   // as rareMC
-        if (!Sd.list.length) return -1;
-        for (let tries = 0; tries < 40; tries++) {
-          const r = rng() * Sd.total;
-          let lo = 0, hi = Sd.cum.length - 1;
-          while (lo < hi) { const mid = (lo + hi) >> 1; if (Sd.cum[mid] > r) hi = mid; else lo = mid + 1; }
-          if (used.indexOf(Sd.groups[lo]) < 0) return lo;
-        }
-        let tot = 0;
-        for (let i = 0; i < Sd.list.length; i++) if (used.indexOf(Sd.groups[i]) < 0) tot += Sd.list[i].f;
-        if (tot <= 0) return -1;
-        let r = rng() * tot;
-        for (let i = 0; i < Sd.list.length; i++) if (used.indexOf(Sd.groups[i]) < 0 && (r -= Sd.list[i].f) < 0) return i;
-        return -1;
-      }
-      if (nP || S.list.length) for (let n = 0; n < rolls; n++) {
-        const count = counts[floor(rng() * counts.length)], pick = [];
-        used.length = 0;
-        let np = 0, ns = 0, pFull = false, sFull = false, k = 0;
-        while (k < count && !(pFull && sFull)) {
-          const suffix = !sFull && (pFull || !(rng() < CONFIG.rarePrefixChance));
-          const Sd = suffix ? S : P;
-          const idx = draw(Sd);
-          if (idx < 0) { if (suffix) sFull = true; else pFull = true; continue; }
-          used.push(Sd.groups[idx]);
-          pick.push(suffix ? nP + idx : idx);
-          if (suffix) { if (++ns >= CONFIG.rareMaxPerSide) sFull = true; } else if (++np >= CONFIG.rareMaxPerSide) pFull = true;
-          k++;
-        }
-        pick.sort((a, b) => a - b);
-        const key = pick.join(','), u = uniq.get(key);
-        if (u) u.n++; else uniq.set(key, { n: 1, pick });
-      }
-      let tot = 0; for (const u of uniq.values()) tot += u.pick.length;
-      const off = new Uint32Array(uniq.size + 1), cnt = new Float64Array(uniq.size), data = new Int16Array(tot);
-      let j = 0, o = 0;
-      for (const u of uniq.values()) { cnt[j] = u.n; data.set(u.pick, o); o += u.pick.length; off[++j] = o; }
-      // inverted index: affix -> samples that contain it (a reweighting then only visits samples with a picked affix that matters to the conditions)
-      const na = nP + S.list.length, ioff = new Uint32Array(na + 1), idat = new Int32Array(tot);
-      for (let k = 0; k < tot; k++) ioff[data[k] + 1]++;
-      for (let a = 0; a < na; a++) ioff[a + 1] += ioff[a];
-      const fill = ioff.slice(0, na);
-      for (let u = 0; u < uniq.size; u++) for (let k = off[u]; k < off[u + 1]; k++) idat[fill[data[k]]++] = u;
-      sm = { rolls, na, off, cnt, data, ioff, idat, stamp: new Int32Array(uniq.size), gen: 0, size: uniq.size };
-      if (sampCache.size >= SAMP_MAX) sampCache.delete(sampCache.keys().next().value);
-      sampCache.set(ck, sm);
-      return sm;
-    }
-    /** P(item of rare quality has all conditions) from the recorded samples; same inputs and result as affixProb(code, alvl, 'rare', conds, opts)
-     *  (staff mods, extras and the automagic row handled alike), the threshold only enters through condProb / staffDist / the auto list. */
+    /** P(item of rare quality has all conditions): affixProb(code, alvl, 'rare', conds, opts) (kept for the item card and the tests) */
     function rareProbFromSamples(code, alvl, conds, opts) {
-      const rolls = (opts && opts.rolls) || 200000, seed = (opts && opts.seed) || 12345;
-      const ilvl = opts && opts.ilvl !== undefined ? opts.ilvl : minIlvlForAlvl(items[code], alvl);
-      const el = eligible(code, alvl, true, ilvl);
-      if (!el.sig) el.sig = el.p.map((a) => a.i + ':' + a.f + (a.mods[0] && a.mods[0][0] === 'sock' ? 's' + a.mods[0][3] : '')).join(',') + '/' + el.s.map((a) => a.i + ':' + a.f + (a.mods[0] && a.mods[0][0] === 'sock' ? 's' + a.mods[0][3] : '')).join(',') + '/' + el.auto.map((a) => a.g + a.n + ':' + a.f).join(',');
-      if (!el.p.length && !el.s.length) return 0;
-      const sd0 = staffDist(code, staffBase(ilvl === null ? 99 : ilvl), conds, false);
-      const ex = extrasDist(code, 'rare', ilvl === null ? 99 : ilvl, opts && opts.diff, conds);
-      const sd = ex.dist.length === 1 && ex.dist[0].mask === 0 ? sd0 : orConv(sd0, ex.dist);
-      const nc = conds.length;
-      let autoList;
-      if (el.auto.length) { let W = 0; for (const a of el.auto) W += a.f; autoList = el.auto.map((a) => ({ w: a.f / W, c: conds.map((c) => condProb(a, c)) })); }
-      else autoList = [{ w: 1, c: new Array(nc).fill(0) }];
-      const sk = (sd0.length === 1 && sd0[0].mask === 0 ? '' : code + staffBase(ilvl === null ? 99 : ilvl)) + '|' + ex.sig;   // as affixProb's key: identical pools share one result
-      const rk = [items[code].t === 'jewl' ? 'J' : '', items[code].cs ? code : '', rolls, seed, JSON.stringify(conds), el.sig, sk].join('|');
-      if (rareMemo.has(rk)) return rareMemo.get(rk);
-      const sm = rareSamples(code, el, rolls, seed);
-      const cps = el.p.concat(el.s).map((a) => conds.map((c) => condProb(a, c)));
-      const miss = new Float64Array(nc);
-      const val = () => {   // P(all conditions) given the running miss[] of this sample
-        let q = 0;
-        for (const au of autoList) {
-          for (const st of sd) {
-            let z = st.p;
-            for (let i = 0; i < nc; i++) if (!((st.mask >> i) & 1)) z *= 1 - miss[i] * (1 - au.c[i]);
-            q += au.w * z;
-          }
-        }
-        return q;
-      };
-      miss.fill(1);
-      const q0 = val();   // a sample with no relevant affix
-      let acc = 0, seen = 0;
-      const gen = ++sm.gen, stamp = sm.stamp;
-      for (let a = 0; a < sm.na; a++) {
-        const ca = cps[a]; let rel = false;
-        for (let i = 0; i < nc; i++) if (ca[i] > 0) { rel = true; break; }
-        if (!rel) continue;
-        for (let k = sm.ioff[a]; k < sm.ioff[a + 1]; k++) {
-          const u = sm.idat[k];
-          if (stamp[u] === gen) continue;
-          stamp[u] = gen;
-          for (let i = 0; i < nc; i++) miss[i] = 1;
-          for (let j = sm.off[u]; j < sm.off[u + 1]; j++) { const c = cps[sm.data[j]]; for (let i = 0; i < nc; i++) miss[i] *= 1 - c[i]; }
-          acc += sm.cnt[u] * val(); seen += sm.cnt[u];
-        }
-      }
-      acc += (sm.rolls - seen) * q0;
-      acc /= sm.rolls;
-      if (rareMemo.size >= 5000) rareMemo.delete(rareMemo.keys().next().value);
-      rareMemo.set(rk, acc);
-      return acc;
+      return affixProb(code, alvl, 'rare', conds, opts);
     }
+
     /** Odds for the builder's item card, over the bases `codes` that can drop at item level ilvl (dropsAt; a base above it is skipped, like in the affix table): for every quality
      *  the chance that an item of that quality carries all `conds` (total), each single condition (perCond[i]) and each group of condition indices
      *  (o.groups = [[0, 2], ...] -> perGroup). Mean over the bases, or sum(w p) / sum(w) with `weights` (Map / object code -> weight; weight 0 bases are skipped).
-     *  Magic and the plain qualities are exact (affixProb); rare is reweighted from the recorded samples (o.rolls per pool, default 50000, o.seed, o.diff). */
+     *  Every quality is exact (affixProb; o.diff). */
     function cardOdds(codes, conds, ilvl, qualities, weights, o) {
       o = o || {};
-      const rolls = o.rolls || 50000, groups = o.groups || [], nc = conds.length;
+      const groups = o.groups || [], nc = conds.length;
       const wget = (c) => (weights ? (weights instanceof Map ? weights.get(c) : weights[c]) || 0 : 1);
       const ws = codes.map((c) => (dropsAt(c, ilvl) ? wget(c) : 0)), W = ws.reduce((a, b) => a + b, 0);
       const mk = () => Object.fromEntries(qualities.map((q) => [q, 0]));
@@ -1576,8 +1640,7 @@
         const it = items[code], il = ilOf(code, ilvl), al = affixLevel(il, it), w = ws[bi] / W;
         for (const q of qualities) for (const [dst, cs] of sets) {
           if (!cs.length) { dst[q] += w; continue; }   // an empty group requires nothing
-          const op = { ilvl: il, diff: o.diff, rolls, seed: o.seed };
-          dst[q] += w * (q === 'rare' ? rareProbFromSamples(code, al, cs, op) : affixProb(code, al, q, cs, op));
+          dst[q] += w * affixProb(code, al, q, cs, { ilvl: il, diff: o.diff });
         }
       });
       return { total, perCond, perGroup };
@@ -1707,7 +1770,7 @@
     }
 
     /** Ranked list of kill sources for "base(s) + quality + affix conditions".
-     *  o = {codes, quality:'magic'|'rare', conds:[{key,min}], mf, diff(-1 all), act(0 all), area(0 all), rolls}  */
+     *  o = {codes, quality:'magic'|'rare', conds:[{key,min}], mf, diff(-1 all), act(0 all), area(0 all)}  */
     function affixSearch(ctx, o, progress) {
       const codes = new Set(o.codes);
       const qn = o.quality, qf = QFIELD[qn];
@@ -1737,7 +1800,7 @@
       const probs = new Map();
       let done = 0;
       for (const [pk, [code, alvl, ilvl, diff]] of need) {
-        probs.set(pk, o.prune && !planCombo(code, ilvl, qn, o.conds, { diff }).ok ? 0 : affixProb(code, alvl, qn, o.conds, { rolls: o.rolls, ilvl, diff }));   // prune: structurally impossible pools are exactly 0
+        probs.set(pk, o.prune && !planCombo(code, ilvl, qn, o.conds, { diff }).ok ? 0 : affixProb(code, alvl, qn, o.conds, { ilvl, diff }));   // prune: structurally impossible pools are exactly 0
         done++;
         if (progress && (done % 3 === 0 || done === need.size)) progress(done, need.size);
       }
@@ -1760,7 +1823,7 @@
     }
 
     // ---------------- item builder (UI tab 2): types, affix catalogue, appearance odds, feasibility / levels of a combination ----------------
-    // Nothing here changes a rule: it re-uses eligible(), condProb(), staffDist(), affixLevel(), the magic split and the rare loop (rareMC) and
+    // Nothing here changes a rule: it re-uses eligible(), condProb(), staffDist(), affixLevel(), the magic split and the rare loop (rareExact) and
     // answers builder questions from them. A condition is {key, min[, le]}: stat key >= min (le: <= min, for stats where lower is better).
     const tierOf = (idx) => Math.floor(idx / CONFIG.staffMods.perTier) + 1;
     /** staff mod tiers a drop of item level il can roll */
@@ -1967,8 +2030,8 @@
     }
 
     /** P(each affix row appears) on one base of a given item level and quality: Map id -> p. Magic: exact (the magic split + group exclusion,
-     *  same model as affixProb); rare: the rare loop Monte Carlo (rareMC) counting picks; automagic rows and staff mod skills as in affixProb. */
-    function affixAppearance(code, ilvl, quality_, rolls, seed, diff) {
+     *  same model as affixProb); rare: exact (rareExact with no conditions, adding up each affix's chance); automagic rows and staff mod skills as in affixProb. */
+    function affixAppearance(code, ilvl, quality_, diff, o) {
       const it = items[code], rare = quality_ === 'rare';
       const el = eligible(code, affixLevel(ilvl, it), rare, ilvl);
       const out = new Map();
@@ -1992,10 +2055,10 @@
       }
       if (isPlain(quality_) || (!el.p.length && !el.s.length)) return out;
       if (rare) {
-        const hits = { p: new Float64Array(el.p.length), s: new Float64Array(el.s.length) }, n = rolls || 50000;
-        rareMC(code, el, [], [{ w: 1, c: [] }], n, seed || 12345, [{ p: 1, mask: 0 }], hits);
-        el.p.forEach((a, i) => out.set(affId(a), hits.p[i] / n));
-        el.s.forEach((a, i) => out.set(affId(a), hits.s[i] / n));
+        const hits = { p: new Float64Array(el.p.length), s: new Float64Array(el.s.length) };
+        (o && o.rareSteps ? rareSteps : rareExact)(code, el, [], [{ w: 1, c: [] }], [{ p: 1, mask: 0 }], hits);
+        el.p.forEach((a, i) => out.set(affId(a), hits.p[i]));
+        el.s.forEach((a, i) => out.set(affId(a), hits.s[i]));
         return out;
       }
       const split = CONFIG.magicSplit;
@@ -2045,7 +2108,7 @@
     }
 
     /** The builder's affix table for a set of bases at an item level: catalogue rows with availability at that level and appearance odds for magic (exact)
-     *  and rare (Monte Carlo, o.rolls per base). Only bases that can drop at ilvl (dropsAt) count, for the odds and for availability (nOn).
+     *  and rare (exact). Only bases that can drop at ilvl (dropsAt) count, for the odds and for availability (nOn).
      *  Odds are the mean over those bases (a base that cannot roll the affix counting 0), every base counted equally,
      *  or with o.weights (Map / object code -> weight, e.g. baseDropWeights) the weighted mean sum(w * p) / sum(w). Each row also carries the per-base odds
      *  (pb.m / pb.r, in the order of `codes`; 0 for a base above ilvl) for the hover. */
@@ -2058,7 +2121,7 @@
       for (const code of codes) {
         if (!dropsAt(code, ilvl)) continue;
         const il = ilOf(code, ilvl);
-        for (const q of quals) per[q].set(code, affixAppearance(code, il, q, o.rolls, o.seed, o.diff));
+        for (const q of quals) per[q].set(code, affixAppearance(code, il, q, o.diff));
       }
       const wget = (c) => (o.weights ? (o.weights instanceof Map ? o.weights.get(c) : o.weights[c]) || 0 : 1);
       const ws = codes.map((c) => (dropsAt(c, ilvl) ? wget(c) : 0)), W = ws.reduce((a, b) => a + b, 0);

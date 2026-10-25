@@ -1871,8 +1871,8 @@ def main():
     for c in CD["cases"]:
         for q, d in c["q"].items():
             tag = "item card odds, %s ilvl %d (%d bases, %d picks), %s" % (c["name"], c["ilvl"], c["n"], c["conds"], q)
-            check(tag + ": total == affixProb averaged over the bases" + (" (exact)" if q != "rare" else " (rare: sample-reweighted, same seed and rolls)"), d["got"], d["want"], 1e-12 if q != "rare" else 1e-9)
-            check(tag + ": every single stat and group figure == affixProb averaged", 1 if all((abs(a - b) <= (1e-12 if q != "rare" else 1e-9) * max(abs(b), 1e-300) if b else abs(a) < 1e-12) for a, b in d["cond"] + d["grp"]) else 0, 1, 0)
+            check(tag + ": total == affixProb averaged over the bases (exact)", d["got"], d["want"], 1e-12)
+            check(tag + ": every single stat and group figure == affixProb averaged", 1 if all((abs(a - b) <= 1e-12 * max(abs(b), 1e-300) if b else abs(a) < 1e-12) for a, b in d["cond"] + d["grp"]) else 0, 1, 0)
             check(tag + ": total <= every single stat and group figure", d["ord"], 1, 0)
             check(tag + ": raising a threshold never raises the odds", d["mono"], 1, 0)
     # ---- affix families and per-character-level stats ----
@@ -1893,9 +1893,26 @@ def main():
         tag = "family odds %s / %s (%s, %d tier rows)" % (o["t"], o["name"], o["side"], o["n"])
         check(tag + ": magic == sum of the tier rows", o["fam"], min(1.0, o["tierSum"]), 1e-12)
         check(tag + ": magic == affixProb of a condition only this family can meet (exact)", o["fam"], o["ref"], 1e-9)
-        if o["refR"] > 0.003:
-            check(tag + ": rare (sum of tier picks) within 6% of the rare estimate of a condition only this family can meet", 1 if abs(o["famR"] - o["refR"]) <= 0.06 * o["refR"] else 0, 1, 0, "%.5f vs %.5f" % (o["famR"], o["refR"]))
+        check(tag + ": rare (sum of the tier rows' appearance) == affixProb of a condition only this family can meet (both exact)", o["famR"], o["refR"], 1e-9)
     check("family odds checked on %d single-stat families of 4 types" % len(FM["odds"]), 1 if len(FM["odds"]) >= 20 else 0, 1, 0)
+    # ---- exact rare odds: the per-side method (rareExact) == the one-state method (rareSteps) ----
+    RX = js["rareExact"]
+    for c in RX["cases"]:
+        tag = "exact rare, %s (%s ilvl %d)" % (c["tag"], c["code"], c["il"])
+        if c.get("missing"):
+            check(tag + ": stats found", 0, 1, 0); continue
+        check(tag + ": per-side method == one-state method", c["p"], c["q"], 1e-12, "%.6g" % c["p"])
+        if "impossible" in c["tag"]:
+            check(tag + ": exactly 0", c["p"], 0, 0)
+        else:
+            check(tag + ": above 0 (a combination the game can roll; Monte Carlo used to give 0 for the 5-affix one)", 1 if c["p"] > 0 else 0, 1, 0, "%.4g" % c["p"])
+    for a in RX["app"]:
+        tag = "exact rare appearance, %s (%s ilvl %d, %d rows)" % (a["tag"], a["code"], a["il"], a["n"])
+        check(tag + ": per-side method == one-state method (max abs diff < 1e-12)", a["d"], 0, 0, "%.1e" % a["d"])
+        cnt = js["config"]["rareJewelCounts" if a["code"] == "jew" else "rareAffixCounts"]
+        mean = sum(cnt) / len(cnt) / 2   # both sides have room for every draw here, so each draw is a prefix or a suffix half the time
+        check(tag + ": expected prefixes and suffixes == mean affix count / 2 (%.4g; max abs diff < 1e-12)" % mean, max(abs(a["sp"] - mean), abs(a["ss"] - mean)), 0, 0)
+    check("exact rare: the shared-group test pool really has suffixes in a prefix group (%d)" % RX["shared"], 1 if RX["shared"] > 0 else 0, 1, 0)
     L = FM["lvl"]
     check("per-level stats: the parameter is the value (Fool's: max damage 4, Attack Rating 33; min = max = parameter)", 1 if L["has"] and [[m[1], m[2], m[3]] for m in L["fool"]] == [["4", 4, 4], ["33", 33, 33]] else 0, 1, 0, str(L["fool"]))
     check("per-level condition: Fool's (4) meets max-damage-per-level >= 4 but not >= 5; Grinding (6) meets >= 5 but not >= 7", 1 if (L["p4"], L["p5"], L["g5"], L["g7"]) == (1, 0, 1, 0) else 0, 1, 0, str((L["p4"], L["p5"], L["g5"], L["g7"])))

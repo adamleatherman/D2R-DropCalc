@@ -736,6 +736,44 @@
       fam.lvlKeys = lk.map((k) => [k, E.perLevelDiv(k)]);
       res.fam = fam;
     }
+    // ---- exact rare odds: rareExact (each side alone) == rareSteps (both sides in one state), on real pools and on a pool with a group on both sides ----
+    {
+      const RX = res.rareExact = { cases: [], app: [] };
+      const keyOf = (Em, code, re) => { const x = Em.builderStats([code]).find((s) => re.test(s.key)); return x ? x.key : null; };
+      const one = (Em, tag, code, il, cs) => {
+        const conds = cs.map(([re, m]) => ({ key: keyOf(Em, code, re), min: m }));
+        if (conds.some((c) => !c.key)) { RX.cases.push({ tag, code, il, missing: true }); return; }
+        const al = Em.affixLevel(il, Em.items[code]);
+        const p = Em.affixProb(code, al, 'rare', conds, { ilvl: il }), q = Em.affixProb(code, al, 'rare', conds, { ilvl: il, rareSteps: true });
+        RX.cases.push({ tag, code, il, n: conds.length, p, q });
+      };
+      const app = (Em, tag, code, il) => {
+        const a = Em.affixAppearance(code, il, 'rare'), b = Em.affixAppearance(code, il, 'rare', undefined, { rareSteps: true });
+        let d = 0, sp = 0, ss = 0;
+        for (const [k, v] of a) { d = Math.max(d, Math.abs(v - (b.get(k) || 0))); if (k[0] === 'p') sp += v; else if (k[0] === 's') ss += v; }
+        RX.app.push({ tag, code, il, n: a.size, d, sp, ss });
+      };
+      const RES = (e) => [[/^Fire Resist/, 31], [/^Lightning Resist/, 31], [/^Poison Resist/, 31], [/^Cold Resist/, 31]].slice(0, e);
+      one(E, 'boots FRW 30 + fire res 31', 'utb', 99, [[/Faster Run/, 30], [/^Fire Resist/, 31]]);
+      one(E, 'boots 3 resist prefixes + FRW 30 + MF 16 (5 affixes)', 'utb', 99, RES(3).concat([[/Faster Run/, 30], [/Magic Items/, 16]]));
+      one(E, 'boots 4 resist prefixes (only 3 prefixes fit: impossible)', 'utb', 99, RES(4));
+      one(E, 'cap fire res 10', 'cap', 60, [[/^Fire Resist/, 10]]);
+      one(E, 'monarch life 30 + fire res 20', 'uit', 85, [[/^\+# to Life$/, 30], [/^Fire Resist/, 20]]);
+      one(E, 'ring mana 10 + fire res 20', 'rin', 85, [[/^\+# to Mana$/, 10], [/^Fire Resist/, 20]]);
+      one(E, 'jewel enhanced damage 30', 'jew', 85, [[/Enhanced Damage/, 30]]);
+      app(E, 'boots', 'utb', 99); app(E, 'cap', 'cap', 60); app(E, 'ring', 'rin', 85); app(E, 'jewel', 'jew', 85);
+      // RotW group 307 (Virulent / of Acidity ...) is on both sides but not spawnable; made spawnable here to run the shared-group path
+      const dataS = JSON.parse(JSON.stringify(data));
+      for (const a of dataS.prefixes.concat(dataS.suffixes)) if (a.g === 307) a.sp = 1;
+      const ES = Engine.create(dataS);
+      { const el = ES.eligible('utb', ES.affixLevel(99, ES.items.utb), true, 99), pg = new Set(el.p.map((a) => a.g)); RX.shared = el.s.filter((a) => pg.has(a.g)).length; }
+      one(ES, 'shared group: boots -poison res 2', 'utb', 99, [[/Enemy Poison Resistance/, 2]]);
+      one(ES, 'shared group: boots -poison res 3 + FRW 30', 'utb', 99, [[/Enemy Poison Resistance/, 3], [/Faster Run/, 30]]);
+      one(ES, 'shared group: boots fire res 31 + FRW 30', 'utb', 99, [[/^Fire Resist/, 31], [/Faster Run/, 30]]);
+      one(ES, 'shared group: two pierces of the one group (impossible)', 'utb', 99, [[/Enemy Poison Resistance/, 1], [/Enemy Fire Resistance/, 1]]);
+      app(ES, 'shared group: boots', 'utb', 99);
+      E.CONFIG.gameMode = 'rotw';
+    }
     res.sourcesCount = E.sources(ctxFor(1, 1)).length;
     res.config = E.CONFIG;
   } catch (e) { res.errors.push(String(e.stack || e)); }

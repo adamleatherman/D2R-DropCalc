@@ -318,7 +318,7 @@
   const showOdds = () => $('odds2').checked;
 
   const cols2 = srcCols.concat(QS_ALL.map((q) => ({ k: 'p' + q, label: 'P(' + (q === 'sup' ? 'superior' : q === 'low' ? 'low' : q) + ')', show: () => bd.farmQ.indexOf(q) >= 0,
-    note: 'Chance per kill of a ' + QCOLN[q].toUpperCase() + ' item of the type with the combination (' + (q === 'rare' ? 'Monte Carlo' : 'exact') + ').', get: (r) => r.pq[q] || 0, fmt: (r) => odds(r.pq[q] || 0) })), [
+    note: 'Chance per kill of a ' + QCOLN[q].toUpperCase() + ' item of the type with the combination (exact).', get: (r) => r.pq[q] || 0, fmt: (r) => odds(r.pq[q] || 0) })), [
     { k: 'ptot', label: 'P per kill', note: 'Chance that one kill drops a matching item (sum over every base of the type and the possible qualities; shown as odds, sorts by probability).', get: (r) => r.pTotal, fmt: (r) => odds(r.pTotal) },
     { k: 'runs', label: 'kills/run', get: (r) => r.src.perRun, fmt: (r) => r.src.herald ? 'n/a' : r.src.perRun < 10 ? r.src.perRun.toFixed(2) : r.src.perRun.toFixed(0) },
     { k: 'perrun', label: 'P per run', note: 'Chance of a matching item in one run (rough model; shown as odds).', get: (r) => r.perRun, fmt: (r) => odds(r.perRun) },
@@ -418,7 +418,7 @@
     { k: 'grp', label: 'Excludes', l: 1, note: 'Affixes of the same group never appear together on one item. The group is named after its first stat.', get: (r) => r.groupName, fmt: (r) => r.g ? r.groupName : '' },
     { k: 'qual', label: 'Quality', l: 1, note: 'Qualities the row can occur on: L low quality, N normal, S superior, M magic, R rare.', get: (r) => r.quals.length * 10 + (r.rare ? 1 : 0), fmt: (r) => r.quals.map((q) => QAB[q]).join(' ') },
   ].concat(QS_ALL.map((q) => ({ k: 'o' + q, show: () => showOdds() && oddsQ().indexOf(q) >= 0, get label() { return 'Odds (' + QCOLN[q] + ', ' + (bd.wts ? 'weighted' : 'avg') + ')'; },
-    get note() { return 'Chance that a ' + QCOLN[q] + ' item of the type carries this ' + (q === 'rare' ? 'at the item level above. Monte Carlo (noise on rare affixes is a few percent of the value). ' : 'at the item level above. Exact. ') + avgNote() + ' Hover a cell for the per-base odds.'; },
+    get note() { return 'Chance that a ' + QCOLN[q] + ' item of the type carries this ' + 'at the item level above. Exact. ' + avgNote() + ' Hover a cell for the per-base odds.'; },
     get: (r) => (r.ap && r.ap[q]) || 0, fmt: (r) => odds((r.ap && r.ap[q]) || 0), tip: (r) => oddsTip(r, q) })));
   /** how the odds columns were averaged over the bases (plain average, or weighted by drop rate in the chosen area / monster) */
   function avgNote() {
@@ -483,15 +483,14 @@
     requestOdds();
     if (!bd.codes.length) { bd.rows = []; renderTable(); return; }
     const ilvl = effIlvl(), codes = bd.codes.slice(), quals = oddsQ(), diff = selDiff();
-    const rolls = Math.min(parseInt($('mc2').value, 10), Math.max(4000, Math.floor(1000000 / codes.length)));
     $('tinfo2').textContent = 'Computing affix odds...';
     const { sel, ctxS } = pctx(), wopts = weightOpts(sel), wlabel = wopts ? weightLabel() : '';
     const local = () => {   // no worker: the same computation on the main thread
-      if (!wopts) return E.builderAffixTable(codes, ilvl, { rolls, qualities: quals, diff });
-      const w = E.baseDropWeights(E.getCtx(ctxS), codes, wopts), rows = E.builderAffixTable(codes, ilvl, { rolls, qualities: quals, diff, weights: w, rare: codes.some((c) => w.get(c) > 0) });
+      if (!wopts) return E.builderAffixTable(codes, ilvl, { qualities: quals, diff });
+      const w = E.baseDropWeights(E.getCtx(ctxS), codes, wopts), rows = E.builderAffixTable(codes, ilvl, { qualities: quals, diff, weights: w, rare: codes.some((c) => w.get(c) > 0) });
       rows.wts = codes.map((c) => w.get(c) || 0); return rows;
     };
-    runJob('table', { type: 'table', codes, ilvl, rolls, ctx: ctxS, wopts, qualities: quals, diff }, null, (rows, err, m) => {
+    runJob('table', { type: 'table', codes, ilvl, ctx: ctxS, wopts, qualities: quals, diff }, null, (rows, err, m) => {
       if (!rows) { $('tinfo2').textContent = 'Error: ' + err; return; }
       bd.tierRows = rows; bd.tableIl = ilvl; bd.rows = E.familyTable(rows, bd.fams); bd.wts = wopts ? (m ? m.wts : rows.wts) : null; bd.wlabel = wlabel;
       renderTable();
@@ -708,7 +707,7 @@
     for (const el of box.querySelectorAll('.od')) el.innerHTML = o ? oddsLine(o, el.dataset.k) : '';
     const n = box.querySelector('.odn');
     if (n) n.textContent = !o ? (oddsBusy ? 'Computing odds...' : '') : 'Chance that an item of that quality on the selection drops with these stats (at least the values set), at item level ' + o.ilvl + '. ' +
-      (o.wlabel ? 'Weighted by drop rate in ' + o.wlabel + '.' : 'Average over the ' + o.nb + ' base' + (o.nb === 1 ? '' : 's') + ' of the selection.') + (o.nd < o.nb ? ' Only ' + o.nd + ' of its ' + o.nb + ' bases can drop at item level ' + o.ilvl + '; the others are left out.' : '') + (o.list.some((x) => x.q === 'rare' && x.ok) ? ' Rare is a Monte Carlo estimate (a few percent noise).' : '') + (oddsBusy ? ' Updating...' : '');
+      (o.wlabel ? 'Weighted by drop rate in ' + o.wlabel + '.' : 'Average over the ' + o.nb + ' base' + (o.nb === 1 ? '' : 's') + ' of the selection.') + (o.nd < o.nb ? ' Only ' + o.nd + ' of its ' + o.nb + ' bases can drop at item level ' + o.ilvl + '; the others are left out.' : '') + (oddsBusy ? ' Updating...' : '');
   }
   /** schedule a recompute (throttled to one per 70 ms while dragging; now = immediately) */
   function requestOdds(now) {
@@ -821,7 +820,7 @@
     const { sel, ctxS } = pctx(); saveSel();
     const qs = bd.farmQ.slice(), an = bd.an;
     const codes = bd.codes.filter((c) => qs.some((q) => an[q].per.find((x) => x.code === c).ok));
-    const opts = { codes, conds: condsOf(), mf: sel.mf, diff: sel.diff, act: sel.act, area: parseInt($('ar2').value || '0', 10), srcKey: $('mo2').value || '', rolls: parseInt($('mc2').value, 10) };
+    const opts = { codes, conds: condsOf(), mf: sel.mf, diff: sel.diff, act: sel.act, area: parseInt($('ar2').value || '0', 10), srcKey: $('mo2').value || '' };
     bd.farm = null; renderHead();
     $('prog2').hidden = false; $('prog2').value = 0;
     $('finfo2').textContent = 'Searching farm sources...';
@@ -846,7 +845,7 @@
       bd.farm = { top, rows: rows.length };
       showShares(); renderHead();
       $('finfo2').textContent = (r.total ? '' : 'No source found: monsters of the selected difficulty/act may not drop items at these item levels (try Difficulty: All or Normal). ') + r.total.toLocaleString() + ' sources (showing ' + r.shown + ')' + (top ? '; best per kill: ' + top.src.name + ' in ' + top.src.areaName + ' (' + DIFF[top.src.diff] + '), ' + odds(top.pTotal) : '') + '; ' +
-        qs.map((q) => QN[q] + (q === 'rare' ? ' = Monte Carlo ' + opts.rolls.toLocaleString() + ' rolls/pool' : ' = exact')).join(', ') + (sel.quest ? '; quest drop (act bosses)' : '') + '; ' + Math.round(performance.now() - t0) + ' ms. Click a column header to sort.';
+        'odds exact (' + qs.map((q) => QN[q]).join(', ') + ')' + (sel.quest ? '; quest drop (act bosses)' : '') + '; ' + Math.round(performance.now() - t0) + ' ms. Click a column header to sort.';
     };
     runJob('farm', { type: 'farm', ctx: ctxS, opts, qualities: qs }, (f) => { $('prog2').value = f; }, finish, () => {
       const out = {}; for (const q of qs) out[q] = E.affixSearch(E.getCtx(ctxS), Object.assign({}, opts, { quality: q, prune: true, byBase: true }), null).rows; return out;
@@ -918,7 +917,6 @@
     $('ilr2').addEventListener('change', () => { syncUrl(); requestTable(); });
     $('il2').addEventListener('change', () => { effIlvl(); syncUrl(); requestTable(); });
     $('ql2').addEventListener('change', () => { TA.key = 'o' + ($('ql2').value || 'magic'); TA.dir = -1; updateRanges(); renderSel(); syncUrl(); requestTable(); updateAnalysis(); runFarm(); refit(true); });
-    $('mc2').addEventListener('change', () => { requestTable(); changed(); });
     $('ar2').addEventListener('change', () => { fillMonsters(); requestTable(); changed(); });
     $('mo2').addEventListener('change', () => { requestTable(); changed(); });
     $('n2').addEventListener('change', () => changed());
