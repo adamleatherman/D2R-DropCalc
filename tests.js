@@ -682,6 +682,19 @@
         card.cases.push(c);
       }
     }
+    // ---- best item level (ilvlCurve): argmax, first, flat band, single values == cardOdds ----
+    { const T = E.builderTypes(), cv = res.curve = { cases: [] }, codesOf = (n) => E.builderBases(T.find((t) => t.name === n).code, -1);
+      const key = (codes, re) => E.builderStats(codes).find((x) => re.test(x.key)).key;
+      for (const [nm, tn, cs, il] of [['boots FRW30 + fire31', 'Boots', [[/Faster Run/, 30], [/^Fire Resist/, 31]], 85], ['large charm +45 life', 'Large Charm', [[/^\+# to Life$/, 45]], 91], ['boots FRW30 + fire31 + light31 + MF16', 'Boots', [[/Faster Run/, 30], [/^Fire Resist/, 31], [/^Lightning Resist/, 31], [/Magic Items/, 16]], 68]]) {
+        const codes = codesOf(tn), conds = cs.map(([re, m]) => ({ key: key(codes, re), min: m })), quals = ['magic', 'rare'], c = E.ilvlCurve(codes, conds, quals, null, {}), o = { name: nm, ilvl: il, q: {} };
+        for (const q of quals) {
+          const x = c[q], mx = Math.max.apply(null, x.p), fi = x.p.findIndex((v) => v > 0) + 1, one = E.cardOdds(codes, conds, il, [q], null, {}).total[q];
+          o.q[q] = { best: x.best, argmax: x.p.indexOf(mx) + 1, pBest: x.pBest, mx, first: x.first, firstWant: fi % 100, n: x.p.length, one: x.p[il - 1], oneWant: one,
+            band: x.best ? (x.p.slice(x.lo - 1, x.hi).every((v) => v >= 0.95 * mx - 1e-300) && (x.lo <= 1 || x.p[x.lo - 2] < 0.95 * mx) && (x.hi >= 99 || x.p[x.hi] < 0.95 * mx) ? 1 : 0) : 1 };
+        }
+        cv.cases.push(o);
+      }
+    }
     // ---- affix families (builderFamilies / familyTable), per-character-level stats ----
     {
       const T = E.builderTypes(), codesOf = (n) => E.builderBases(T.find((t) => t.name === n).code, -1), fam = {};

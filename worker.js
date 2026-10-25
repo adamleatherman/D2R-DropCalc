@@ -33,6 +33,11 @@ self.onmessage = async (ev) => {
       const rows = E.cardOdds(m.codes, m.conds, m.ilvl, m.qualities, w, { diff: m.diff, groups: m.groups });
       rows.wts = w ? m.codes.map((c) => w.get(c) || 0) : null;
       self.postMessage({ type: 'result', id: m.id, rows });
+    } else if (m.type === 'curve') {
+      // best item level: cardOdds at ilvl 1..99 (E.ilvlCurve); same weights as the card
+      let w = null;
+      if (m.wopts) { const k = m.file + JSON.stringify([m.ctx, m.wopts, m.codes]); w = wcache.get(k); if (!w) { w = E.baseDropWeights(E.getCtx(m.ctx), m.codes, m.wopts); if (wcache.size > 20) wcache.clear(); wcache.set(k, w); } }
+      self.postMessage({ type: 'result', id: m.id, rows: E.ilvlCurve(m.codes, m.conds, m.qualities, w, { diff: m.diff }) });
     } else if (m.type === 'stats') {
       self.postMessage({ type: 'stats', id: m.id, stats: E.statList(m.codes, m.quality) });
     }

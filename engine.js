@@ -1646,6 +1646,23 @@
       return { total, perCond, perGroup };
     }
 
+    /** Odds of all `conds` (cardOdds total) at every item level 1..99, per quality: { q: { p: [99 values, index = ilvl - 1], first (lowest ilvl with p > 0, 0 = never), best (argmax, lowest on ties),
+     *  lo, hi (the contiguous ilvl range around best with p >= 0.95 best), pBest } }. Same arguments as cardOdds (weights too: the area weights do not depend on the item level). */
+    function ilvlCurve(codes, conds, qualities, weights, o) {
+      const out = {}; for (const q of qualities) out[q] = { p: [], first: 0, best: 0, lo: 0, hi: 0, pBest: 0 };
+      for (let il = 1; il <= 99; il++) {
+        const t = cardOdds(codes, conds, il, qualities, weights, o).total;
+        for (const q of qualities) { const c = out[q], p = t[q] || 0; c.p.push(p); if (p > 0 && !c.first) c.first = il; if (p > c.pBest) { c.pBest = p; c.best = il; } }
+      }
+      for (const q of qualities) {
+        const c = out[q]; if (!c.best) continue;
+        const th = 0.95 * c.pBest; c.lo = c.hi = c.best;
+        while (c.lo > 1 && c.p[c.lo - 2] >= th) c.lo--;
+        while (c.hi < 99 && c.p[c.hi] >= th) c.hi++;
+      }
+      return out;
+    }
+
     /** For each condition: lowest affix level (and monster level) at which some eligible affix, the automagic row or a staff mod skill on the
      *  base can reach it */
     function minLevels(code, quality_, conds) {
@@ -2409,7 +2426,7 @@
 
     return {
       CONFIG, data: D, DIFFS, items, types, getCtx, playersN, adjNoDrop, dist, upgradeTC, areaSources, DUP_OF, areaRun, areaRolls, listShares, bossPacks,
-      mode, heraldsAvailable, sunderChance, sunderPaths, isSunder, adjQuality, heraldSpawnPct, quality, qualityTotals, sources, srcDist, chanceFor, baseQualityChance, affixLevel, minIlvlForAlvl, eligible, maxSockets, affixProb, rareProbFromSamples, cardOdds, minLevels, staffDist, staffBase,
+      mode, heraldsAvailable, sunderChance, sunderPaths, isSunder, adjQuality, heraldSpawnPct, quality, qualityTotals, sources, srcDist, chanceFor, baseQualityChance, affixLevel, minIlvlForAlvl, eligible, maxSockets, affixProb, rareProbFromSamples, cardOdds, ilvlCurve, minLevels, staffDist, staffBase,
       statList, describe, describeAt, sliderWhat, affixSearch, searchIndex, baseTypes, metaCache, uniqById, setById, uniqByCode, setByCode, prettyId, tzLevel,
       eligibleUniques, eligibleSets, condProb, trialsFor,
       builderTypes, builderBases, builderCatalog, builderStats, builderFamilies, familyTable, familyIdOf, allowedValues, snapValue, tierFor, perLevelDiv, perLevelAt, builderAffixTable, baseDropWeights, affixAppearance, planCombo, comboForBase, comboAnalysis, feasibleAny, fitIndex, fitsCombo, statRange, explainCombo, groupName,

@@ -1875,6 +1875,16 @@ def main():
             check(tag + ": every single stat and group figure == affixProb averaged", 1 if all((abs(a - b) <= 1e-12 * max(abs(b), 1e-300) if b else abs(a) < 1e-12) for a, b in d["cond"] + d["grp"]) else 0, 1, 0)
             check(tag + ": total <= every single stat and group figure", d["ord"], 1, 0)
             check(tag + ": raising a threshold never raises the odds", d["mono"], 1, 0)
+    # ---- best item level (ilvlCurve) ----
+    for c in js["curve"]["cases"]:
+        for q, d in c["q"].items():
+            tag = "best item level, %s, %s" % (c["name"], q)
+            check(tag + ": best == argmax of the 99 odds (lowest on ties) and pBest == max", 1 if (d["best"] == d["argmax"] and d["pBest"] == d["mx"] and d["n"] == 99) or (d["best"] == 0 and d["mx"] == 0) else 0, 1, 0)
+            check(tag + ": first == lowest item level with odds > 0 (0 = never)", d["first"], d["firstWant"], 0)
+            check(tag + ": flat band == contiguous range around best with odds >= 95% of best", d["band"], 1, 0)
+            check(tag + ": the value at item level %d == cardOdds there (exact)" % c["ilvl"], d["one"], d["oneWant"], 0)
+    GC = [c for c in js["curve"]["cases"] if c["name"] == "large charm +45 life"][0]["q"]["magic"]
+    check("best item level: magic large charm +45 life first and best level is 91", GC["first"] * 1000 + GC["best"], 91091, 0)
     # ---- affix families and per-character-level stats ----
     FM = js["fam"]
     check("family grouping: Bronze on small charm is ONE family (prefix, +Attack Rating) with its two tier rows", FM["bronze"]["n"] * 10 + FM["bronze"]["ids"], 12, 0)

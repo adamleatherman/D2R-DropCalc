@@ -312,7 +312,8 @@
   const selDiff = () => { const d = parseInt($('s_diff').value, 10); return d >= 0 ? d : 2; };
   let T2 = null, TA = null, TYPEOPTS = [];
   let bd = { type: null, codes: [], stats: new Map(), fams: new Map(), tierRows: [], sel: [], picks: [], rows: [], an: null, farm: null, farmQ: [], wts: null, wlabel: '' };
-  let tableWorker = null, farmWorker = null, oddsWorker = null, tableId = 0, farmId = 0, oddsId = 0;
+  let tableWorker = null, farmWorker = null, tableId = 0, farmId = 0;
+  const OJ = { odds: { id: 0, w: null }, curve: { id: 0, w: null } };   // the card-odds and the best-item-level jobs: one long-lived worker each
   /** remember a checkbox in localStorage (try/catch: storage can be blocked) */
   const lsGet = (k) => { try { return localStorage.getItem(k) === '1'; } catch (e) { return false; } };
   const lsSet = (k, v) => { try { localStorage.setItem(k, v ? '1' : '0'); } catch (e) { /* ignore */ } };
@@ -353,7 +354,7 @@
   }
   /** run a job on a dedicated worker, replacing (terminating) one that is still busy with a stale request */
   function runJob(kind, msg, onProgress, onDone, fallback) {
-    if (kind === 'odds') return runOddsJob(msg, onDone, fallback);
+    if (kind === 'odds' || kind === 'curve') return runOddsJob(kind, msg, onDone, fallback);
     const id = kind === 'farm' ? ++farmId : ++tableId;
     let w = kind === 'farm' ? farmWorker : tableWorker;
     if (w && w.busy) { w.terminate(); w = null; }
@@ -372,16 +373,16 @@
 
   /** the card-odds job: one long-lived worker (it keeps the rare sample cache, so a busy one is never terminated); a request that arrives while it works waits as `next`
    *  (only the newest is kept) and only the newest id is delivered */
-  function runOddsJob(msg, onDone, fallback) {
-    const id = ++oddsId;
-    const w = oddsWorker || (oddsWorker = newWorker());
-    if (!w) { setTimeout(() => { if (id === oddsId) onDone(fallback()); }, 20); return id; }
+  function runOddsJob(kind, msg, onDone, fallback) {
+    const J = OJ[kind], id = ++J.id;
+    const w = J.w || (J.w = newWorker());
+    if (!w) { setTimeout(() => { if (id === J.id) onDone(fallback()); }, 20); return id; }
     const send = (job) => { w.busy = true; w.job = job; w.postMessage(Object.assign({ id: job.id, file: DATAFILE[E.mode] }, job.msg)); };
     w.onmessage = (ev) => {
       const m = ev.data, job = w.job; if (!job || m.id !== job.id) return;
       w.busy = false; w.job = null;
       const nx = w.next; w.next = null; if (nx) send(nx);
-      if (job.id === oddsId) { if (m.type === 'result') job.onDone(m.rows, null, m); else job.onDone(null, m.message); }
+      if (job.id === J.id) { if (m.type === 'result') job.onDone(m.rows, null, m); else job.onDone(null, m.message); }
     };
     if (w.busy) w.next = { id, msg, onDone }; else send({ id, msg, onDone });
     return id;
@@ -677,7 +678,7 @@
     const other = bd.sel.map((s, i) => own.has(i) ? '' : rowHtml(s, i)).join('');
     if (other) blocks.push('<div class="pk"><div class="pkh"><b>Other stats</b></div>' + other + '</div>');
     const q = $('ql2').value;
-    box.innerHTML = '<div class="card"><div class="chd"><b>' + esc(bd.type.name) + '</b><span>' + (q ? QN[q] : 'Any quality') + '</span></div><div class="slots">' + slotLine() + '</div>' + (bd.sel.length ? '<div class="odt"><b>All picks:</b> <span class="od" data-k="t"></span></div><div class="note odn"></div>' : '') +
+    box.innerHTML = '<div class="card"><div class="chd"><b>' + esc(bd.type.name) + '</b><span>' + (q ? QN[q] : 'Any quality') + '</span></div><div class="slots">' + slotLine() + '</div>' + (bd.sel.length ? '<div class="odt"><b>All picks:</b> <span class="od" data-k="t"></span></div><div class="note odn"></div><div class="ilc"></div>' : '') +
       (blocks.join('') || '<div class="note">Click an affix in the table to add it. Each of its stats gets a minimum value you can move with the slider.</div>') + '</div>';
     paintOdds(); requestOdds();
   }
@@ -706,9 +707,69 @@
     const box = $('sel2'), o = oddsFresh(), card = box.querySelector('.card'); if (!card) return;
     card.classList.toggle('odstale', oddsBusy);
     for (const el of box.querySelectorAll('.od')) el.innerHTML = o ? oddsLine(o, el.dataset.k) : '';
+    paintCurve();
     const n = box.querySelector('.odn');
     if (n) n.textContent = !o ? (oddsBusy ? 'Computing odds...' : '') : 'Chance that an item of that quality on the selection drops with these stats (at least the values set), at item level ' + o.ilvl + '. ' +
       (o.wlabel ? 'Weighted by drop rate in ' + o.wlabel + '.' : 'Average over the ' + o.nb + ' base' + (o.nb === 1 ? '' : 's') + ' of the selection.') + (o.nd < o.nb ? ' Only ' + o.nd + ' of its ' + o.nb + ' bases can drop at item level ' + o.ilvl + '; the others are left out.' : '') + (oddsBusy ? ' Updating...' : '');
+  }
+  // ----- best item level: odds of all picks at ilvl 1..99 (E.ilvlCurve, own worker; it does not depend on the item level, so moving the level only moves the marker) -----
+  const QCOL = { low: 'var(--dim)', normal: 'var(--text)', sup: 'var(--good)', magic: 'var(--side-prefix)', rare: 'var(--side-auto)' };
+  let curveSig = '';
+  /** inline SVG: x = item level 1..99, y = log odds (one line per series {q, p[99], best}), the item level `cur` marked; 100 px tall, stretched to the width */
+  function ilChart(series, cur) {
+    const W = 396, H = 100, X = (il) => ((il - 1) / 98 * W).toFixed(1);
+    let lo = 0, hi = 0; for (const s of series) for (const p of s.p) if (p > 0) { lo = lo ? Math.min(lo, p) : p; hi = Math.max(hi, p); }
+    if (!lo) return '';
+    const a = Math.log10(hi) + 0.15, b = Math.min(Math.log10(lo), a - 0.6) - 0.15, Y = (p) => (4 + (a - Math.log10(p)) / (a - b) * (H - 8)).toFixed(1);
+    let g = '';
+    for (let e = Math.ceil(b); e <= Math.floor(a); e++) g += '<line x1="0" x2="' + W + '" y1="' + Y(Math.pow(10, e)) + '" y2="' + Y(Math.pow(10, e)) + '" stroke="var(--line)" stroke-width="1" vector-effect="non-scaling-stroke"/>';
+    for (let il = 10; il < 99; il += 10) g += '<line x1="' + X(il) + '" x2="' + X(il) + '" y1="0" y2="' + H + '" stroke="var(--line)" stroke-width="1" stroke-dasharray="2 3" vector-effect="non-scaling-stroke"/>';
+    g += '<line x1="' + X(cur) + '" x2="' + X(cur) + '" y1="0" y2="' + H + '" stroke="var(--text)" stroke-width="1.5" vector-effect="non-scaling-stroke"/>';
+    for (const s of series) {
+      let d = '', pen = 'M';
+      s.p.forEach((p, i) => { if (p > 0) { d += pen + X(i + 1) + ' ' + Y(p) + ' '; pen = 'L'; } else pen = 'M'; });
+      g += '<path d="' + d + '" fill="none" stroke="' + QCOL[s.q] + '" stroke-width="2" vector-effect="non-scaling-stroke"/>';
+      if (s.best) g += '<circle cx="' + X(s.best) + '" cy="' + Y(s.p[s.best - 1]) + '" r="3" fill="' + QCOL[s.q] + '"/>';
+    }
+    return '<svg viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none" width="100%" height="100" style="display:block;cursor:crosshair;touch-action:manipulation;background:var(--panel);border:1px solid var(--line);border-radius:4px">' + g + '</svg>';
+  }
+  /** the best-item-level line and chart of the card, from bd.curve */
+  function paintCurve() {
+    const el = $('sel2').querySelector('.ilc'); if (!el) return;
+    const c = bd.curve, cur = effIlvl();
+    if (!c || c.sig !== curveSig) { el.innerHTML = ''; return; }
+    const qs = Object.keys(c.res).filter((q) => c.res[q].first);
+    if (!qs.length) { el.innerHTML = '<div class="note">No item level lets these picks drop.</div>'; return; }
+    const parts = qs.map((q) => {
+      const r = c.res[q], within = r.lo < r.hi ? ', within 5% from ' + r.lo + (r.hi >= 99 ? '+' : '-' + r.hi) : '';
+      return '<span style="color:' + QCOL[q] + '">' + QCOLN[q] + '</span> <b>' + r.best + '</b> (' + odds(r.pBest) + within + ')';
+    });
+    const at = qs.map((q) => QCOLN[q] + ' ' + odds(c.res[q].p[cur - 1])).join(', ');
+    el.innerHTML = '<div class="note ilbest" title="' + esc('Per item of that quality on the selection (average over its bases that can drop at the level), not per kill: the farm table also includes the quality chance, MF and the base mix, so it stays the answer for where to farm. Higher levels add competing affixes and bases, so the best level is often below 99. Click the chart to set the item level.') + '"><b>Best item level:</b> ' +
+      parts.join(' &middot; ') + ' &middot; at your level ' + cur + ': ' + at + '</div>' +
+      '<div class="ilch" title="Click to set the item level">' + ilChart(qs.map((q) => ({ q, p: c.res[q].p, best: c.res[q].best })), cur) + '</div>' +
+      '<div class="note" style="display:flex;justify-content:space-between;gap:8px"><span>ilvl 1</span><span>log odds; first level: ' + qs.map((q) => QCOLN[q] + ' ' + c.res[q].first).join(', ') + '</span><span>99</span></div>';
+  }
+  const chartIl = (ev, sv) => { const r = sv.getBoundingClientRect(); return Math.max(1, Math.min(99, Math.round(1 + (ev.clientX - r.left) / r.width * 98))); };
+  /** click / tap on the chart: that item level */
+  function chartClick(ev) {
+    const sv = ev.target.closest && ev.target.closest('.ilch svg'); if (!sv) return;
+    $('il2').value = chartIl(ev, sv); effIlvl(); syncUrl(); requestTable(); requestOdds(true);
+  }
+  function chartTip(ev) {
+    const sv = ev.target.closest && ev.target.closest('.ilch svg'), c = bd.curve; if (!sv || !c) return;
+    const il = chartIl(ev, sv);
+    sv.parentNode.title = 'Item level ' + il + ': ' + Object.keys(c.res).filter((q) => c.res[q].first).map((q) => QCOLN[q] + ' ' + odds(c.res[q].p[il - 1])).join(', ') + ' (click to set)';
+  }
+  function runCurve(codes, conds, quals, wopts, ctxS, diff) {
+    const sig = JSON.stringify([E.mode, codes, conds, quals, wopts, wopts ? ctxS : 0, diff]);
+    if (sig === curveSig) return;
+    curveSig = sig;
+    const local = () => E.ilvlCurve(codes, conds, quals, wopts ? E.baseDropWeights(E.getCtx(ctxS), codes, wopts) : null, { diff });
+    runJob('curve', { type: 'curve', codes, conds, qualities: quals, ctx: ctxS, wopts, diff }, null, (res) => {
+      if (!res) { curveSig = ''; return; }
+      bd.curve = { sig, res }; paintCurve();
+    }, local);
   }
   /** schedule a recompute (throttled to one per 70 ms while dragging; now = immediately) */
   function requestOdds(now) {
@@ -716,9 +777,10 @@
     if (!oddsTimer) oddsTimer = setTimeout(() => { oddsTimer = null; runOdds(); }, 70);
   }
   function runOdds() {
-    if (!bd.type || !bd.codes.length || !bd.sel.length) { bd.odds = null; oddsSig = ''; oddsBusy = false; paintOdds(); return; }
+    if (!bd.type || !bd.codes.length || !bd.sel.length) { bd.odds = null; bd.curve = null; curveSig = ''; oddsSig = ''; oddsBusy = false; paintOdds(); return; }
     const list = oddsList(), quals = list.filter((x) => x.ok).map((x) => x.q), { sel, ctxS } = pctx(), wopts = weightOpts(sel), ilvl = effIlvl(), diff = selDiff(), conds = condsOf(), groups = bd.picks.map(pickIdx), codes = bd.codes.slice();
     const sig = JSON.stringify([E.mode, codes, conds, ilvl, quals, wopts, wopts ? ctxS : 0, diff, groups]);
+    runCurve(codes, conds, quals, wopts, ctxS, diff);
     if (sig === oddsSig) return;   // nothing changed: keep what is shown
     oddsSig = sig; oddsBusy = true; paintOdds();
     const keys = bd.sel.map((s) => s.key).join('|'), gsig = JSON.stringify(groups), wlabel = wopts ? weightLabel() : '';
@@ -802,7 +864,8 @@
     const qn = feas.length >= 4 ? 'Any quality' : feas.map((q) => QCOLN[q]).join(' or ').replace(/^./, (c) => c.toUpperCase()), f = bd.farm;
     const farm = !f ? 'searching farm sources&hellip;' : f.err ? 'farm search failed (' + esc(f.err) + ')' : !f.top ? 'no farm source found (try Difficulty: All)' :
       'best per kill: <b>' + esc(f.top.src.name) + '</b> in ' + whereTxt(f.top.src) + ', ' + killsTxt(f.top.pTotal) +
-      (f.topRun ? ' &middot; best per run: <b>' + whereTxt(f.topRun.src) + '</b>, ' + runsTxt(f.topRun.p) : '');
+      (f.topRun ? ' &middot; best per run: <b>' + whereTxt(f.topRun.src) + '</b>, ' + runsTxt(f.topRun.p) : '') +
+      (f.topIl ? ' &middot; <span title="Highest per-kill chance among the sources of each item level (the level a drop rolls at = monster level); includes quality chance, MF and the base mix">best monster level per kill: <b>' + f.topIl.il + '</b> (' + esc(f.topIl.x.src.name) + ', ' + killsTxt(f.topIl.x.pTotal) + ')</span>' : '');
     h.className = 'head';
     h.innerHTML = '<b>' + esc(qn + ' ' + bd.type.name) + '</b> &middot; item level ' + ilTxt(lo, hi) + ' &middot; requires character level ' + rq + ' &middot; ' + farm;
   }
@@ -853,9 +916,13 @@
         if (a) a.p += x.perRun; else byArea.set(k, { src: x.src, p: x.perRun });
       }
       for (const a of byArea.values()) { a.p = Math.min(1, a.p); if (!topRun || a.p > topRun.p) topRun = a; }   // as tab 1's area rows
-      bd.farm = { top, topRun, rows: rows.length };
+      // best item level for farming: group the rows by the item level they roll at (the monster level, capped at 99), best per-kill P of each
+      const byIl = new Map(); let topIl = null;
+      for (const x of rows) { const il = Math.min(x.src.mlvl, 99), a = byIl.get(il); if (!a || x.pTotal > a.x.pTotal) byIl.set(il, { il, x }); }
+      for (const a of byIl.values()) if (a.x.pTotal > 0 && (!topIl || a.x.pTotal > topIl.x.pTotal || (a.x.pTotal === topIl.x.pTotal && a.il < topIl.il))) topIl = a;
+      bd.farm = { top, topRun, topIl, rows: rows.length };
       showShares(); renderHead();
-      $('finfo2').textContent = (r.total ? '' : 'No source found: monsters of the selected difficulty/act may not drop items at these item levels (try Difficulty: All or Normal). ') + r.total.toLocaleString() + ' sources (showing ' + r.shown + ')' + (top ? '; best per kill: ' + top.src.name + ' in ' + top.src.areaName + ' (' + DIFF[top.src.diff] + '), ' + odds(top.pTotal) : '') + (topRun ? '; best per run: ' + topRun.src.areaName + ' (' + DIFF[topRun.src.diff] + '), ' + odds(topRun.p) : '') + '; ' +
+      $('finfo2').textContent = (r.total ? '' : 'No source found: monsters of the selected difficulty/act may not drop items at these item levels (try Difficulty: All or Normal). ') + r.total.toLocaleString() + ' sources (showing ' + r.shown + ')' + (top ? '; best per kill: ' + top.src.name + ' in ' + top.src.areaName + ' (' + DIFF[top.src.diff] + '), ' + odds(top.pTotal) : '') + (topIl ? '; best monster level per kill: ' + topIl.il + ' (' + topIl.x.src.name + ', ' + odds(topIl.x.pTotal) + ')' : '') + (topRun ? '; best per run: ' + topRun.src.areaName + ' (' + DIFF[topRun.src.diff] + '), ' + odds(topRun.p) : '') + '; ' +
         'odds exact (' + qs.map((q) => QN[q]).join(', ') + ')' + (sel.quest ? '; quest drop (act bosses)' : '') + '; ' + Math.round(performance.now() - t0) + ' ms. Click a column header to sort.';
     };
     runJob('farm', { type: 'farm', ctx: ctxS, opts, qualities: qs }, (f) => { $('prog2').value = f; }, finish, () => {
@@ -927,6 +994,7 @@
     $('ilr2').addEventListener('input', () => { $('il2').value = $('ilr2').value; });
     $('ilr2').addEventListener('change', () => { syncUrl(); requestTable(); });
     $('il2').addEventListener('change', () => { effIlvl(); syncUrl(); requestTable(); });
+    $('sel2').addEventListener('click', chartClick); $('sel2').addEventListener('mousemove', chartTip);
     $('ql2').addEventListener('change', () => { TA.key = 'o' + ($('ql2').value || 'magic'); TA.dir = -1; updateRanges(); renderSel(); syncUrl(); requestTable(); updateAnalysis(); runFarm(); refit(true); });
     $('ar2').addEventListener('change', () => { fillMonsters(); requestTable(); changed(); });
     $('mo2').addEventListener('change', () => { requestTable(); changed(); });
