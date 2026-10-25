@@ -77,7 +77,8 @@
       const th = ev.target.closest('th'); if (!th) return;
       const k = th.dataset.k;
       if (st.key === k) st.dir = -st.dir; else { st.key = k; st.dir = -1; if (cols.find((c) => c.k === k).l) st.dir = 1; }
-      st.onSort && st.onSort(render());
+      const r = render();   // re-render on every header click; onSort (optional) refreshes what depends on the order
+      if (st.onSort) st.onSort(r);
     });
     el.addEventListener('click', (ev) => {   // optional row click handler (st.onRow(row))
       const tr = ev.target.closest('tbody tr'); if (!tr || !st.onRow) return;
@@ -321,7 +322,7 @@
     note: 'Chance per kill of a ' + QCOLN[q].toUpperCase() + ' item of the type with the combination (exact).', get: (r) => r.pq[q] || 0, fmt: (r) => odds(r.pq[q] || 0) })), [
     { k: 'ptot', label: 'P per kill', note: 'Chance that one kill drops a matching item (sum over every base of the type and the possible qualities; shown as odds, sorts by probability).', get: (r) => r.pTotal, fmt: (r) => odds(r.pTotal) },
     { k: 'runs', label: 'kills/run', get: (r) => r.src.perRun, fmt: (r) => r.src.herald ? 'n/a' : r.src.perRun < 10 ? r.src.perRun.toFixed(2) : r.src.perRun.toFixed(0) },
-    { k: 'perrun', label: 'P per run', note: 'Chance of a matching item in one run (rough model; shown as odds).', get: (r) => r.perRun, fmt: (r) => odds(r.perRun) },
+    { k: 'perrun', label: 'P per run', note: 'Chance of a matching item from the kills of this row in one run of its area (rough model; shown as odds). The best per run above adds up every row of an area.', get: (r) => r.perRun, fmt: (r) => odds(r.perRun) },
     { k: 'go1', label: 'Tab 1', note: 'Open tab 1 filtered to this monster / area (with the base as the target when the builder has a single base)', get: () => 0, html: () => '<a href="#" class="go1">search</a>' },
   ]);
   const typeLabel = (t) => t.name + (t.cls ? ' (' + (CLASSN[t.cls] || t.cls) + ')' : '') + (t.broad ? ' - broad group' : '') + ' - ' + t.codes.length + ' bases';
@@ -791,6 +792,7 @@
   /** why no wanted quality works: the explanation of the most permissive one (rare, then magic, ...) */
   const whyNot = (an) => { const q = ['rare', 'magic', 'sup', 'normal', 'low'].filter((x) => wantQ().indexOf(x) >= 0 && an[x].why.length && !/is not possible for this type/.test(an[x].why[0]))[0] || wantQ()[0]; return an[q].why; };
   const killsTxt = (p) => { const o = odds(p); return o.slice(0, 4) === '1 in' ? o + ' kills' : o === 'always' ? 'every kill' : o; };
+  const whereTxt = (s) => esc(s.areaName) + ' (' + DIFF[s.diff] + (s.tz ? ', terror zone' : '') + ')';
   /** the one-sentence answer above the tables: quality and type, item level, character level, best farm source (or why it is impossible) */
   function renderHead() {
     const h = $('head2'), an = bd.an; if (!h || !an) return;
@@ -799,7 +801,8 @@
     const lo = Math.min.apply(null, feas.map((q) => an[q].minIl)), hi = Math.max.apply(null, feas.map((q) => an[q].maxIl)), rq = Math.min.apply(null, feas.map((q) => an[q].reqLv));
     const qn = feas.length >= 4 ? 'Any quality' : feas.map((q) => QCOLN[q]).join(' or ').replace(/^./, (c) => c.toUpperCase()), f = bd.farm;
     const farm = !f ? 'searching farm sources&hellip;' : f.err ? 'farm search failed (' + esc(f.err) + ')' : !f.top ? 'no farm source found (try Difficulty: All)' :
-      'best farm: <b>' + esc(f.top.src.name) + '</b> in ' + esc(f.top.src.areaName) + ' (' + DIFF[f.top.src.diff] + '), ' + killsTxt(f.top.pTotal);
+      'best per kill: <b>' + esc(f.top.src.name) + '</b> in ' + whereTxt(f.top.src) + ', ' + killsTxt(f.top.pTotal) +
+      (f.topRun ? ' &middot; best per run: <b>' + whereTxt(f.topRun.src) + '</b>, ' + runsTxt(f.topRun.p) : '');
     h.className = 'head';
     h.innerHTML = '<b>' + esc(qn + ' ' + bd.type.name) + '</b> &middot; item level ' + ilTxt(lo, hi) + ' &middot; requires character level ' + rq + ' &middot; ' + farm;
   }
@@ -842,9 +845,17 @@
       T2.key = opts.area ? 'perrun' : 'ptot'; T2.dir = -1;
       const r = T2.render();
       let top = null; for (const x of rows) if (!top || x.pTotal > top.pTotal) top = x;
-      bd.farm = { top, rows: rows.length };
+      // per run: one full clear of an area = every source row of that area (regular packs, champions, uniques, minions, super uniques, bosses; no heralds), summed
+      const byArea = new Map(); let topRun = null;
+      for (const x of rows) {
+        if (!(x.perRun > 0)) continue;
+        const k = x.src.area + '|' + x.src.diff + '|' + (x.src.tz ? 1 : 0), a = byArea.get(k);
+        if (a) a.p += x.perRun; else byArea.set(k, { src: x.src, p: x.perRun });
+      }
+      for (const a of byArea.values()) { a.p = Math.min(1, a.p); if (!topRun || a.p > topRun.p) topRun = a; }   // as tab 1's area rows
+      bd.farm = { top, topRun, rows: rows.length };
       showShares(); renderHead();
-      $('finfo2').textContent = (r.total ? '' : 'No source found: monsters of the selected difficulty/act may not drop items at these item levels (try Difficulty: All or Normal). ') + r.total.toLocaleString() + ' sources (showing ' + r.shown + ')' + (top ? '; best per kill: ' + top.src.name + ' in ' + top.src.areaName + ' (' + DIFF[top.src.diff] + '), ' + odds(top.pTotal) : '') + '; ' +
+      $('finfo2').textContent = (r.total ? '' : 'No source found: monsters of the selected difficulty/act may not drop items at these item levels (try Difficulty: All or Normal). ') + r.total.toLocaleString() + ' sources (showing ' + r.shown + ')' + (top ? '; best per kill: ' + top.src.name + ' in ' + top.src.areaName + ' (' + DIFF[top.src.diff] + '), ' + odds(top.pTotal) : '') + (topRun ? '; best per run: ' + topRun.src.areaName + ' (' + DIFF[topRun.src.diff] + '), ' + odds(topRun.p) : '') + '; ' +
         'odds exact (' + qs.map((q) => QN[q]).join(', ') + ')' + (sel.quest ? '; quest drop (act bosses)' : '') + '; ' + Math.round(performance.now() - t0) + ' ms. Click a column header to sort.';
     };
     runJob('farm', { type: 'farm', ctx: ctxS, opts, qualities: qs }, (f) => { $('prog2').value = f; }, finish, () => {
