@@ -137,7 +137,9 @@
   const PERKILL = new Set(['ptar', 'pbase', 'plow', 'pnorm', 'psup', 'pmag', 'prare', 'pset', 'puni', 'sTable', 'sMf', 'sTotal']);
   const kills1 = () => PERKILL.has(T1.key);
   /** chance per run: kills/run x per-kill chance (rough); an area row carries the sum over its sources */
-  const runP = (r) => r.runP !== undefined ? r.runP : r.src.quest ? r.c.target : r.c.target * r.src.perRun;   // a boss quest row: its run is the one quest kill
+  /** chance of at least one success in k kills at p each: 1 - (1-p)^k (k may be fractional; log form keeps tiny p exact) */
+  const runOf = (p, k) => p >= 1 ? 1 : -Math.expm1(k * Math.log1p(-p));
+  const runP = (r) => r.runP !== undefined ? r.runP : r.src.quest ? r.c.target : runOf(r.c.target, r.src.perRun);   // a boss quest row: its run is the one quest kill
   const PCTS = [25, 50, 75, 90, 95, 99];
   const unit1 = () => kills1() ? 'kills' : 'runs';
   const per1 = (r) => kills1() ? r.c.target : runP(r);
@@ -163,7 +165,7 @@
     { k: 'puni', show: showQB, note: QNOTE, label: 'P(unique)', get: (r) => r.c.unique, fmt: (r) => odds(r.c.unique) },
     { k: 'ptar', label: 'Chance per kill', get note() { return 'Chance that one kill drops the target (shown as odds; sorts by probability).' + (areaMode() ? ' Area rows: the average over all kills of an area clear.' : ''); }, get: (r) => r.c.target, fmt: (r) => odds(r.c.target) },
     { k: 'runs', label: 'kills/run', get: (r) => r.src.perRun, fmt: (r) => runsTxtOf(r.src) },
-    { k: 'perrun', label: 'Chance per run', get note() { return 'Chance of finding the target in one run: kills/run x per-kill chance (rough model; shown as odds).' + (areaMode() ? ' Area rows add up the per-run chances of their sources (same linear model, capped at 1).' : ''); }, get: runP, fmt: (r) => odds(runP(r)) },
+    { k: 'perrun', label: 'Chance per run', get note() { return 'Chance of finding the target at least once in one run: 1 - (1 - per-kill chance)^(kills/run) (kills/run is a rough model; shown as odds).' + (areaMode() ? ' Area rows combine all their sources the same way.' : ''); }, get: runP, fmt: (r) => odds(runP(r)) },
     { k: 'n50', get label() { return unit1() + ' for 50%'; }, get note() { return 'Number of ' + unit1() + ' needed to have found the target with 50% probability: ceil(ln(0.5) / ln(1-p)). Counts kills while the table is sorted by a per-kill column, runs otherwise. Hover a cell for 25/50/75/90/95/99%.'; },
       get: per1, fmt: (r) => r.src.quest && !kills1() ? '-' : countFmt(E.trialsFor(per1(r), 0.5)), rtip: (r) => r.src.quest && !kills1() ? 'The quest kill happens once per character and difficulty.' : PCTS.map((q) => q + '%: ' + countFmt(E.trialsFor(per1(r), q / 100)) + ' ' + unit1()).join('\n') },
   ];
@@ -188,8 +190,8 @@
     }
     return (allCache = { sig, rows, maxMl: list.reduce((a, s) => Math.max(a, s.mlvl), 0) });
   }
-  /** Group by area: one row per area / difficulty / terror-zone flag. Per-run chance = the SUM of the sources' per-run chances (matches how per-run is
-   *  computed, kills/run x p, so it is additive; capped at 1). Per-kill values are kill-weighted averages. Herald rows (no per-run) are left out. */
+  /** Group by area: one row per area / difficulty / terror-zone flag. Per-run chance = 1 - prod over the sources of (1 - p)^kills (at least one drop
+   *  in a full clear). Per-kill values are kill-weighted averages. Herald rows (no per-run) are left out. */
   function groupAreas(rows) {
     const m = new Map();
     for (const r of rows) {
@@ -200,9 +202,8 @@
     const wavg = (parts, kills, get) => parts.reduce((a, r) => a + get(r) * r.src.perRun, 0) / kills;
     return Array.from(m.values()).map((parts) => {
       const s0 = parts[0].src, kills = parts.reduce((a, r) => a + r.src.perRun, 0);
-      const p = Math.min(1, parts.reduce((a, r) => a + r.c.target * r.src.perRun, 0));
+      const p = -Math.expm1(parts.reduce((a, r) => a + r.src.perRun * Math.log1p(-Math.min(r.c.target, 1)), 0));
       const c = {}; for (const key in parts[0].c) c[key] = wavg(parts, kills, (r) => r.c[key]);
-      c.target = p / kills;
       const sp = parts[0].sp ? { table: wavg(parts, kills, (r) => r.sp.table), mf: wavg(parts, kills, (r) => r.sp.mf), total: wavg(parts, kills, (r) => r.sp.total) } : null;
       parts.sort((x, y) => runP(y) - runP(x));
       return { src: { name: s0.areaName, areaName: s0.areaName, diff: s0.diff, act: s0.act, tz: s0.tz, rank: 'regular', mlvl: Math.max(...parts.map((r) => r.src.mlvl)), perRun: kills }, c, sp, runP: p, parts };
@@ -326,7 +327,7 @@
     { k: 'base', label: 'Base', l: 1, get: base3, html: (r) => esc(base3(r)) },
     { k: 'pk', get label() { return c3.one ? 'Chance per kill' : 'Chance per kill (average)'; }, note: 'Chance that one kill drops the item (shown as odds). A whole area clear: the average over all its kills.', get: (r) => r.pk, fmt: (r) => odds(r.pk) },
     { k: 'kills', label: 'kills/run', show: () => c3.one, get: () => c3.kills, fmt: () => c3.quest ? 'first kill' : c3.kills < 10 ? c3.kills.toFixed(2) : c3.kills.toFixed(0) },
-    { k: 'perrun', label: 'Chance per run', note: 'Chance of finding the item in one run: kills/run x per-kill chance (rough model; an area clear adds up its sources, capped at 1; same numbers as Tab 1).', get: PCT3, fmt: (r) => odds(r.runP) },
+    { k: 'perrun', label: 'Chance per run', note: 'Chance of finding the item at least once in one run: 1 - (1 - per-kill chance)^(kills/run), over every source of an area clear (kills/run is a rough model; same numbers as Tab 1).', get: PCT3, fmt: (r) => odds(r.runP) },
     { k: 'n50', label: 'runs for 50%', note: 'Runs needed to have found the item with 50% probability: ceil(ln(0.5) / ln(1-p)). Hover a cell for 25/50/75/90/95/99%.', get: PCT3, fmt: (r) => c3.quest ? '-' : countFmt(E.trialsFor(r.runP, 0.5)), rtip: (r) => c3.quest ? 'The quest kill happens once per character and difficulty.' : PCTS.map((q) => q + '%: ' + countFmt(E.trialsFor(r.runP, q / 100)) + ' runs').join('\n') },
   ];
   function runTab3() {
@@ -341,14 +342,14 @@
       for (const src of srcs) {
         const d = E.dropsOf(ctx, src, sel.mf), w = one ? 1 : src.perRun;
         for (const [kind, m] of [['base', d.base], ['unique', d.unique], ['set', d.set]]) for (const [id, p] of m) {
-          const a = acc.get(kind + '|' + id) || acc.set(kind + '|' + id, { pw: 0, run: 0 }).get(kind + '|' + id);
-          a.pw += p * w; a.run += p * (src.quest ? 1 : src.perRun);   // a boss quest row: its run is the one quest kill
+          const a = acc.get(kind + '|' + id) || acc.set(kind + '|' + id, { pw: 0, lm: 0 }).get(kind + '|' + id);
+          a.pw += p * w; a.lm += (src.quest ? 1 : src.perRun) * Math.log1p(-Math.min(p, 1));   // log of the chance to miss it all run; a boss quest row: its run is the one quest kill
         }
       }
       const rows = [];
       for (const t of INDEX) {
         const a = acc.get(t.kind + '|' + (t.kind === 'base' ? t.code : t.id));
-        if (a && a.pw > 0) rows.push({ t, kind: kind3(t), pk: a.pw / wsum, runP: Math.min(1, a.run), text: (t.name + ' ' + (t.kind === 'base' ? '' : E.items[t.code].n)).toLowerCase() });
+        if (a && a.pw > 0) rows.push({ t, kind: kind3(t), pk: a.pw / wsum, runP: -Math.expm1(a.lm), text: (t.name + ' ' + (t.kind === 'base' ? '' : E.items[t.code].n)).toLowerCase() });
       }
       c3 = { sig, rows, one, kills, quest: one && !!srcs[0].quest, n: srcs.length, ms: 0 };
     }
@@ -411,7 +412,7 @@
     note: 'Chance per kill of a ' + QCOLN[q].toUpperCase() + ' item of the type with the combination (exact).', get: (r) => r.pq[q] || 0, fmt: (r) => odds(r.pq[q] || 0) })), [
     { k: 'ptot', label: 'P per kill', note: 'Chance that one kill drops a matching item (sum over every base of the type and the possible qualities; shown as odds, sorts by probability).', get: (r) => r.pTotal, fmt: (r) => odds(r.pTotal) },
     { k: 'runs', label: 'kills/run', get: (r) => r.src.perRun, fmt: (r) => runsTxtOf(r.src) },
-    { k: 'perrun', label: 'P per run', note: 'Chance of a matching item from the kills of this row in one run of its area (rough model; shown as odds). The best per run above adds up every row of an area.', get: (r) => r.perRun, fmt: (r) => odds(r.perRun) },
+    { k: 'perrun', label: 'P per run', note: 'Chance of at least one matching item from the kills of this row in one run of its area: 1 - (1 - P per kill)^(kills/run) (rough model; shown as odds). The best per run above combines every row of an area the same way.', get: (r) => r.perRun, fmt: (r) => odds(r.perRun) },
     { k: 'go1', label: 'Tab 1', note: 'Open tab 1 filtered to this monster / area (with the base as the target when the builder has a single base)', get: () => 0, html: () => '<a href="#" class="go1">search</a>' },
   ]);
   const typeLabel = (t) => t.name + (t.cls ? ' (' + (CLASSN[t.cls] || t.cls) + ')' : '') + (t.broad ? ' - broad group' : '') + ' - ' + t.codes.length + ' bases';
@@ -1010,10 +1011,11 @@
         let x = m.get(r.src.key);
         if (!x) { x = { src: r.src, pq: {}, pTotal: 0, perRun: 0, byBase: {} }; m.set(r.src.key, x); }
         x.pq[q] = r.pTotal;
-        x.pTotal += r.pTotal; x.perRun += r.perRun;
+        x.pTotal += r.pTotal;
         for (const c in r.byBase || {}) x.byBase[c] = (x.byBase[c] || 0) + r.byBase[c];
       }
       let rows = Array.from(m.values());
+      for (const x of rows) x.perRun = runOf(x.pTotal, x.src.perRun);   // at least one matching item in a run
       if (sel.tz) rows = rows.filter((r) => r.src.tz);
       T2.rows = rows; T2.limit = parseInt($('n2').value, 10);
       T2.key = opts.area ? 'perrun' : 'ptot'; T2.dir = -1;
@@ -1024,9 +1026,10 @@
       for (const x of rows) {
         if (!(x.perRun > 0)) continue;
         const k = x.src.area + '|' + x.src.diff + '|' + (x.src.tz ? 1 : 0), a = byArea.get(k);
-        if (a) a.p += x.perRun; else byArea.set(k, { src: x.src, p: x.perRun });
+        const lm = x.src.perRun * Math.log1p(-Math.min(x.pTotal, 1));   // log of the chance this row's kills all miss
+        if (a) a.lm += lm; else byArea.set(k, { src: x.src, lm });
       }
-      for (const a of byArea.values()) { a.p = Math.min(1, a.p); if (!topRun || a.p > topRun.p) topRun = a; }   // as tab 1's area rows
+      for (const a of byArea.values()) { a.p = -Math.expm1(a.lm); if (!topRun || a.p > topRun.p) topRun = a; }   // as tab 1's area rows
       // best item level for farming: group the rows by the item level they roll at (the monster level, capped at 99), best per-kill P of each
       const byIl = new Map(); let topIl = null;
       for (const x of rows) { const il = Math.min(x.src.mlvl, 99), a = byIl.get(il); if (!a || x.pTotal > a.x.pTotal) byIl.set(il, { il, x }); }
