@@ -214,7 +214,7 @@
     const act = [];   // active filters: [id, text]
     if (sel.diff >= 0) act.push(['diff', 'Difficulty ' + DIFF[sel.diff]]);
     if (sel.act) act.push(['act', 'Act ' + sel.act]);
-    if ($('r1').value) act.push(['rank', 'Rank ' + $('r1').value]);
+    if (ranks1().length) act.push(['rank', 'Rank ' + ranks1().join(' / ')]);
     if (sel.tz) act.push(['tz', 'Terror zone']);
     if ($('f1').value.trim()) act.push(['text', 'Source filter "' + $('f1').value.trim() + '"']);
     const L = [];
@@ -251,12 +251,15 @@
     return L;
   }
 
+  /** the ranks ticked in the Rank filter; [] = all */
+  const ranks1 = () => Array.from(document.querySelectorAll('#r1 input:checked')).map((i) => i.value);
+  function rankSummary1() { const r = ranks1(); $('r1s').textContent = !r.length ? 'All' : r.length <= 2 ? r.join(', ') : r.length + ' ranks'; }
   function runTab1() {
     if (!target1) return;
     const sel = S = readSel(); saveSel();
     const t0 = performance.now();
     const { ctx, list } = getSources(sel);
-    const f = $('f1').value.trim().toLowerCase(), rk = $('r1').value;
+    const f = $('f1').value.trim().toLowerCase(), rk = ranks1();
     $('l_bq1').hidden = !isWhiteBase();
     const bq = isWhiteBase() ? $('bq1').value : '';
     const all = allRows(sel, ctx, list, bq);
@@ -264,7 +267,7 @@
       const src = r.src, x = [];
       if (sel.diff >= 0 && src.diff !== sel.diff) x.push('diff');
       if (sel.act && src.act !== sel.act) x.push('act');
-      if (rk && src.rank !== rk) x.push('rank');
+      if (rk.length && rk.indexOf(src.rank) < 0) x.push('rank');
       if (sel.tz && !src.tz) x.push('tz');
       if (f && (src.name + ' ' + (src.members || []).join(' ') + ' ' + src.mon + ' ' + src.areaName).toLowerCase().indexOf(f) < 0) x.push('text');
       return x;
@@ -1201,7 +1204,9 @@
     });
     autocomplete($('q1'), $('ac1'), () => INDEX, (x) => { target1 = x; runTab1(); });
     $('f1').addEventListener('input', () => { clearTimeout(runTab1.t); runTab1.t = setTimeout(runTab1, 250); });
-    $('r1').addEventListener('change', runTab1);
+    $('r1').addEventListener('change', () => { rankSummary1(); runTab1(); });
+    $('r1c').addEventListener('click', () => { for (const i of document.querySelectorAll('#r1 input')) i.checked = false; rankSummary1(); runTab1(); });
+    document.addEventListener('click', (ev) => { if (!$('r1').contains(ev.target)) $('r1').open = false; });   // the rank list closes on a click elsewhere
     $('bq1').addEventListener('change', runTab1);
     $('n1').addEventListener('change', runTab1);
 

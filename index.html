@@ -27,6 +27,10 @@
   .tab { display:none; } .tab.on { display:block; }
   .row { display:flex; flex-wrap:wrap; gap:8px 14px; align-items:flex-end; margin-bottom:10px; }
   .row label { display:flex; flex-direction:column; font-size:11px; color:var(--dim); gap:2px; }
+  .row .fld { display:flex; flex-direction:column; font-size:11px; color:var(--dim); gap:2px; }
+  .ms { position:relative; } .ms summary { list-style:none; margin:0; min-width:100px; background:var(--panel2); color:var(--text); border:1px solid var(--line); border-radius:4px; padding:4px 22px 4px 6px; font-size:14px; white-space:nowrap; }
+  .ms summary::-webkit-details-marker { display:none; } .ms summary::after { content:"\25BE"; position:absolute; right:7px; color:var(--dim); }
+  .msl { position:absolute; z-index:6; left:0; top:100%; margin-top:2px; min-width:150px; background:var(--panel); border:1px solid var(--accent); border-radius:4px; padding:6px 8px; display:flex; flex-direction:column; gap:4px; }
   .ac { position:relative; } .ac input { width:420px; max-width:90vw; }
   .ac ul { position:absolute; z-index:5; left:0; right:0; top:100%; margin:0; padding:0; list-style:none; background:var(--panel); border:1px solid var(--accent); max-height:320px; overflow:auto; }
   .ac li { padding:4px 8px; cursor:pointer; } .ac li:hover, .ac li.hi { background:var(--panel2); }
@@ -127,7 +131,7 @@
         <div class="ac"><input id="q1" placeholder="type to search, e.g. Shako, Ber, Tyrael, Griffon" autocomplete="off"><ul id="ac1" hidden></ul></div>
       </label>
       <label>Source filter <input id="f1" placeholder="monster or area text" style="width:200px"></label>
-      <label>Rank <select id="r1"><option value="">All</option><option>regular</option><option>champion</option><option>unique</option><option>minion</option><option>super</option><option>boss</option><option>herald</option></select></label>
+      <div class="fld" title="Tick one or more ranks; none ticked lists all of them">Rank <details class="ms" id="r1"><summary id="r1s">All</summary><div class="msl"><label class="chk"><input type="checkbox" value="regular"> regular</label><label class="chk"><input type="checkbox" value="champion"> champion</label><label class="chk"><input type="checkbox" value="unique"> unique</label><label class="chk"><input type="checkbox" value="minion"> minion</label><label class="chk"><input type="checkbox" value="super"> super</label><label class="chk"><input type="checkbox" value="boss"> boss</label><label class="chk"><input type="checkbox" value="herald"> herald</label><button type="button" id="r1c">Clear (all ranks)</button></div></details></div>
       <span class="wh" id="wh">
         <label>Difficulty
           <select id="s_diff"><option value="-1">All</option><option value="0">Normal</option><option value="1">Nightmare</option><option value="2" selected>Hell</option></select></label>
