@@ -409,6 +409,22 @@
     out.push('', 'Rows: ' + f.rows.map((r) => r.id).join(', '));
     return out.join('\n');
   }
+  /** the other affixes of a row's group on the current bases (same side; prefix and suffix groups are numbered apart): their first stat, or the
+   *  affix name when it has the row's own stat (another tier family like of Pacing / of Speed) */
+  let matesRows = null, matesMap = new Map();
+  const statLabel = (r) => (r.mods.length ? r.mods[0].key.replace(/[+-]?#%?/g, '').replace(/\(.*?\)/g, '').replace(/\s+/g, ' ').trim().replace(/^to /, '') : r.name);
+  function matesOf(r) {
+    if (!r.g) return [];
+    if (matesRows !== bd.rows) { matesRows = bd.rows; matesMap = new Map(); }
+    let m = matesMap.get(r.id);
+    if (!m) {
+      const own = statLabel(r);
+      m = Array.from(new Set(bd.rows.filter((x) => x.id !== r.id && x.g === r.g && x.side === r.side).map((x) => (statLabel(x) === own ? x.name : statLabel(x)))));
+      matesMap.set(r.id, m);
+    }
+    return m;
+  }
+  const matesTxt = (r) => { const m = matesOf(r); return m.length > 3 ? m.slice(0, 2).join(', ') + ' +' + (m.length - 2) + ' more' : m.join(', '); };
   const colsA = [
     { k: 'name', label: 'Name', l: 1, get: (r) => r.name.toLowerCase(), html: (r) => esc(r.name) + ' ' + sideTag(r) + (pickIds().has(r.id) ? ' <span class="picked-tag">picked</span>' : fitOf(r) ? '' : ' <span class="nofit-tag">doesn\'t fit</span>') },
     { k: 'desc', label: 'Description (all tiers)', l: 1, get: (r) => r.desc.toLowerCase(), html: (r) => r.desc.indexOf('poison damage over') >= 0 ? '<span title="' + esc(POIS_TIP) + '">' + esc(r.desc) + '</span>' : esc(r.desc) },
@@ -417,7 +433,7 @@
     { k: 'lvl', label: 'Affix lvl', note: 'Affix level (of the lowest tier). Staff skills have a tier instead.', get: (r) => r.lvl === null ? r.tier : r.lvl, fmt: (r) => r.lvl === null ? (r.tier ? 'tier ' + r.tier : '-') : r.lvl },
     { k: 'lr', label: 'Req lvl', note: 'Character level the affix requires (levelreq; of the lowest tier).', get: (r) => r.lr === null ? 0 : r.lr, fmt: (r) => r.lr === null ? '-' : r.lr },
     { k: 'cls', label: 'Class', l: 1, get: (r) => r.cls, fmt: (r) => r.cls ? (CLASSN[r.cls] || r.cls) + ' only' : '' },
-    { k: 'grp', label: 'Excludes', l: 1, note: 'Affixes of the same group never appear together on one item. The group is named after its first stat.', get: (r) => r.groupName, fmt: (r) => r.g ? r.groupName : '' },
+    { k: 'grp', label: 'Excludes', l: 1, note: 'The other affixes of its group (same side) on these bases: affixes of one group never appear together on one item. Hover for the full list.', get: (r) => matesTxt(r).toLowerCase(), fmt: matesTxt, rtip: (r) => matesOf(r).join('\n') },
     { k: 'qual', label: 'Quality', l: 1, note: 'Qualities the row can occur on: L low quality, N normal, S superior, M magic, R rare.', get: (r) => r.quals.length * 10 + (r.rare ? 1 : 0), fmt: (r) => r.quals.map((q) => QAB[q]).join(' ') },
   ].concat(QS_ALL.map((q) => ({ k: 'o' + q, show: () => showOdds() && oddsQ().indexOf(q) >= 0, get label() { return 'Odds (' + QCOLN[q] + ', ' + (bd.wts ? 'weighted' : 'avg') + ')'; },
     get note() { return 'Chance that a ' + QCOLN[q] + ' item of the type carries this ' + 'at the item level above. Exact. ' + avgNote() + ' Hover a cell for the per-base odds.'; },
@@ -449,7 +465,7 @@
     const wq = wantQ(), hf = $('hf2').checked, ids = pickIds();
     fitSync(); nofitHidden = 0;
     return bd.rows.filter((r) => (!sd || r.side === sd) && (!av || r.avail) && r.quals.some((q) => wq.indexOf(q) >= 0) &&
-      f.every((w) => (r.name + ' ' + r.desc + ' ' + r.side + ' ' + (r.cls ? (CLASSN[r.cls] || r.cls) + ' only' : '') + ' ' + r.groupName).toLowerCase().indexOf(w) >= 0) && (!hf || ids.has(r.id) || fitOf(r) || (nofitHidden++, false)));
+      f.every((w) => (r.name + ' ' + r.desc + ' ' + r.side + ' ' + (r.cls ? (CLASSN[r.cls] || r.cls) + ' only' : '')).toLowerCase().indexOf(w) >= 0) && (!hf || ids.has(r.id) || fitOf(r) || (nofitHidden++, false)));
   }
   function renderTable() {
     if (!showOdds() && TA.key.charAt(0) === 'o') { TA.key = 'il'; TA.dir = 1; }

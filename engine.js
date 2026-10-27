@@ -1856,6 +1856,8 @@
     const affId = (a) => a.k + a.i;   // 'p12' / 's7' / 'a3' (automagic row); staff mod skills are 'k' + stat key
 
     let btCache = null;
+    // itemtypes.txt names the charm types by size (Small / Medium / Large Charm) while their only bases are the Small / Large / Grand Charm
+    const CHARM_TYPE_NAMES = { mcha: 'Large Charm', lcha: 'Grand Charm' };
     /** item types the builder offers: [{code, name, cls, codes (rare/magic-capable spawnable bases), broad}]. broad = an abstract type no base is
      *  directly of ("Any Armor", "Melee Weapon", ...); the concrete ones (Boots, Sword, Circlet, ...) come first. */
     function builderTypes() {
@@ -1870,7 +1872,7 @@
       const out = [];
       for (const [code, list] of baseTypes()) {
         const codes = list.filter((c) => (items[c].cr || items[c].am) && drops(c));
-        if (codes.length) out.push({ code, name: types[code].n, cls: types[code].cls || '', codes, broad: !direct.has(code) });
+        if (codes.length) out.push({ code, name: CHARM_TYPE_NAMES[code] || types[code].n, cls: types[code].cls || '', codes, broad: !direct.has(code) });
       }
       out.sort((a, b) => (a.broad - b.broad) || a.name.localeCompare(b.name));
       return (btCache = out);
