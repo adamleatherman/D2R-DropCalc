@@ -2421,21 +2421,25 @@
     }
 
     // ---------------- search index ----------------
+    // left out of the search on purpose: event drops everyone knows (Annihilus: Diablo Clone, Hellfire Torch: Uber Tristram) and RotW's cjw, a
+    // "Jewel" (Colossal Jewel) that no treasure class names
+    const HIDDEN = new Set(['base|cjw', 'unique|Annihilus', 'unique|Hellfire Torch']);
     function searchIndex() {
       const out = [];
       const explicitI = new Set();
       for (const n in TC) for (const e of TC[n].e) if (items[e[0].split(',')[0]]) explicitI.add(e[0].split(',')[0]);   // e.g. ua1-ua5 statue pieces (spawnable=0 but named in TCs)
-      for (const code in items) {
+      const bases = Object.keys(items).filter((code) => (items[code].sp || explicitI.has(code)) && code !== 'gld' && !HIDDEN.has('base|' + code) && !(items[code].q <= 0 && items[code].k !== 'm'));
+      const nameN = new Map(); for (const c of bases) nameN.set(items[c].n, (nameN.get(items[c].n) || 0) + 1);
+      for (const code of bases) {
         const it = items[code];
-        if (!(it.sp || explicitI.has(code)) || code === 'gld') continue;
-        if (it.q <= 0 && it.k !== 'm') continue;
-        out.push({ kind: 'base', code, label: it.n + ' (' + code + ', qlvl ' + it.q + (it.tier === 1 ? ', exceptional' : it.tier === 2 ? ', elite' : '') + ')', name: it.n });   // the code is part of the label, so it is searchable too
+        const label = it.n + ' (' + (nameN.get(it.n) > 1 ? code + ', ' : '') + 'qlvl ' + it.q + (it.tier === 1 ? ', exceptional' : it.tier === 2 ? ', elite' : '') + ')';   // the code only when two bases share a name (RotW jew / cjw)
+        out.push({ kind: 'base', code, label, search: label + ' ' + code, name: it.n });   // the code stays searchable
       }
       const explicitU = new Set();
       for (const n in TC) for (const e of TC[n].e) if (uniqById[e[0]]) explicitU.add(e[0]);   // e.g. Sunder charms (spawnable=0 but dropped explicitly)
       for (const u of D.uniques) if ((u.sp || explicitU.has(u.id)) && !u.dis && dropConditionOK(u.dc, 2)) { const label = u.n + ' - unique ' + (items[u.code] ? items[u.code].n : u.code) + ' (lvl ' + u.lvl + ')'; out.push({ kind: 'unique', id: u.id, code: u.code, label, search: label + ' ' + u.id, name: u.n }); }
       for (const s of D.sets) if (s.sp && !s.dis) { const label = s.n + ' - set ' + (items[s.code] ? items[s.code].n : s.code) + ' (' + s.sn + ', lvl ' + s.lvl + ')'; out.push({ kind: 'set', id: s.id, code: s.code, label, search: label + ' ' + s.id + ' ' + s.set, name: s.n }); }
-      return out;
+      return out.filter((x) => !HIDDEN.has(x.kind + '|' + (x.kind === 'base' ? x.code : x.id)));
     }
 
     function baseTypes() {

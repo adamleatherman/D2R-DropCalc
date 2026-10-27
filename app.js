@@ -1085,7 +1085,7 @@
     w = w.toLowerCase();
     const names = TYPEOPTS.filter((o) => o.kind === 'type');
     return names.find((o) => o.name.toLowerCase() === w) || names.find((o) => o.name.toLowerCase().startsWith(w)) || names.find((o) => o.name.toLowerCase().indexOf(w) >= 0) ||
-      TYPEOPTS.find((o) => o.kind === 'base' && o.label.toLowerCase().indexOf(w) >= 0) || null;
+      TYPEOPTS.find((o) => o.kind === 'base' && (o.search || o.label).toLowerCase().indexOf(w) >= 0) || null;
   }
   function typeOptions() {
     const tys = E.builderTypes().map((t) => ({ kind: 'type', code: t.code, name: t.name, label: typeLabel(t), search: t.name + ' ' + t.code }));
