@@ -50,16 +50,16 @@
       for (const nm of ['Mephisto', 'Andariel', 'Baal', 'Diablo', 'Duriel']) {
         const r = {};
         for (const q of [false, true]) {
-          const ctx = cq(q), sr = find(ctx, nm, 2, ['boss']);
+          const ctx = cq(q), sr = (q && find(ctx, nm + ' (quest)', 2, ['boss'])) || find(ctx, nm, 2, ['boss']);   // quest on: the quest row (none for Andariel)
           r[q ? 'on' : 'off'] = { tc: sr.tc, mlvl: sr.mlvl, N: ctx.N, quest: sr.quest, totals: E.qualityTotals(ctx, sr, 0), hc: E.chanceFor(ctx, sr, hc, 0).target, hc300: E.chanceFor(ctx, sr, hc, 300).target };
         }
         res.quest[nm] = r;
       }
-      { const ctx = cq(true), sr = find(ctx, 'Mephisto', 2, ['boss']);   // a base the quest TC can drop: weapon/armor -> rare-or-better only
+      { const ctx = cq(true), sr = find(ctx, 'Mephisto (quest)', 2, ['boss']);   // a base the quest TC can drop: weapon/armor -> rare-or-better only
         let code = null; for (const [k, p] of E.srcDist(ctx, sr)) { const m = E.metaCache.get(k); if (m.kind === 'i' && p > 0 && E.items[m.id] && E.items[m.id].k && E.items[m.id].t !== 'grim' && !/^r\d\d$|^gld$/.test(m.id) && E.items[m.id].sp) { code = m.id; break; } }
         const c = code && E.chanceFor(ctx, sr, { kind: 'base', code }, 0), o = code && E.chanceFor(cq(false), find(cq(false), 'Mephisto', 2, ['boss']), { kind: 'base', code }, 0);
         res.quest.mephBase = { code, on: c, off: o }; }
-      { const f = (q) => E.sources(E.getCtx({ players: 1, party: 1, ladder: true, tz: true, clvl: 85, mf: 0, quest: q })).find((x) => x.rank === 'boss' && x.mon === 'diablo' && x.diff === 2 && x.tz);   // getCtx returns a shared object: use each result at once
+      { const f = (q) => E.sources(E.getCtx({ players: 1, party: 1, ladder: true, tz: true, clvl: 85, mf: 0, quest: q })).filter((x) => x.rank === 'boss' && x.mon === 'diablo' && x.diff === 2 && x.tz).sort((a, b) => b.quest - a.quest)[0];   // the quest row when there is one; getCtx returns a shared object: use each result at once
         const on = f(true), off = f(false); E.CONFIG.questOverridesTz = false; const fl = f(true); E.CONFIG.questOverridesTz = true;
         res.quest.tz = { on: on && on.tc, off: off && off.tc, flagOff: fl && fl.tc }; }
     }

@@ -137,11 +137,13 @@
   const PERKILL = new Set(['ptar', 'pbase', 'plow', 'pnorm', 'psup', 'pmag', 'prare', 'pset', 'puni', 'sTable', 'sMf', 'sTotal']);
   const kills1 = () => PERKILL.has(T1.key);
   /** chance per run: kills/run x per-kill chance (rough); an area row carries the sum over its sources */
-  const runP = (r) => r.runP !== undefined ? r.runP : r.c.target * r.src.perRun;
+  const runP = (r) => r.runP !== undefined ? r.runP : r.src.quest ? r.c.target : r.c.target * r.src.perRun;   // a boss quest row: its run is the one quest kill
   const PCTS = [25, 50, 75, 90, 95, 99];
   const unit1 = () => kills1() ? 'kills' : 'runs';
   const per1 = (r) => kills1() ? r.c.target : runP(r);
-  const srcLine = (p) => srcCols[0].html(p) + ' <span class="d">' + (p.src.herald ? 'n/a' : odds(runP(p)) + ' per run') + '</span>';
+  /** kills/run cell: heralds have no per-run chance, a boss quest row is the first kill only */
+  const runsTxtOf = (src) => src.herald ? 'n/a' : src.quest ? 'first kill' : src.perRun < 10 ? src.perRun.toFixed(2) : src.perRun.toFixed(0);
+  const srcLine = (p) => srcCols[0].html(p) + ' <span class="d">' + (p.src.herald ? 'n/a' : odds(runP(p)) + (p.src.quest ? ' on the quest kill' : ' per run')) + '</span>';
   const cols1 = [
     { k: 'name', get label() { return areaMode() ? 'Sources' : 'Monster'; }, l: 1, get: (r) => r.src.name,
       html: (r) => r.parts ? '<details class="mem"><summary>' + r.parts.length + ' source' + (r.parts.length > 1 ? 's' : '') + '</summary>' + r.parts.map((p) => '<div>' + srcLine(p) + '</div>').join('') + '</details>' : srcCols[0].html(r),
@@ -160,10 +162,10 @@
     { k: 'pset', show: showQB, note: QNOTE, label: 'P(set)', get: (r) => r.c.set, fmt: (r) => odds(r.c.set) },
     { k: 'puni', show: showQB, note: QNOTE, label: 'P(unique)', get: (r) => r.c.unique, fmt: (r) => odds(r.c.unique) },
     { k: 'ptar', label: 'Chance per kill', get note() { return 'Chance that one kill drops the target (shown as odds; sorts by probability).' + (areaMode() ? ' Area rows: the average over all kills of an area clear.' : ''); }, get: (r) => r.c.target, fmt: (r) => odds(r.c.target) },
-    { k: 'runs', label: 'kills/run', get: (r) => r.src.perRun, fmt: (r) => r.src.herald ? 'n/a' : r.src.perRun < 10 ? r.src.perRun.toFixed(2) : r.src.perRun.toFixed(0) },
+    { k: 'runs', label: 'kills/run', get: (r) => r.src.perRun, fmt: (r) => runsTxtOf(r.src) },
     { k: 'perrun', label: 'Chance per run', get note() { return 'Chance of finding the target in one run: kills/run x per-kill chance (rough model; shown as odds).' + (areaMode() ? ' Area rows add up the per-run chances of their sources (same linear model, capped at 1).' : ''); }, get: runP, fmt: (r) => odds(runP(r)) },
     { k: 'n50', get label() { return unit1() + ' for 50%'; }, get note() { return 'Number of ' + unit1() + ' needed to have found the target with 50% probability: ceil(ln(0.5) / ln(1-p)). Counts kills while the table is sorted by a per-kill column, runs otherwise. Hover a cell for 25/50/75/90/95/99%.'; },
-      get: per1, fmt: (r) => countFmt(E.trialsFor(per1(r), 0.5)), rtip: (r) => PCTS.map((q) => q + '%: ' + countFmt(E.trialsFor(per1(r), q / 100)) + ' ' + unit1()).join('\n') },
+      get: per1, fmt: (r) => r.src.quest && !kills1() ? '-' : countFmt(E.trialsFor(per1(r), 0.5)), rtip: (r) => r.src.quest && !kills1() ? 'The quest kill happens once per character and difficulty.' : PCTS.map((q) => q + '%: ' + countFmt(E.trialsFor(per1(r), q / 100)) + ' ' + unit1()).join('\n') },
   ];
 
   let srcCache = { sig: '', list: null };
@@ -291,7 +293,7 @@
     const it = target1.kind === 'base' ? E.items[target1.code] : E.items[(target1.kind === 'unique' ? E.uniqById : E.setById)[target1.id].code];
     // headline: best per kill (monster rows), best per run (area rows in area mode, else monster rows)
     const best = (rs, g) => rs.reduce((a, x) => !a || g(x) > g(a) ? x : a, null);
-    const bk = best(mon, (x) => x.c.target), br = best(areaMode() ? rows : mon.filter((x) => !x.src.herald), runP);
+    const bk = best(mon, (x) => x.c.target), br = best(areaMode() ? rows : mon.filter((x) => !x.src.herald && !x.src.quest), runP);   // a quest kill is not repeatable
     let hl = '<b>' + esc(target1.label) + '</b>';
     if (bk) hl += ' &middot; best per kill: ' + esc(srcWhere(bk.src)) + ', <b>' + odds(bk.c.target) + '</b>';
     if (br && runP(br) > 0) hl += ' &middot; best per run: ' + esc(areaMode() ? br.src.areaName + ' (' + DIFF[br.src.diff] + ')' : srcWhere(br.src)) + ', <b>' + runsTxt(runP(br)) + '</b>, ~' + countFmt(E.trialsFor(runP(br), 0.5)) + ' runs for 50% / ~' + countFmt(E.trialsFor(runP(br), 0.9)) + ' for 90%';
@@ -308,7 +310,7 @@
       why.hidden = false;
     }
     $('info1').textContent = 'base qlvl ' + it.q + '  |  ' + r.total.toLocaleString() + ' ' + (areaMode() ? 'areas' : 'sources') + ' can drop it (showing ' + r.shown + ')  |  N=' + ctx.N +
-      '  MF=' + sel.mf + '%' + (sel.quest ? '  |  quest drop (act bosses)' : '') + (bq ? '  |  base quality: ' + BQN[bq] : '') + '  |  ' + Math.round(performance.now() - t0) + ' ms. Click a column header to sort.';
+      '  MF=' + sel.mf + '%' + (sel.quest ? '  |  boss quest rows shown (first kill only)' : '') + (bq ? '  |  base quality: ' + BQN[bq] : '') + '  |  ' + Math.round(performance.now() - t0) + ' ms. Click a column header to sort.';
   }
 
   // ---------------- Tab 3: what drops here (reverse lookup) ----------------
@@ -323,16 +325,16 @@
     { k: 'name', label: 'Item', l: 1, get: (r) => r.t.name, html: (r) => esc(r.t.name) + ' <span class="tag ' + r.kind + '">' + (r.kind === 'charm' && /^(jew|cjw)$/.test(r.t.code) ? 'jewel' : KIND3[r.kind]) + '</span>' },   // jewels sit under the "Charms and jewels" filter but keep their own tag
     { k: 'base', label: 'Base', l: 1, get: base3, html: (r) => esc(base3(r)) },
     { k: 'pk', get label() { return c3.one ? 'Chance per kill' : 'Chance per kill (average)'; }, note: 'Chance that one kill drops the item (shown as odds). A whole area clear: the average over all its kills.', get: (r) => r.pk, fmt: (r) => odds(r.pk) },
-    { k: 'kills', label: 'kills/run', show: () => c3.one, get: () => c3.kills, fmt: () => c3.kills < 10 ? c3.kills.toFixed(2) : c3.kills.toFixed(0) },
+    { k: 'kills', label: 'kills/run', show: () => c3.one, get: () => c3.kills, fmt: () => c3.quest ? 'first kill' : c3.kills < 10 ? c3.kills.toFixed(2) : c3.kills.toFixed(0) },
     { k: 'perrun', label: 'Chance per run', note: 'Chance of finding the item in one run: kills/run x per-kill chance (rough model; an area clear adds up its sources, capped at 1; same numbers as Tab 1).', get: PCT3, fmt: (r) => odds(r.runP) },
-    { k: 'n50', label: 'runs for 50%', note: 'Runs needed to have found the item with 50% probability: ceil(ln(0.5) / ln(1-p)). Hover a cell for 25/50/75/90/95/99%.', get: PCT3, fmt: (r) => countFmt(E.trialsFor(r.runP, 0.5)), rtip: (r) => PCTS.map((q) => q + '%: ' + countFmt(E.trialsFor(r.runP, q / 100)) + ' runs').join('\n') },
+    { k: 'n50', label: 'runs for 50%', note: 'Runs needed to have found the item with 50% probability: ceil(ln(0.5) / ln(1-p)). Hover a cell for 25/50/75/90/95/99%.', get: PCT3, fmt: (r) => c3.quest ? '-' : countFmt(E.trialsFor(r.runP, 0.5)), rtip: (r) => c3.quest ? 'The quest kill happens once per character and difficulty.' : PCTS.map((q) => q + '%: ' + countFmt(E.trialsFor(r.runP, q / 100)) + ' runs').join('\n') },
   ];
   function runTab3() {
     const area = parseInt($('ar3').value || '0', 10);
     if (!area) { T3.rows = []; T3.render(); $('info3').textContent = 'Choose an area (and optionally one monster) to list what it drops, best first. Click an item to search it in tab 1.'; return; }
     const sel = S = readSel(), t0 = performance.now(), diff = d3Diff(), key = $('mo3').value;
     const { ctx, list } = getSources(sel);
-    const srcs = list.filter((s) => s.area === area && s.diff === diff && (!sel.tz || s.tz) && !s.herald && (!key || s.key === key));
+    const srcs = list.filter((s) => s.area === area && s.diff === diff && (!sel.tz || s.tz) && !s.herald && (key ? s.key === key : !s.quest));   // a whole area clear leaves out the boss quest rows (first kill only)
     const sig = JSON.stringify([srcCache.sig, area, diff, key, sel.ladder, sel.mf]);
     if (c3.sig !== sig) {
       const acc = new Map(), kills = srcs.reduce((a, s) => a + s.perRun, 0), one = srcs.length === 1, wsum = srcs.reduce((a, s) => a + (one ? 1 : s.perRun), 0);
@@ -340,7 +342,7 @@
         const d = E.dropsOf(ctx, src, sel.mf), w = one ? 1 : src.perRun;
         for (const [kind, m] of [['base', d.base], ['unique', d.unique], ['set', d.set]]) for (const [id, p] of m) {
           const a = acc.get(kind + '|' + id) || acc.set(kind + '|' + id, { pw: 0, run: 0 }).get(kind + '|' + id);
-          a.pw += p * w; a.run += p * src.perRun;
+          a.pw += p * w; a.run += p * (src.quest ? 1 : src.perRun);   // a boss quest row: its run is the one quest kill
         }
       }
       const rows = [];
@@ -348,7 +350,7 @@
         const a = acc.get(t.kind + '|' + (t.kind === 'base' ? t.code : t.id));
         if (a && a.pw > 0) rows.push({ t, kind: kind3(t), pk: a.pw / wsum, runP: Math.min(1, a.run), text: (t.name + ' ' + (t.kind === 'base' ? '' : E.items[t.code].n)).toLowerCase() });
       }
-      c3 = { sig, rows, one, kills, n: srcs.length, ms: 0 };
+      c3 = { sig, rows, one, kills, quest: one && !!srcs[0].quest, n: srcs.length, ms: 0 };
     }
     const k = $('k3').value, f = $('f3').value.trim().toLowerCase();
     T3.rows = c3.rows.filter((r) => (k === 'all' || (k === 'notable' ? r.kind !== 'base' : r.kind === k)) && (!f || r.text.indexOf(f) >= 0));
@@ -408,7 +410,7 @@
   const cols2 = srcCols.concat(QS_ALL.map((q) => ({ k: 'p' + q, label: 'P(' + (q === 'sup' ? 'superior' : q === 'low' ? 'low' : q) + ')', show: () => bd.farmQ.indexOf(q) >= 0,
     note: 'Chance per kill of a ' + QCOLN[q].toUpperCase() + ' item of the type with the combination (exact).', get: (r) => r.pq[q] || 0, fmt: (r) => odds(r.pq[q] || 0) })), [
     { k: 'ptot', label: 'P per kill', note: 'Chance that one kill drops a matching item (sum over every base of the type and the possible qualities; shown as odds, sorts by probability).', get: (r) => r.pTotal, fmt: (r) => odds(r.pTotal) },
-    { k: 'runs', label: 'kills/run', get: (r) => r.src.perRun, fmt: (r) => r.src.herald ? 'n/a' : r.src.perRun < 10 ? r.src.perRun.toFixed(2) : r.src.perRun.toFixed(0) },
+    { k: 'runs', label: 'kills/run', get: (r) => r.src.perRun, fmt: (r) => runsTxtOf(r.src) },
     { k: 'perrun', label: 'P per run', note: 'Chance of a matching item from the kills of this row in one run of its area (rough model; shown as odds). The best per run above adds up every row of an area.', get: (r) => r.perRun, fmt: (r) => odds(r.perRun) },
     { k: 'go1', label: 'Tab 1', note: 'Open tab 1 filtered to this monster / area (with the base as the target when the builder has a single base)', get: () => 0, html: () => '<a href="#" class="go1">search</a>' },
   ]);
@@ -1032,7 +1034,7 @@
       bd.farm = { top, topRun, topIl, rows: rows.length };
       showShares(); renderHead();
       $('finfo2').textContent = (r.total ? '' : 'No source found: monsters of the selected difficulty/act may not drop items at these item levels (try Difficulty: All or Normal). ') + r.total.toLocaleString() + ' sources (showing ' + r.shown + ')' + (top ? '; best per kill: ' + top.src.name + ' in ' + top.src.areaName + ' (' + DIFF[top.src.diff] + '), ' + odds(top.pTotal) : '') + (topIl ? '; best monster level per kill: ' + topIl.il + ' (' + topIl.x.src.name + ', ' + odds(topIl.x.pTotal) + ')' : '') + (topRun ? '; best per run: ' + topRun.src.areaName + ' (' + DIFF[topRun.src.diff] + '), ' + odds(topRun.p) : '') + '; ' +
-        'odds exact (' + qs.map((q) => QN[q]).join(', ') + ')' + (sel.quest ? '; quest drop (act bosses)' : '') + '; ' + Math.round(performance.now() - t0) + ' ms. Click a column header to sort.';
+        'odds exact (' + qs.map((q) => QN[q]).join(', ') + ')' + (sel.quest ? '; boss quest rows shown (first kill only)' : '') + '; ' + Math.round(performance.now() - t0) + ' ms. Click a column header to sort.';
     };
     runJob('farm', { type: 'farm', ctx: ctxS, opts, qualities: qs }, (f) => { $('prog2').value = f; }, finish, () => {
       const out = {}; for (const q of qs) out[q] = E.affixSearch(E.getCtx(ctxS), Object.assign({}, opts, { quality: q, prune: true, byBase: true }), null).rows; return out;
@@ -1213,7 +1215,7 @@
   function updGame() {
     const v = (id) => $(id).value, n = (id, w) => v(id) + ' ' + w + (v(id) === '1' ? '' : 's');
     $('gsum').textContent = ['Your game: ' + (v('s_mode') === 'lod' ? 'LoD' : 'RotW'), v('s_ladder') === '1' ? 'Ladder' : 'Non-ladder', n('s_players', 'player') + (+v('s_party') > 1 ? ' (party ' + v('s_party') + ')' : ''),
-      (+v('s_mf') || 0) + '% MF', 'clvl ' + v('s_clvl')].concat($('s_quest').checked ? ['quest drop'] : [], $('s_tz').checked ? ['terror zone' + (+v('s_tier') ? ' T' + v('s_tier') : '')] : []).join(' · ');
+      (+v('s_mf') || 0) + '% MF', 'clvl ' + v('s_clvl')].concat($('s_tz').checked ? ['terror zone' + (+v('s_tier') ? ' T' + v('s_tier') : '')] : []).join(' · ');
   }
   const sameTarget = (x, y) => x.kind === y.kind && (x.code || x.id) === (y.code || y.id);
 

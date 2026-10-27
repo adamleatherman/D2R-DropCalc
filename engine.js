@@ -91,8 +91,8 @@
     // = data-lod.json, see build.py); Engine.create sets this to the mode of the data it was given (meta.mode). Heralds exist when the
     // data has herald tiers (desecratedzones rotw section only).
     gameMode: 'rotw',
-    // --- quest drop (setting `quest`): act bosses with a monstats TreasureClassQuest use it instead of their TC (D2MOO MonsterMode.cpp:
-    //     first kill while the killer's quest is open; Andariel's normal TC already is Andarielq). ---
+    // --- quest drop (setting `quest`): act bosses with a monstats TreasureClassQuest get a second row on it, the quest kill (D2MOO MonsterMode.cpp:
+    //     it replaces the TC on the first kill while the killer's quest is open; Andariel's normal TC already is Andarielq, so she gets none). ---
     // ASSUMPTION: D2MOO is 1.10 (no desecrated TCs); in a terror zone D2R may use the desecrated column as-is (Andariel's desecrated
     // columns are 'Andarielq ... Desecrated', which hints at that). true = the quest TC overrides the desecrated TC too (D2MOO order).
     questOverridesTz: true,
@@ -835,12 +835,15 @@
           const inTz = tzOn && D.tz.levels[String(lid)] !== undefined;
           const base = m.lv[d];
           const mlvl = inTz ? Math.max(base, tzLevel(0, s.clvl, d) + CONFIG.uniqueOffset) + (CONFIG.tzBossExtra[id] || 0) : base;   // own level is the floor; Colossal Ancients (110) stay
-          let tcn = pickTC(m, d, 'regular', inTz);
-          const qtc = s.quest && m.qtc && m.qtc[d] && TC[m.qtc[d]] && (!inTz || CONFIG.questOverridesTz) ? m.qtc[d] : null;
-          if (qtc) tcn = qtc;
+          const tcn = pickTC(m, d, 'regular', inTz);
           if (!tcn || !TC[tcn]) continue;
           out.push({ key: 'boss|' + id + '|' + d, mon: id, name: m.n, rank: 'boss', diff: d, area: lid,
-            areaName: A.name, act: A.act, mlvl, tc: tcn, boss: true, perRun: 1, tz: inTz, quest: !!qtc });
+            areaName: A.name, act: A.act, mlvl, tc: tcn, boss: true, perRun: 1, tz: inTz, quest: false });
+          // setting `quest`: the quest kill as a row of its own next to the regular one (first kill only, so no kills per run); none when the
+          // quest TC is the regular one (Andariel)
+          const qtc = s.quest && m.qtc && m.qtc[d] && TC[m.qtc[d]] && m.qtc[d] !== tcn && (!inTz || CONFIG.questOverridesTz) ? m.qtc[d] : null;
+          if (qtc) out.push({ key: 'boss|' + id + '|' + d + '|quest', mon: id, name: m.n + ' (quest)', rank: 'boss', diff: d, area: lid,
+            areaName: A.name, act: A.act, mlvl, tc: qtc, boss: true, perRun: 0, tz: inTz, quest: true });
           for (const su of D.su) if (su.cls === id && D.su_area[su.id] === lid) suMinions(su, lid, inTz);   // the super unique row of the same boss (Radament, Summoner, Nihlathak, Griswold)
         }
       }
