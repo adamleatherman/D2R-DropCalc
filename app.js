@@ -417,7 +417,7 @@
   ]);
   const typeLabel = (t) => t.name + (t.cls ? ' (' + (CLASSN[t.cls] || t.cls) + ')' : '') + (t.broad ? ' - broad group' : '') + ' - ' + t.codes.length + ' bases';
   const effTier = () => parseInt($('tr2').value, 10);
-  const effIlvl = () => { const v = clampInt($('il2'), 1, 99); $('ilr2').value = v; return v; };
+  const effIlvl = () => { const v = clampInt($('il2'), 1, 99); $('ilr2').value = v; $('av2t').textContent = 'available at item level ' + v; return v; };
   function curCodes() {
     if (!bd.type) return [];
     return bd.type.kind === 'base' ? [bd.type.code] : E.builderBases(bd.type.code, effTier());
@@ -564,7 +564,7 @@
       (nd === bd.codes.length ? '' : nd ? '; ' + nd + ' of ' + bd.codes.length + ' bases can drop at item level ' + bd.tableIl + ' (the others only count above their own level)' : '; no base of the selection can drop at item level ' + bd.tableIl + ', so every row is dimmed') + (nofitHidden ? '; ' + nofitHidden + ' hidden because they do not fit your picks' : '') + (showOdds() ? '; odds at item level ' + effIlvl() + ', ' : '. ') +
       (!showOdds() ? '' : bd.wts ? (bd.wts.some((w) => w > 0) ? 'weighted by drop rate in ' + bd.wlabel + ' (bases that cannot drop there count 0)' : 'no base of the selection drops in ' + bd.wlabel + ' with the current selectors, so every odds figure is "-"')
         : 'average over the ' + bd.codes.length + ' base' + (bd.codes.length === 1 ? '' : 's') + ' of the selection (each base counted equally)') +
-      (showOdds() ? '. Hover an odds cell for the per-base odds.' : '') + ' Click a row to add or remove it. Dimmed rows cannot roll at the item level set under Advanced; rows marked "doesn\'t fit" cannot be combined with your picks (hover for why).' : '';
+      (showOdds() ? '. Hover an odds cell for the per-base odds.' : '') + ' Click a row to add or remove it. Dimmed rows cannot roll at item level ' + effIlvl() + ' (set in the card); rows marked "doesn\'t fit" cannot be combined with your picks (hover for why).' : '';
   }
   /** weighting request for the affix table: null (plain average) unless an area is chosen */
   function weightOpts(sel) {
@@ -669,7 +669,7 @@
   /** the pick a stat belongs to; null when no pick has it (deep link) or several do */
   const pickOf = (key) => { const ps = bd.picks.filter((p) => p.keys.indexOf(key) >= 0); return ps.length === 1 ? ps[0] : null; };
   const pickFromRow = (r) => ({ id: r.id, name: r.name, side: r.side, g: r.g, keys: r.mods.map((m) => m.key).filter((k) => bd.stats.has(k)) });
-  /** the family that owns a picked stat (its block); null for "Other stats" (no pick, or several picks share the stat) */
+  /** the family that owns a picked stat (its block); null for "Stats (any affix that gives them)" (no pick, or several picks share the stat) */
   const famOf = (key) => { const p = pickOf(key); return p ? bd.fams.get(p.id) || null : null; };
   /** the weakest value of a family stat: lowest minimum (ge) or highest maximum (le) over its tiers */
   const weakest = (f, key, le) => { const iv = f && f.vals[key]; return !iv ? undefined : le ? iv[iv.length - 1][1] : iv[0][0]; };
@@ -775,10 +775,10 @@
       '<input type="range" class="thrr" step="1"' + sl + '><small class="note rn">' + rngNote(s) + '</small></div>') +
       (vals && !fx ? '<small class="note tn">' + esc(tierNote(s)) + '</small>' : '') + '<div class="od" data-k="c' + i + '"></div></div>';
   }
-  /** the item card: base and quality, the slot counter, then one block per picked affix family with the sliders of its stats; stats no pick owns go under "Other stats" */
+  /** the item card: base and quality, the slot counter, then one block per picked affix family with the sliders of its stats; stats no pick owns go under "Stats (any affix that gives them)" */
   function renderSel() {
     const box = $('sel2');
-    if (!bd.type) { box.className = 'note'; box.textContent = 'Pick an item type or base first.'; return; }
+    if (!bd.type) { box.className = 'note'; box.textContent = 'Pick an item type or base first.'; $('st2').disabled = true; return; }
     box.className = '';
     const HINT = 'Higher tiers and other affixes with this stat also count.';
     const own = new Set(), blocks = bd.picks.map((p, pi) => {
@@ -788,11 +788,12 @@
         (mine.length ? '<div class="od" data-k="g' + pi + '"></div>' : '') + (mine.join('') || '<div class="note">its stats are also picked by another affix (see below)</div>') + '</div>';
     });
     const other = bd.sel.map((s, i) => own.has(i) ? '' : rowHtml(s, i)).join('');
-    if (other) blocks.push('<div class="pk"><div class="pkh"><b>Other stats</b></div>' + other + '</div>');
+    if (other) blocks.push('<div class="pk"><div class="pkh"><b>Stats (any affix that gives them)</b></div>' + other + '</div>');
     const q = $('ql2').value;
-    box.innerHTML = '<div class="card"><div class="chd"><b>' + esc(bd.type.name) + '</b><span>' + (q ? QN[q] : 'Any quality') + '</span></div><div class="slots">' + slotLine() + '</div>' + (bd.sel.length ? '<div class="odt"><b>All picks:</b> <span class="od" data-k="t"></span></div><div class="note odn"></div><div class="ilc"></div>' : '') +
-      (blocks.join('') || '<div class="note">Click an affix in the table to add it. Each of its stats gets a minimum value you can move with the slider.</div>') + '</div>';
-    paintOdds(); requestOdds();
+    box.innerHTML = '<div class="card"><div class="chd"><b>' + esc(bd.type.name) + '</b><span>' + (q ? QN[q] : 'Any quality') + '</span></div><div class="slots">' + slotLine() + '</div>' + (bd.sel.length ? '<div class="vd" hidden></div><div class="odt"><b>All picks, per item:</b> <span class="od" data-k="t"></span></div><div class="note odn"></div><div class="ilc"></div>' : '') +
+      (blocks.join('') || '<div class="note">Click an affix in the table, or add a stat by name below. Each stat gets a minimum value you can move with the slider.</div>') + '</div>';
+    $('st2').disabled = false;
+    paintOdds(); requestOdds(); paintVerdict();
   }
 
   // ----- odds in the item card: per stat, per affix block, all picks (E.cardOdds: magic exact, rare reweighted from recorded samples, done in the worker) -----
@@ -821,7 +822,7 @@
     for (const el of box.querySelectorAll('.od')) el.innerHTML = o ? oddsLine(o, el.dataset.k) : '';
     paintCurve();
     const n = box.querySelector('.odn');
-    if (n) n.textContent = !o ? (oddsBusy ? 'Computing odds...' : '') : 'Chance that an item of that quality on the selection drops with these stats (at least the values set), at item level ' + o.ilvl + '. ' +
+    if (n) n.textContent = !o ? (oddsBusy ? 'Computing odds...' : '') : 'Per item, not per kill: of the items of that quality the selection drops at item level ' + o.ilvl + ', the share with these stats (at least the values set). The per-kill odds are in the verdict and the farm search. ' +
       (o.wlabel ? 'Weighted by drop rate in ' + o.wlabel + '.' : 'Average over the ' + o.nb + ' base' + (o.nb === 1 ? '' : 's') + ' of the selection.') + (o.nd < o.nb ? ' Only ' + o.nd + ' of its ' + o.nb + ' bases can drop at item level ' + o.ilvl + '; the others are left out.' : '') + (oddsBusy ? ' Updating...' : '');
   }
   // ----- best item level: odds of all picks at ilvl 1..99 (E.ilvlCurve, own worker; it does not depend on the item level, so moving the level only moves the marker) -----
@@ -858,7 +859,7 @@
     });
     const at = qs.map((q) => QCOLN[q] + ' ' + odds(c.res[q].p[cur - 1])).join(', ');
     el.innerHTML = '<div class="note ilbest" title="' + esc('Per item of that quality on the selection (average over its bases that can drop at the level), not per kill: the farm table also includes the quality chance, MF and the base mix, so it stays the answer for where to farm. Higher levels add competing affixes and bases, so the best level is often below 99. Click the chart to set the item level.') + '"><b>Best item level:</b> ' +
-      parts.join(' &middot; ') + ' &middot; at your level ' + cur + ': ' + at + '</div>' +
+      parts.join(' &middot; ') + ' &middot; at item level ' + cur + ': ' + at + '</div>' +
       '<div class="ilch" title="Click to set the item level">' + ilChart(qs.map((q) => ({ q, p: c.res[q].p, best: c.res[q].best })), cur) + '</div>' +
       '<div class="note" style="display:flex;justify-content:space-between;gap:8px"><span>ilvl 1</span><span>log odds; first level: ' + qs.map((q) => QCOLN[q] + ' ' + c.res[q].first).join(', ') + '</span><span>99</span></div>';
   }
@@ -925,7 +926,7 @@
     const res = $('res2');
     bd.an = null; bd.farmQ = [];
     if (!bd.codes.length) { res.innerHTML = '<div class="note">No bases for this type / tier.</div>'; requestOdds(true); return; }
-    if (!bd.sel.length) { requestOdds(true); res.innerHTML = '<div class="note">Select at least one affix to see the item levels and farm sources.</div>'; T2.rows = []; T2.render(); $('finfo2').textContent = ''; return; }
+    if (!bd.sel.length) { requestOdds(true); res.innerHTML = '<div class="note">Select at least one affix or stat to see the item levels and farm sources.</div>'; T2.rows = []; T2.render(); $('finfo2').textContent = ''; return; }
     const an = bd.an = E.comboAnalysis(bd.codes, condsOf(), { diff: selDiff() });
     const forced = $('ql2').value, qs = wantQ();
     bd.farmQ = qs.filter((q) => an[q].ok);
@@ -980,6 +981,15 @@
       (f.topIl ? ' &middot; <span title="Highest per-kill chance among the sources of each item level (the level a drop rolls at = monster level); includes quality chance, MF and the base mix">best monster level per kill: <b>' + f.topIl.il + '</b> (' + esc(f.topIl.x.src.name) + ', ' + killsTxt(f.topIl.x.pTotal) + ')</span>' : '');
     h.className = 'head';
     h.innerHTML = '<b>' + esc(qn + ' ' + bd.type.name) + '</b> &middot; item level ' + ilTxt(lo, hi) + ' &middot; requires character level ' + rq + ' &middot; ' + farm;
+    paintVerdict();
+  }
+  /** the verdict (renderHead's line) repeated at the top of the card, so it shows without scrolling past the affix table */
+  function paintVerdict() {
+    const v = $('sel2').querySelector('.vd'), h = $('head2'); if (!v) return;
+    v.hidden = !(h && bd.an && h.innerHTML);
+    if (v.hidden) return;
+    v.className = 'vd' + (h.classList.contains('bad') ? ' bad' : '');
+    v.innerHTML = h.innerHTML + ' <a href="#res2">details below</a>';
   }
   /** per-base contribution to the best farm source, from the last farm result */
   function showShares() {
@@ -1106,6 +1116,9 @@
     $('odds2').checked = lsGet('d2dc-odds2');
     TA.onRow = onPickRow;
     autocomplete($('q2'), $('ac2'), () => TYPEOPTS, (x) => setType(x));
+    // stat-first entry: any affix that gives the stat counts (the stat goes under "Stats (any affix that gives them)" in the card)
+    autocomplete($('st2'), $('acst2'), () => bd.type ? Array.from(bd.stats.values()).filter((st) => !bd.sel.some((s) => s.key === st.key)).map((st) => ({ key: st.key, label: st.text, search: st.text + ' ' + st.key })) : [],
+      (x) => { $('st2').value = ''; if (addStat(x.key)) { renderSel(); refit(true); changed(); } });
     $('tr2').addEventListener('change', () => { if (bd.type && bd.type.kind === 'type') refreshBuilder(); });
     $('ilr2').addEventListener('input', () => { $('il2').value = $('ilr2').value; });
     $('ilr2').addEventListener('change', () => { syncUrl(); requestTable(); });
@@ -1184,7 +1197,7 @@
     bd.stats = new Map(E.builderStats(bd.codes).map((s) => [s.key, s])); bd.fams = E.builderFamilies(bd.codes);
     bd.sel = []; bd.picks = []; fitIdx = null;
     const byRow = new Map(); for (const f of bd.fams.values()) for (const id of f.ids) byRow.set(id, f);
-    for (const id of qs.getAll('p')) {   // ?p=<family id>: the picked affixes; an old link's tier row id (p12) maps to its family; links without p: the stats show under "Other stats"
+    for (const id of qs.getAll('p')) {   // ?p=<family id>: the picked affixes; an old link's tier row id (p12) maps to its family; links without p: the stats show under "Stats (any affix that gives them)"
       const f = bd.fams.get(id) || byRow.get(id); if (!f || bd.picks.some((p) => p.id === f.fid) || groupClash(f) || sideClash(f)) continue;
       if (!pickFromRow(f).keys.length) continue;
       addPick(f);
@@ -1261,7 +1274,7 @@
     const tabs = ['t1', 't2', 't3', 't4'];
     tabs.forEach((t, i) => $(t).onclick = () => {
       tabs.forEach((x, j) => { $(x).classList.toggle('on', i === j); $('tab' + (j + 1)).classList.toggle('on', i === j); });
-      if (i < 3) $('tab' + (i + 1)).querySelector('.row').appendChild($('wh'));   // Difficulty / Act (global) sit with the filters of the open tab
+      if (i < 3) { const sec = $('tab' + (i + 1)), fr = sec.querySelector('.farmrow'); if (fr) fr.insertBefore($('wh'), fr.children[1]); else sec.querySelector('.row').appendChild($('wh')); }   // Difficulty / Act (global) sit with the filters of the open tab; in the builder with the farm filters
     });
     // "Your game" bar: one-line summary, open state remembered
     $('game').open = lsGet('d2dc-game');
