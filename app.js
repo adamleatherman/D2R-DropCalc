@@ -527,12 +527,18 @@
   }
   /** the pick a family cannot appear with: one of the same affix group on the same side (tiers like of Pacing / of Speed); null when none */
   const groupClash = (f) => (f.g ? bd.picks.find((p) => p.id !== f.id && p.g === f.g && p.side === f.side) || null : null);
+  /** the pick a prefix / suffix replaces when no wanted quality has room for a second one on that side: magic items (charms, or the quality forced
+   *  to magic) carry one prefix and one suffix; only a rare has more. null when none */
+  const sideClash = (f) => ((f.side === 'prefix' || f.side === 'suffix') && !(wantQ().indexOf('rare') >= 0 && bd.codes.some((c) => E.data.items[c].cr))
+    ? bd.picks.find((p) => p.id !== f.id && p.side === f.side) || null : null);
   /** a family fits when it is in no picked affix's group and some tier fits */
-  const fitOf = (f) => !groupClash(f) && (!bd.sel.length || f.rows.some(rowFits));
+  const fitOf = (f) => !groupClash(f) && !sideClash(f) && (!bd.sel.length || f.rows.some(rowFits));
   /** why a row does not fit: E.explainCombo for the wanted qualities (the qualities the row can occur on first, magic and rare before the white ones). Computed on hover: it sweeps every item level */
   function noFitWhy(r) {
     const gc = groupClash(r);
     if (gc) return "Doesn't fit with your picks: " + r.name + ' and ' + gc.name + ' are affixes of the same group, which never appear together on one item. Click to pick it instead of ' + gc.name + '.';
+    const sc = sideClash(r);
+    if (sc) return "Doesn't fit with your picks: a magic item has one " + r.side + ' and ' + sc.name + ' is already picked. Click to pick ' + r.name + ' instead.';
     fitSync();
     let w = whyCache.get(r.id);
     if (!w) {
@@ -968,6 +974,7 @@
     if (!r) return;
     if (bd.picks.some((p) => p.id === r.id)) { removePick(r.id); return; }   // clicking a picked row takes it out again
     const gc = groupClash(r); if (gc) dropPick(gc.id);   // another tier of a picked group replaces it (an item never has both)
+    const sc = sideClash(r); if (sc) dropPick(sc.id);   // a second prefix / suffix on a magic-only item replaces the first
     addPick(r);
     updateRanges(); renderSel(); refit(true); changed();
   }
@@ -1061,7 +1068,7 @@
     bd.sel = []; bd.picks = []; fitIdx = null;
     const byRow = new Map(); for (const f of bd.fams.values()) for (const id of f.ids) byRow.set(id, f);
     for (const id of qs.getAll('p')) {   // ?p=<family id>: the picked affixes; an old link's tier row id (p12) maps to its family; links without p: the stats show under "Other stats"
-      const f = bd.fams.get(id) || byRow.get(id); if (!f || bd.picks.some((p) => p.id === f.fid) || groupClash(f)) continue;
+      const f = bd.fams.get(id) || byRow.get(id); if (!f || bd.picks.some((p) => p.id === f.fid) || groupClash(f) || sideClash(f)) continue;
       if (!pickFromRow(f).keys.length) continue;
       addPick(f);
     }

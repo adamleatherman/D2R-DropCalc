@@ -1862,9 +1862,14 @@
       if (btCache) return btCache;
       const direct = new Set();
       for (const c in items) { direct.add(items[c].t); if (items[c].t2) direct.add(items[c].t2); }
+      // a base no treasure class can pick is left out: named in a TC, or of a type with auto TCs (armo3, weap3, ...; genericInfo). RotW's cjw
+      // ("Jewel", type Colossal Jewel) is spawnable but in no TC, so it would show up as a second "Jewel" that never drops.
+      const named = new Set();
+      for (const n in TC) for (const e of TC[n].e) named.add(e[0].split(',')[0]);
+      const drops = (c) => named.has(c) || items[c].anc.some((a) => types[a] && types[a].tc);
       const out = [];
       for (const [code, list] of baseTypes()) {
-        const codes = list.filter((c) => items[c].cr || items[c].am);
+        const codes = list.filter((c) => (items[c].cr || items[c].am) && drops(c));
         if (codes.length) out.push({ code, name: types[code].n, cls: types[code].cls || '', codes, broad: !direct.has(code) });
       }
       out.sort((a, b) => (a.broad - b.broad) || a.name.localeCompare(b.name));
