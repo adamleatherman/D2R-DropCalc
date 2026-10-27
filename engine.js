@@ -852,8 +852,10 @@
      *  same group-upgraded TC at the same mlvl (NM/Hell; Normal uses each type's own mlvl), so their per-kill odds are identical. Rows merge only when
      *  upgraded TC, mlvl and herald tier all match; kills/run add up. A rank that still splits in an area lists its member names after the label.
      *  Merged rows carry members (display names) and mon (the ids, space separated); regular monsters, super uniques and bosses pass through.
-     *  Heralds: one row per tier ("Herald tier N"), all five when the context's tier is 0 (All tiers), else only that tier. Verified against the data:
-     *  in every terror zone, at every tier and clvl, all herald types of the area end on one Herald TC (same mlvl, tier boost and quality adjustment). */
+     *  Heralds: all five tiers when the context's tier is 0 (All tiers), else only that tier; merged ACROSS areas, one row per tier / mlvl / upgraded Herald
+     *  TC ("Herald tier N (mlvl M)"). The Herald TC picked by upgradeTC is the highest group-41 Herald TC at or below mlvl + tier boost whatever the
+     *  starting TC, so (mlvl, tier) alone fixes the drop table (verified at every clvl); the TC stays in the key so a rule change splits rows instead of
+     *  merging wrong ones. Herald rows carry areas ([{id, name}]), acts (sorted) and the area / act fields 0; areaName says how many areas. */
     function areaSources(ctx) {
       const out = [], groups = new Map(), split = new Map();
       const st = ctx.s.tier, tiers = st >= 1 && st <= 5 ? [st] : [1, 2, 3, 4, 5];
@@ -861,21 +863,26 @@
       for (const src0 of sources(ctx)) for (const src of expand(src0)) {
         if (!GROUP_LABEL[src.rank]) { out.push(src); continue; }
         const top = upgradeTC(src.tc, src.mlvl + (src.tcBoost || 0), false, src.herald ? HERALD_TC : null);
-        const where = [src.rank, src.area, src.diff, src.tz ? 1 : 0, src.tier || 0].join('|');
+        const where = [src.rank, src.herald ? 'h' : src.area, src.diff, src.tz ? 1 : 0, src.tier || 0].join('|');
         const key = 'grp|' + where + '|' + src.mlvl + '|' + top;
         let g = groups.get(key);
         if (!g) {
           g = Object.assign({}, src, { key, members: [], mon: '', perRun: 0, share: 0 });
+          if (src.herald) { g.area = 0; g.act = 0; g.areas = []; g.acts = []; g.seen = new Set(); }
           groups.set(key, g); out.push(g);
           split.set(where, (split.get(where) || 0) + 1);
         }
         if (g.members.indexOf(src.name) < 0) g.members.push(src.name);
-        g.mon += (g.mon ? ' ' : '') + src.mon;
+        if (g.herald) {
+          if (g.areas.every((a) => a.id !== src.area)) { g.areas.push({ id: src.area, name: src.areaName }); if (g.acts.indexOf(src.act) < 0) g.acts.push(src.act); }
+          if (!g.seen.has(src.mon)) { g.seen.add(src.mon); g.mon += (g.mon ? ' ' : '') + src.mon; }
+        } else g.mon += (g.mon ? ' ' : '') + src.mon;
         g.perRun += src.perRun; g.share += src.share || 0;
       }
       for (const g of groups.values()) {
         const where = [g.rank, g.area, g.diff, g.tz ? 1 : 0, g.tier || 0].join('|');
-        g.name = (g.herald ? 'Herald tier ' + g.tier : GROUP_LABEL[g.rank]) + (split.get(where) > 1 ? ': ' + g.members.join(', ') : '');
+        if (g.herald) { g.acts.sort(); g.areaName = g.areas.length + ' terror-zone area' + (g.areas.length === 1 ? '' : 's'); delete g.seen; }
+        g.name = g.herald ? 'Herald tier ' + g.tier + ' (mlvl ' + g.mlvl + ')' : GROUP_LABEL[g.rank] + (split.get(where) > 1 ? ': ' + g.members.join(', ') : '');
       }
       return out;
     }
@@ -1791,7 +1798,7 @@
     function affixSearch(ctx, o, progress) {
       const codes = new Set(o.codes);
       const qn = o.quality, qf = QFIELD[qn];
-      let srcs = areaSources(ctx).filter((s) => (o.diff < 0 || s.diff === o.diff) && (!o.act || s.act === o.act) && (!o.area || s.area === o.area) && (!o.srcKey || s.key === o.srcKey));
+      let srcs = areaSources(ctx).filter((s) => (o.diff < 0 || s.diff === o.diff) && (!o.act || s.act === o.act || (s.acts && s.acts.indexOf(o.act) >= 0)) && (!o.area || s.area === o.area || (s.areas && s.areas.some((a) => a.id === o.area))) && (!o.srcKey || s.key === o.srcKey));
       const recs = [];
       const need = new Map();
       for (const src of srcs) {
@@ -2114,7 +2121,7 @@
       const set = new Set(codes), mass = new Map();
       let tot = 0, n = 0;
       for (const src of areaSources(ctx)) {
-        if (o.srcKey ? src.key !== o.srcKey : ((o.diff >= 0 && src.diff !== o.diff) || (o.act && src.act !== o.act) || (o.area && src.area !== o.area) || (o.tz && !src.tz))) continue;
+        if (o.srcKey ? src.key !== o.srcKey : ((o.diff >= 0 && src.diff !== o.diff) || (o.act && src.act !== o.act && !(src.acts && src.acts.indexOf(o.act) >= 0)) || (o.area && src.area !== o.area) || (o.tz && !src.tz))) continue;
         const f = o.srcKey ? 1 : src.perRun;
         if (!(f > 0)) continue;
         let hit = false;

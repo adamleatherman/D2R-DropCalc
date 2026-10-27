@@ -92,9 +92,9 @@
   const rankTag = (r) => r === 'regular' ? '' : r === 'herald' ? ' <span class="tag herald" title="' + esc(HERALD_TIP) + '">herald</span>' : ' <span class="tag ' + r + '">' + r + '</span>';
   const srcCols = [
     { k: 'name', label: 'Monster', l: 1, get: (r) => r.src.name, html: (r) => (r.src.members ? '<span title="' + esc(r.src.members.join(', ')) + '">' + esc(r.src.name) + '</span>' : esc(r.src.name)) + rankTag(r.src.rank) },
-    { k: 'area', label: 'Area', l: 1, get: (r) => r.src.areaName, html: (r) => esc(r.src.areaName) + (r.src.tz ? ' <span class="tz">TZ</span>' : '') },
+    { k: 'area', label: 'Area', l: 1, get: (r) => r.src.areaName, html: (r) => (r.src.areas ? '<span title="' + esc(r.src.areas.map((a) => a.name).join(', ')) + '">' + esc(r.src.areaName) + '</span>' : esc(r.src.areaName)) + (r.src.tz ? ' <span class="tz">TZ</span>' : '') },
     { k: 'diff', label: 'Diff', l: 1, get: (r) => r.src.diff, fmt: (r) => DIFF[r.src.diff].slice(0, 2) + (r.src.diff == 1 ? 'm' : '') },
-    { k: 'act', label: 'Act', get: (r) => r.src.act },
+    { k: 'act', label: 'Act', get: (r) => r.src.acts ? r.src.acts[0] : r.src.act, fmt: (r) => r.src.acts ? r.src.acts.join(', ') : r.src.act },
     { k: 'mlvl', label: 'mlvl', get: (r) => r.src.mlvl },
   ];
 
@@ -206,6 +206,17 @@
       return { src: { name: s0.areaName, areaName: s0.areaName, diff: s0.diff, act: s0.act, tz: s0.tz, rank: 'regular', mlvl: Math.max(...parts.map((r) => r.src.mlvl)), perRun: kills }, c, sp, runP: p, parts };
     });
   }
+  const actsOf = (src) => src.acts || [src.act];
+  /** text filter on a source; a merged herald row also matches any covered area name (areaName itself is only the count) */
+  const textHit = (src, f) => (src.name + ' ' + (src.members || []).join(' ') + ' ' + src.mon + ' ' + src.areaName + ' ' + (src.areas || []).map((a) => a.name).join(' ')).toLowerCase().indexOf(f) >= 0;
+  /** a merged herald row narrowed to the areas the Act and source filters let through (its other fields stay) */
+  function narrowHerald(src, act, f) {
+    if (!src.areas) return src;
+    const own = f && (src.name + ' ' + src.members.join(' ') + ' ' + src.mon).toLowerCase().indexOf(f) >= 0;   // matched by monster: every area stays
+    const areas = src.areas.filter((a) => (!act || E.data.levels[a.id].act === act) && (!f || own || a.name.toLowerCase().indexOf(f) >= 0));
+    if (areas.length === src.areas.length) return src;
+    return Object.assign({}, src, { areas, acts: Array.from(new Set(areas.map((a) => E.data.levels[a.id].act))).sort(), areaName: areas.length + ' of ' + src.areas.length + ' terror-zone areas' });
+  }
   const srcWhere = (src) => src.name + ' in ' + src.areaName + ' (' + DIFF[src.diff] + ')';
   const runsTxt = (p) => p >= 1 ? 'always' : odds(p) + ' runs';
   const lowest = (rows) => rows.reduce((a, r) => !a || r.src.mlvl < a.src.mlvl ? r : a, null);
@@ -233,7 +244,7 @@
       if (!ok.length) continue;
       const vals = (g) => Array.from(new Set(ok.map(g))).sort();
       part.push(id === 'diff' ? txt + ': it only drops in ' + vals((r) => r.src.diff).map((d) => DIFF[d]).join(' / ')
-        : id === 'act' ? txt + ': it drops in act ' + vals((r) => r.src.act).join(', ')
+        : id === 'act' ? txt + ': it drops in act ' + Array.from(new Set(ok.flatMap((r) => actsOf(r.src)))).sort().join(', ')
         : id === 'rank' ? txt + ': it drops from ' + vals((r) => r.src.rank).join(', ') + ' only'
         : id === 'tz' ? 'Terror zone is on: untick it to see the ' + ok.length + ' sources outside terror zones'
         : txt + ' matches none of them; clear it to see ' + ok.length);
@@ -266,15 +277,15 @@
     const fails = all.rows.map((r) => {
       const src = r.src, x = [];
       if (sel.diff >= 0 && src.diff !== sel.diff) x.push('diff');
-      if (sel.act && src.act !== sel.act) x.push('act');
+      if (sel.act && actsOf(src).indexOf(sel.act) < 0) x.push('act');
       if (rk.length && rk.indexOf(src.rank) < 0) x.push('rank');
       if (sel.tz && !src.tz) x.push('tz');
-      if (f && (src.name + ' ' + (src.members || []).join(' ') + ' ' + src.mon + ' ' + src.areaName).toLowerCase().indexOf(f) < 0) x.push('text');
+      if (f && !textHit(src, f)) x.push('text');
       return x;
     });
     const mon = all.rows.filter((r, i) => !fails[i].length);
     if (isSun()) for (const r of mon) if (r.sp === undefined) r.sp = E.sunderPaths(ctx, r.src, target1.id, sel.mf);
-    const rows = areaMode() ? groupAreas(mon) : mon;
+    const rows = areaMode() ? groupAreas(mon) : mon.map((r) => r.src.areas && (sel.act || f) ? Object.assign({}, r, { src: narrowHerald(r.src, sel.act, f) }) : r);
     T1.rows = rows; T1.limit = parseInt($('n1').value, 10);
     const r = T1.render();
     const it = target1.kind === 'base' ? E.items[target1.code] : E.items[(target1.kind === 'unique' ? E.uniqById : E.setById)[target1.id].code];
@@ -1198,7 +1209,10 @@
       const r = T2.shownRows[ev.target.closest('tr').sectionRowIndex]; if (!r) return;
       const t = bd.type && bd.type.kind === 'base' ? INDEX.find((x) => x.kind === 'base' && x.code === bd.type.code) : null;
       if (t) { target1 = t; $('q1').value = t.label; }
-      $('f1').value = r.src.rank === 'boss' || r.src.rank === 'super' ? r.src.name : r.src.areaName;
+      const hr = !!r.src.herald;   // a merged herald row covers many areas: no area filter, the Rank filter says herald instead
+      for (const i of document.querySelectorAll('#r1 input')) i.checked = hr && i.value === 'herald';
+      rankSummary1();
+      $('f1').value = hr ? '' : r.src.rank === 'boss' || r.src.rank === 'super' ? r.src.name : r.src.areaName;
       $('t1').click();
       runTab1();
     });
