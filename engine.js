@@ -947,6 +947,28 @@
       return res;
     }
 
+    /** Every target a source can drop in one pass over its leaves (same walk and numbers as chanceFor): {base: Map code -> P(base), unique: Map id -> p, set: Map id -> p}, per kill. */
+    function dropsOf(ctx, src, mf) {
+      const base = new Map(), unique = new Map(), set = new Map();
+      const add = (m, k, v) => m.set(k, (m.get(k) || 0) + v);
+      const cfgSig = JSON.stringify([CONFIG.heraldQualityAdj]);
+      const memo = ctx.qmemo || (ctx.qmemo = new Map());
+      for (const [k, p] of srcDist(ctx, src)) {
+        const meta = metaCache.get(k);
+        if (meta.kind === 'u') { add(unique, meta.id, p); continue; }
+        if (meta.kind === 's') { add(set, meta.id, p); continue; }
+        const code = meta.id;
+        add(base, code, p);
+        if (!items[code]) continue;
+        const qk = code + '|' + src.mlvl + '|' + mf + '|' + meta.f.join(',') + '|' + (ctx.ladder ? 1 : 0) + '|' + src.diff + '|' + (src.herald ? src.tier : 0) + '|' + cfgSig;
+        let q = memo.get(qk);
+        if (!q) { q = adjQuality(quality(code, src.mlvl, mf, meta.f, ctx.ladder, src.diff), src); memo.set(qk, q); }
+        for (const x of q.uniques) add(unique, x.u.id, p * x.p);
+        for (const x of q.sets) add(set, x.s.id, p * x.p);
+      }
+      return { base, unique, set };
+    }
+
     /** per-kill chance of the base target restricted to a base quality: '' / 'any' | 'white' (low+normal+superior) | 'normsup' | 'sup' */
     function baseQualityChance(c, mode) {
       return mode === 'white' ? c.low + c.normal + c.hq : mode === 'normsup' ? c.normal + c.hq : mode === 'sup' ? c.hq : c.base;
@@ -2440,7 +2462,7 @@
 
     return {
       CONFIG, data: D, DIFFS, items, types, getCtx, playersN, adjNoDrop, dist, upgradeTC, areaSources, DUP_OF, areaRun, areaRolls, listShares, bossPacks,
-      mode, heraldsAvailable, sunderChance, sunderPaths, isSunder, adjQuality, heraldSpawnPct, quality, qualityTotals, sources, srcDist, chanceFor, baseQualityChance, affixLevel, minIlvlForAlvl, eligible, maxSockets, affixProb, rareProbFromSamples, cardOdds, ilvlCurve, minLevels, staffDist, staffBase,
+      mode, heraldsAvailable, sunderChance, sunderPaths, isSunder, adjQuality, heraldSpawnPct, quality, qualityTotals, sources, srcDist, chanceFor, dropsOf, baseQualityChance, affixLevel, minIlvlForAlvl, eligible, maxSockets, affixProb, rareProbFromSamples, cardOdds, ilvlCurve, minLevels, staffDist, staffBase,
       statList, describe, describeAt, sliderWhat, affixSearch, searchIndex, baseTypes, metaCache, uniqById, setById, uniqByCode, setByCode, prettyId, tzLevel,
       eligibleUniques, eligibleSets, condProb, trialsFor,
       builderTypes, builderBases, builderCatalog, builderStats, builderFamilies, familyTable, familyIdOf, allowedValues, snapValue, tierFor, perLevelDiv, perLevelAt, builderAffixTable, baseDropWeights, affixAppearance, planCombo, comboForBase, comboAnalysis, feasibleAny, fitIndex, fitsCombo, statRange, explainCombo, groupName,

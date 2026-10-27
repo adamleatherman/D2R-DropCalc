@@ -311,6 +311,78 @@
       '  MF=' + sel.mf + '%' + (sel.quest ? '  |  quest drop (act bosses)' : '') + (bq ? '  |  base quality: ' + BQN[bq] : '') + '  |  ' + Math.round(performance.now() - t0) + ' ms. Click a column header to sort.';
   }
 
+  // ---------------- Tab 3: what drops here (reverse lookup) ----------------
+  // One source -> per-kill chance of everything it drops (E.dropsOf, same numbers as chanceFor); an area clear adds up the sources' per-run chances like Tab 1's Group by Area.
+  let T3 = null, c3 = { sig: '', rows: [] };
+  const d3Diff = () => { const d = parseInt($('s_diff').value, 10); return d < 0 ? 2 : d; };   // All difficulties -> Hell
+  const kind3 = (t) => t.kind !== 'base' ? t.kind : /^r\d\d$/.test(t.code) ? 'rune' : /^(cm[123]|jew|cjw)$/.test(t.code) ? 'charm' : 'base';
+  const KIND3 = { unique: 'unique', set: 'set item', rune: 'rune', charm: 'charm', base: 'base' };
+  const base3 = (r) => r.t.kind === 'base' ? '' : E.items[r.t.code].n;
+  const PCT3 = (r) => r.runP;
+  const cols3 = [
+    { k: 'name', label: 'Item', l: 1, get: (r) => r.t.name, html: (r) => esc(r.t.name) + ' <span class="tag ' + r.kind + '">' + (r.kind === 'charm' && /^(jew|cjw)$/.test(r.t.code) ? 'jewel' : KIND3[r.kind]) + '</span>' },   // jewels sit under the "Charms and jewels" filter but keep their own tag
+    { k: 'base', label: 'Base', l: 1, get: base3, html: (r) => esc(base3(r)) },
+    { k: 'pk', get label() { return c3.one ? 'Chance per kill' : 'Chance per kill (average)'; }, note: 'Chance that one kill drops the item (shown as odds). A whole area clear: the average over all its kills.', get: (r) => r.pk, fmt: (r) => odds(r.pk) },
+    { k: 'kills', label: 'kills/run', show: () => c3.one, get: () => c3.kills, fmt: () => c3.kills < 10 ? c3.kills.toFixed(2) : c3.kills.toFixed(0) },
+    { k: 'perrun', label: 'Chance per run', note: 'Chance of finding the item in one run: kills/run x per-kill chance (rough model; an area clear adds up its sources, capped at 1; same numbers as Tab 1).', get: PCT3, fmt: (r) => odds(r.runP) },
+    { k: 'n50', label: 'runs for 50%', note: 'Runs needed to have found the item with 50% probability: ceil(ln(0.5) / ln(1-p)). Hover a cell for 25/50/75/90/95/99%.', get: PCT3, fmt: (r) => countFmt(E.trialsFor(r.runP, 0.5)), rtip: (r) => PCTS.map((q) => q + '%: ' + countFmt(E.trialsFor(r.runP, q / 100)) + ' runs').join('\n') },
+  ];
+  function runTab3() {
+    const area = parseInt($('ar3').value || '0', 10);
+    if (!area) { T3.rows = []; T3.render(); $('info3').textContent = 'Choose an area (and optionally one monster) to list what it drops, best first. Click an item to search it in tab 1.'; return; }
+    const sel = S = readSel(), t0 = performance.now(), diff = d3Diff(), key = $('mo3').value;
+    const { ctx, list } = getSources(sel);
+    const srcs = list.filter((s) => s.area === area && s.diff === diff && (!sel.tz || s.tz) && !s.herald && (!key || s.key === key));
+    const sig = JSON.stringify([srcCache.sig, area, diff, key, sel.ladder, sel.mf]);
+    if (c3.sig !== sig) {
+      const acc = new Map(), kills = srcs.reduce((a, s) => a + s.perRun, 0), one = srcs.length === 1, wsum = srcs.reduce((a, s) => a + (one ? 1 : s.perRun), 0);
+      for (const src of srcs) {
+        const d = E.dropsOf(ctx, src, sel.mf), w = one ? 1 : src.perRun;
+        for (const [kind, m] of [['base', d.base], ['unique', d.unique], ['set', d.set]]) for (const [id, p] of m) {
+          const a = acc.get(kind + '|' + id) || acc.set(kind + '|' + id, { pw: 0, run: 0 }).get(kind + '|' + id);
+          a.pw += p * w; a.run += p * src.perRun;
+        }
+      }
+      const rows = [];
+      for (const t of INDEX) {
+        const a = acc.get(t.kind + '|' + (t.kind === 'base' ? t.code : t.id));
+        if (a && a.pw > 0) rows.push({ t, kind: kind3(t), pk: a.pw / wsum, runP: Math.min(1, a.run), text: (t.name + ' ' + (t.kind === 'base' ? '' : E.items[t.code].n)).toLowerCase() });
+      }
+      c3 = { sig, rows, one, kills, n: srcs.length, ms: 0 };
+    }
+    const k = $('k3').value, f = $('f3').value.trim().toLowerCase();
+    T3.rows = c3.rows.filter((r) => (k === 'all' || (k === 'notable' ? r.kind !== 'base' : r.kind === k)) && (!f || r.text.indexOf(f) >= 0));
+    T3.limit = parseInt($('n3').value, 10);
+    const r = T3.render(), an = $('ar3').selectedOptions[0].textContent.replace(/^Act \d+ - /, '');
+    $('info3').textContent = an + ' (' + DIFF[diff] + (sel.diff < 0 ? ', difficulty All shows Hell' : '') + '): ' + (c3.one ? srcs[0].name : 'whole area clear, ' + c3.n + ' source' + (c3.n === 1 ? '' : 's') + ', ' + c3.kills.toFixed(0) + ' kills/run') + '  |  ' +
+      r.total.toLocaleString() + ' items (showing ' + r.shown + ')  |  N=' + ctx.N + '  MF=' + sel.mf + '%' + (sel.tz && E.data.tz.herald.length && diff === 2 ? '  |  herald rows are left out (no per-run chance; pick them in tab 1)' : '') + (c3.n ? '' : '  |  no source here with these settings') +
+      '  |  ' + Math.round(performance.now() - t0) + ' ms. Click a header to sort, a row to search it in tab 1.';
+    sync3();
+  }
+  /** ?t3a=<area id>&t3m=<source key>&t3k=<kind> (tab 3 opens when t3a is present) */
+  function sync3() {
+    try {
+      const qs = new URLSearchParams(location.search);
+      for (const k of ['t3a', 't3m', 't3k']) qs.delete(k);
+      if ($('ar3').value) { qs.set('t3a', $('ar3').value); if ($('mo3').value) qs.set('t3m', $('mo3').value); if ($('k3').value !== 'notable') qs.set('t3k', $('k3').value); }
+      history.replaceState(null, '', location.pathname + (qs.toString() ? '?' + qs.toString() : ''));
+    } catch (e) { /* ignore */ }
+  }
+  const fill3 = () => fillMonsters('ar3', 'mo3', d3Diff());
+  function initTab3() {
+    T3 = makeTable($('tb3'), cols3, 'perrun', -1);
+    T3.rowCls = () => 'clk';
+    T3.onRow = (r) => {   // -> tab 1 searching that item
+      target1 = r.t; $('q1').value = r.t.label; $('f1').value = '';
+      for (const i of document.querySelectorAll('#r1 input')) i.checked = false;
+      rankSummary1(); $('t1').click(); runTab1();
+    };
+    $('ar3').addEventListener('change', () => { fill3(); runTab3(); });
+    $('mo3').addEventListener('change', runTab3);
+    for (const id of ['k3', 'n3']) $(id).addEventListener('change', runTab3);
+    $('f3').addEventListener('input', () => { clearTimeout(runTab3.t); runTab3.t = setTimeout(runTab3, 250); });
+  }
+
   // ---------------- Tab 2: item builder ----------------
   // State: bd.type (type or single base option), bd.codes (bases in play), bd.stats (stat key -> range over all tiers), bd.sel (picked stats with thresholds).
   // All rules live in engine.js (builder*, comboAnalysis, affixSearch); this only presents them.
@@ -502,13 +574,14 @@
     return (a.selectedOptions[0] ? a.selectedOptions[0].textContent.replace(/^Act \d+ - /, '') : 'the area') + (m.value ? ' (' + m.selectedOptions[0].textContent + ')' : '');
   }
   /** monsters / sources of the chosen area under the global selectors, for the Monster selector */
-  function fillMonsters() {
-    const mo = $('mo2'), area = parseInt($('ar2').value || '0', 10), cur = mo.value;
+  function fillMonsters(aid, mid, d3) {   // tab 3 passes its own selects and a fixed difficulty (the area already fixes the act)
+    const mo = $(mid || 'mo2'), area = parseInt($(aid || 'ar2').value || '0', 10), cur = mo.value;
     mo.disabled = !area;
-    if (!area) { mo.innerHTML = '<option value="">All sources</option>'; return; }
+    if (!area) { mo.innerHTML = '<option value="">' + (d3 === undefined ? 'All sources' : 'Whole area clear') + '</option>'; return; }
     const sel = readSel(), { list } = getSources(sel);
-    const rows = list.filter((s) => s.area === area && (sel.diff < 0 || s.diff === sel.diff) && (!sel.act || s.act === sel.act) && (!sel.tz || s.tz) && !s.herald);
-    mo.innerHTML = '<option value="">All sources in the area</option>' + rows.map((s) => '<option value="' + esc(s.key) + '">' + esc(s.name) + (s.rank === 'regular' || s.members ? '' : ' (' + s.rank + ')') + (sel.diff < 0 ? ' - ' + DIFF[s.diff] : '') + '</option>').join('');
+    if (d3 !== undefined) sel.diff = d3;
+    const rows = list.filter((s) => s.area === area && (sel.diff < 0 || s.diff === sel.diff) && (d3 !== undefined || !sel.act || s.act === sel.act) && (!sel.tz || s.tz) && !s.herald);
+    mo.innerHTML = '<option value="">' + (d3 === undefined ? 'All sources in the area' : 'Whole area clear') + '</option>' + rows.map((s) => '<option value="' + esc(s.key) + '">' + esc(s.name) + (s.rank === 'regular' || s.members ? '' : ' (' + s.rank + ')') + (sel.diff < 0 ? ' - ' + DIFF[s.diff] : '') + '</option>').join('');
     if (rows.some((s) => s.key === cur)) mo.value = cur;
   }
   function requestTable() {
@@ -1129,6 +1202,10 @@
     $('ar2').innerHTML = '<option value="">All areas</option>' + areas.map((x) => '<option value="' + x.id + '">Act ' + x.a.act + ' - ' + esc(x.a.name) + (x.a.ho ? ' (Hell only)' : '') + '</option>').join('');
     if (areas.some((x) => x.id === cur)) $('ar2').value = cur;
     fillMonsters();
+    const cur3 = $('ar3').value;
+    $('ar3').innerHTML = $('ar2').innerHTML.replace('All areas', 'Choose an area');
+    if (areas.some((x) => x.id === cur3)) $('ar3').value = cur3;
+    fill3();
     $('info1').textContent = 'Ready. ' + INDEX.length + ' items indexed, ' + Object.keys(E.data.levels).length + ' areas, ' + Object.keys(E.data.monsters).length + ' monster types.';
     updTier();
   }
@@ -1152,6 +1229,7 @@
       refreshBuilder();
     }
     T2.rows = []; T2.render();
+    c3.sig = ''; if ($('ar3').value) runTab3(); else { T3.rows = []; T3.render(); }
     if (target1) runTab1();
   }
 
@@ -1166,10 +1244,10 @@
     await useEngine($('s_mode').value);
 
     // tabs
-    const tabs = ['t1', 't2', 't3'];
+    const tabs = ['t1', 't2', 't3', 't4'];
     tabs.forEach((t, i) => $(t).onclick = () => {
       tabs.forEach((x, j) => { $(x).classList.toggle('on', i === j); $('tab' + (j + 1)).classList.toggle('on', i === j); });
-      if (i < 2) $('tab' + (i + 1)).querySelector('.row').appendChild($('wh'));   // Difficulty / Act (global) sit with the filters of the open tab
+      if (i < 3) $('tab' + (i + 1)).querySelector('.row').appendChild($('wh'));   // Difficulty / Act (global) sit with the filters of the open tab
     });
     // "Your game" bar: one-line summary, open state remembered
     $('game').open = lsGet('d2dc-game');
@@ -1183,6 +1261,7 @@
       if (k === 's_clvl' && bd.sel.length) renderSel();   // per-level stats show their value at this level
       updTier(); if (target1) runTab1(); if (bd.an) { syncUrl(); runFarm(); }
       if (bd.type && $('ar2').value) { fillMonsters(); requestTable(); }
+      if ($('ar3').value) { fill3(); runTab3(); }
     });
     $('s_act').addEventListener('change', () => { if (target1) runTab1(); });
     // theme: personal preference, kept out of KEYS / share links
@@ -1224,6 +1303,8 @@
     $('bq1').addEventListener('change', runTab1);
     $('n1').addEventListener('change', runTab1);
 
+    // tab 3
+    initTab3();
     // tab 2
     initTab2();
     // about
@@ -1236,6 +1317,13 @@
       if (target1) { $('q1').value = target1.label; runTab1(); }
     }
     applyUrl2(qs);
+    const a3 = qs.get('t3a');
+    if (a3 && Array.from($('ar3').options).some((o) => o.value === a3)) {
+      $('ar3').value = a3; fill3();
+      if (qs.get('t3m') && Array.from($('mo3').options).some((o) => o.value === qs.get('t3m'))) $('mo3').value = qs.get('t3m');
+      if (qs.get('t3k') && Array.from($('k3').options).some((o) => o.value === qs.get('t3k'))) $('k3').value = qs.get('t3k');
+      runTab3(); $('t3').click();
+    }
   }
 
   function aboutHtml() {

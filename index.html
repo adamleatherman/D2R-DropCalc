@@ -6,9 +6,9 @@
 <title>D2R Drop Calculator</title>
 <script>try { const t = localStorage.getItem('d2dc-theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch (e) {}</script>
 <style>
-  :root { color-scheme:dark; --bg:#14161a; --panel:#1d2026; --panel2:#262a32; --text:#e4e1d8; --dim:#9a968a; --accent:#c8a45a; --good:#7fcf7f; --bad:#e07a6a; --line:#343944; --hover:#20242c; --primary-bg:#3a3220; --on-accent:#111111; --tag-champion:#8ab4ff; --tag-unique:#e6c34d; --tag-minion:#b79ad8; --tag-super:#7fe0c0; --tag-boss:#ff8f6a; --tag-herald:#ff6ad5; --tz:#e07a6a; --err:#e07a6a; --side-prefix:#8ab4ff; --side-suffix:#7fe0c0; --side-auto:#e6c34d; --side-staff:#ff8f6a; --side-socket:#c9a0ff; --side-ethereal:#9ad7ff; --side-superior:#d9d9d9; }
-  :root[data-theme="light"] { color-scheme:light; --bg:#f6f4ef; --panel:#ffffff; --panel2:#ece9e1; --text:#1e1d1a; --dim:#6b675d; --accent:#7a5a0e; --good:#2a722e; --bad:#b3261e; --line:#d6d1c4; --hover:#efe9da; --primary-bg:#f1e6c8; --on-accent:#ffffff; --tag-champion:#2d5fb8; --tag-unique:#7a5f00; --tag-minion:#6b4ea0; --tag-super:#1a6e52; --tag-boss:#a53f1a; --tag-herald:#b0287f; --tz:#b3261e; --err:#b3261e; --side-prefix:#2d5fb8; --side-suffix:#1a6e52; --side-auto:#7a5f00; --side-staff:#a53f1a; --side-socket:#7a3fc0; --side-ethereal:#1f6b94; --side-superior:#555555; }
-  @media (prefers-color-scheme: light) { :root:not([data-theme]) { color-scheme:light; --bg:#f6f4ef; --panel:#ffffff; --panel2:#ece9e1; --text:#1e1d1a; --dim:#6b675d; --accent:#7a5a0e; --good:#2a722e; --bad:#b3261e; --line:#d6d1c4; --hover:#efe9da; --primary-bg:#f1e6c8; --on-accent:#ffffff; --tag-champion:#2d5fb8; --tag-unique:#7a5f00; --tag-minion:#6b4ea0; --tag-super:#1a6e52; --tag-boss:#a53f1a; --tag-herald:#b0287f; --tz:#b3261e; --err:#b3261e; --side-prefix:#2d5fb8; --side-suffix:#1a6e52; --side-auto:#7a5f00; --side-staff:#a53f1a; --side-socket:#7a3fc0; --side-ethereal:#1f6b94; --side-superior:#555555; } }
+  :root { color-scheme:dark; --bg:#14161a; --panel:#1d2026; --panel2:#262a32; --text:#e4e1d8; --dim:#9a968a; --accent:#c8a45a; --good:#7fcf7f; --bad:#e07a6a; --line:#343944; --hover:#20242c; --primary-bg:#3a3220; --on-accent:#111111; --tag-champion:#8ab4ff; --tag-unique:#e6c34d; --tag-minion:#b79ad8; --tag-super:#7fe0c0; --tag-boss:#ff8f6a; --tag-herald:#ff6ad5; --tag-set:#7fcf7f; --tag-rune:#ffa64d; --tag-charm:#8ad0e0; --tz:#e07a6a; --err:#e07a6a; --side-prefix:#8ab4ff; --side-suffix:#7fe0c0; --side-auto:#e6c34d; --side-staff:#ff8f6a; --side-socket:#c9a0ff; --side-ethereal:#9ad7ff; --side-superior:#d9d9d9; }
+  :root[data-theme="light"] { color-scheme:light; --bg:#f6f4ef; --panel:#ffffff; --panel2:#ece9e1; --text:#1e1d1a; --dim:#6b675d; --accent:#7a5a0e; --good:#2a722e; --bad:#b3261e; --line:#d6d1c4; --hover:#efe9da; --primary-bg:#f1e6c8; --on-accent:#ffffff; --tag-champion:#2d5fb8; --tag-unique:#7a5f00; --tag-minion:#6b4ea0; --tag-super:#1a6e52; --tag-boss:#a53f1a; --tag-herald:#b0287f; --tag-set:#2a722e; --tag-rune:#a65a00; --tag-charm:#1f6b94; --tz:#b3261e; --err:#b3261e; --side-prefix:#2d5fb8; --side-suffix:#1a6e52; --side-auto:#7a5f00; --side-staff:#a53f1a; --side-socket:#7a3fc0; --side-ethereal:#1f6b94; --side-superior:#555555; }
+  @media (prefers-color-scheme: light) { :root:not([data-theme]) { color-scheme:light; --bg:#f6f4ef; --panel:#ffffff; --panel2:#ece9e1; --text:#1e1d1a; --dim:#6b675d; --accent:#7a5a0e; --good:#2a722e; --bad:#b3261e; --line:#d6d1c4; --hover:#efe9da; --primary-bg:#f1e6c8; --on-accent:#ffffff; --tag-champion:#2d5fb8; --tag-unique:#7a5f00; --tag-minion:#6b4ea0; --tag-super:#1a6e52; --tag-boss:#a53f1a; --tag-herald:#b0287f; --tag-set:#2a722e; --tag-rune:#a65a00; --tag-charm:#1f6b94; --tz:#b3261e; --err:#b3261e; --side-prefix:#2d5fb8; --side-suffix:#1a6e52; --side-auto:#7a5f00; --side-staff:#a53f1a; --side-socket:#7a3fc0; --side-ethereal:#1f6b94; --side-superior:#555555; } }
   * { box-sizing: border-box; }
   body { margin:0; font:14px/1.4 "Segoe UI", system-ui, sans-serif; background:var(--bg); color:var(--text); }
   header { background:var(--panel); border-bottom:1px solid var(--line); padding:8px 14px; }
@@ -47,7 +47,8 @@
   tr:hover td { background:var(--hover); }
   .tbl { max-height:68vh; overflow:auto; border:1px solid var(--line); border-radius:6px; }
   .tag { display:inline-block; padding:0 6px; border-radius:8px; font-size:11px; background:var(--panel2); color:var(--dim); }
-  .tag.champion { color:var(--tag-champion); } .tag.unique { color:var(--tag-unique); } .tag.minion { color:var(--tag-minion); } .tag.super { color:var(--tag-super); } .tag.boss { color:var(--tag-boss); } .tag.herald { color:var(--tag-herald); cursor:help; }
+  .tag.champion { color:var(--tag-champion); } .tag.unique { color:var(--tag-unique); } .tag.minion { color:var(--tag-minion); } .tag.super { color:var(--tag-super); } .tag.boss { color:var(--tag-boss); } .tag.herald { color:var(--tag-herald); cursor:help; } .tag.set { color:var(--tag-set); } .tag.rune { color:var(--tag-rune); } .tag.charm { color:var(--tag-charm); }
+  tr.clk { cursor:pointer; }
   .cond { display:flex; gap:6px; align-items:center; margin:3px 0; }
   .cond input[list] { width:340px; max-width:60vw; }
   progress { width:240px; }
@@ -122,7 +123,8 @@
 <nav>
   <button id="t1" class="on">1. Item search</button>
   <button id="t2">2. Item builder</button>
-  <button id="t3">About / assumptions</button>
+  <button id="t3">3. What drops here</button>
+  <button id="t4">About / assumptions</button>
 </nav>
 <main>
   <section id="tab1" class="tab on">
@@ -205,6 +207,18 @@
   </section>
 
   <section id="tab3" class="tab">
+    <div class="row">
+      <label title="Choose an area to list what it drops; Difficulty below is the one under the tabs (All = Hell)">Area <select id="ar3"><option value="">Choose an area</option></select></label>
+      <label title="Optional: one monster / source of the area; none = a whole area clear">Source <select id="mo3" disabled><option value="">Whole area clear</option></select></label>
+      <label>Show <select id="k3"><option value="notable" selected>Uniques, sets, runes, charms</option><option value="all">Everything</option><option value="unique">Uniques</option><option value="set">Set items</option><option value="rune">Runes</option><option value="charm">Charms and jewels</option><option value="base">Other bases</option></select></label>
+      <label>Item filter <input id="f3" placeholder="name or base text" style="width:180px"></label>
+      <label>Rows <select id="n3"><option>100</option><option selected>300</option><option>1000</option><option>5000</option></select></label>
+    </div>
+    <div class="note" id="info3">Choose an area (and optionally one monster) to list what it drops, best first. Click an item to search it in tab 1.</div>
+    <div class="tbl"><table id="tb3"></table></div>
+  </section>
+
+  <section id="tab4" class="tab">
     <div class="box" id="about"></div>
   </section>
 </main>
