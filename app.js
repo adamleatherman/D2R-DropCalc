@@ -1004,6 +1004,7 @@
     $('finfo2').textContent = 'Searching farm sources...';
     const t0 = performance.now();
     const finish = (rowsByQ, err) => {
+      if (bd.an !== an) return;   // the item changed (or was cleared) while the search ran
       $('prog2').hidden = true;
       if (!rowsByQ) { $('finfo2').textContent = 'Error: ' + err; bd.farm = { err: String(err) }; renderHead(); return; }
       const m = new Map();
@@ -1136,6 +1137,14 @@
     });
     $('go2').onclick = () => { updateAnalysis(); runFarm(); };
     $('clr2').onclick = () => { bd.sel = []; bd.picks = []; renderSel(); refit(true); bd.farm = null; changed({ noFarm: true }); };
+    $('new2').onclick = () => {   // start over: no type, tier All, quality Auto, no picks (item level, area and monster stay)
+      clearTimeout(anTimer); clearTimeout(farmTimer);
+      $('q2').value = ''; $('tr2').value = '-1'; $('ql2').value = '';
+      Object.assign(bd, { type: null, codes: [], stats: new Map(), fams: new Map(), sel: [], picks: [], rows: [], an: null, farm: null, farmQ: [] }); fitIdx = null;
+      renderSel(); requestTable();
+      $('res2').innerHTML = ''; T2.rows = []; T2.render(); $('finfo2').textContent = ''; $('tinfo2').textContent = '';
+      syncUrl();
+    };
     $('link2').addEventListener('focus', () => $('link2').select());
     const selbox = $('sel2');
     selbox.addEventListener('click', (ev) => {

@@ -161,6 +161,7 @@
       </label>
       <label title="Only the bases of this tier (armor and weapons); jewelry, charms and jewels have no tiers">Tier <select id="tr2"><option value="-1">All</option><option value="0">Normal</option><option value="1">Exceptional</option><option value="2">Elite</option></select></label>
       <label title="Auto: every quality the selection allows (low, normal, superior, magic, rare). A magic item has at most 1 prefix and 1 suffix; normal, superior and low quality items have no prefixes or suffixes (only sockets, ethereal, the superior bonus, the automagic row and staff skills)">Quality <select id="ql2"><option value="">Auto (all that fit)</option><option value="low">Low quality</option><option value="normal">Normal (white)</option><option value="sup">Superior</option><option value="magic">Magic only</option><option value="rare">Rare only</option></select></label>
+      <button id="new2" style="align-self:flex-end" title="Start over: clear the item type, tier, quality and every picked affix (the advanced settings stay)">Clear item</button>
     </div>
     <details id="adv2">
       <summary>Advanced: affix odds and farm search</summary>
@@ -195,7 +196,7 @@
         <div id="sel2" class="note">Pick an item type or base first.</div>
         <div class="row" style="margin-top:8px">
           <button id="go2" title="Re-run the farm search (it also runs by itself after every change)">Refresh</button>
-          <button id="clr2">Clear</button>
+          <button id="clr2" title="Clear the picked affixes (keeps the item type)">Clear affixes</button>
           <progress id="prog2" value="0" max="1" hidden></progress>
         </div>
         <label class="lnk">Link to this build <input id="link2" readonly></label>
