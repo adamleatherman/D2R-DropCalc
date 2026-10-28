@@ -9,7 +9,7 @@
   const ENGINES = {};
 
   // ---------------- persistent selectors ----------------
-  const KEYS = ['s_mode', 's_tier', 's_diff', 's_players', 's_party', 's_mf', 's_quest', 's_tz', 's_clvl', 's_ladder', 's_act'];
+  const KEYS = ['s_mode', 's_tier', 's_diff', 's_players', 's_party', 's_mf', 's_quest', 's_tz', 's_clvl', 's_ladder', 's_act', 's_style', 's_tp', 's_map', 's_sunder', 's_ovh'];
   function loadSel() {
     try {
       const raw = localStorage.getItem('d2rdropcalc.sel');
@@ -353,6 +353,15 @@
   const KIND3 = { unique: 'unique', set: 'set item', rune: 'rune', charm: 'charm', base: 'base' };
   const base3 = (r) => r.t.kind === 'base' ? '' : E.items[r.t.code].n;
   const PCT3 = (r) => r.runP;
+  // minutes per game of the chosen farm (tab 2): the override typed for it, else Engine.farmMinutes from the "Your game" settings; null = none (Other area without a typed value)
+  const FTKEYS = ['s_style', 's_tp', 's_map', 's_sunder', 's_ovh'];
+  const ovh3 = () => { const v = parseFloat($('s_ovh').value); return isNaN(v) ? E.CONFIG.farmTime.overhead : Math.max(0, Math.min(10, v)); };
+  const farm3 = () => E.CONFIG.farms[parseInt($('pf3').value, 10)];
+  const minKey3 = () => { const f = farm3(); return f ? f.name : 'other|' + $('ar3').value + '|' + $('mo3').value; };
+  const lsMin = () => { try { return JSON.parse(localStorage.getItem('d2dc-min3')) || {}; } catch (e) { return {}; } };
+  const calcMin3 = () => { const f = farm3(); return f ? E.farmMinutes(f, { style: $('s_style').value, teleport: $('s_tp').value, map: $('s_map').value, sunder: $('s_sunder').checked, overhead: ovh3() }) : null; };
+  const mins3 = () => { const o = parseFloat($('min3').value); return o > 0 ? o : calcMin3(); };
+  const perHour3 = (r) => { const m = mins3(); return m && !c3.quest ? -Math.expm1(Math.log1p(-Math.min(r.runP, 1)) * 60 / m) : 0; };   // 1 - (1 - runP)^(60 / minutes)
   const cols3 = [
     { k: 'name', label: 'Item', l: 1, get: (r) => r.t.name, html: (r) => dropName(r.t, r.t.name, true) + ' <span class="tag ' + r.kind + '">' + (r.kind === 'charm' && /^(jew|cjw)$/.test(r.t.code) ? 'jewel' : KIND3[r.kind]) + '</span>' },   // jewels sit under the "Charms and jewels" filter but keep their own tag
     { k: 'base', label: 'Base', l: 1, get: base3, html: (r) => esc(base3(r)) },
@@ -360,14 +369,19 @@
     { k: 'kills', label: 'kills/run', show: () => c3.one, get: () => c3.kills, fmt: () => c3.quest ? 'first kill' : c3.kills < 10 ? c3.kills.toFixed(2) : c3.kills.toFixed(0) },
     { k: 'perrun', label: 'Chance per run', note: 'Chance of finding the item at least once in one run: 1 - (1 - per-kill chance)^(kills/run), over every source of an area clear (kills/run is a rough model; same numbers as Tab 1).', get: PCT3, fmt: (r) => odds(r.runP) },
     { k: 'n50', label: 'runs for 50%', note: 'Runs needed to have found the item with 50% probability: ceil(ln(0.5) / ln(1-p)). Hover a cell for 25/50/75/90/95/99%.', get: PCT3, fmt: (r) => c3.quest ? '-' : countFmt(E.trialsFor(r.runP, 0.5)), rtip: (r) => c3.quest ? 'The quest kill happens once per character and difficulty.' : PCTS.map((q) => q + '%: ' + countFmt(E.trialsFor(r.runP, q / 100)) + ' runs').join('\n') },
+    { k: 'min', label: 'min/game', show: () => !!mins3(), note: 'Minutes per game of this farm: a rough estimate from the play style, teleport, map, sunder charm and overhead in Your game, or the value typed next to Farm.', get: () => mins3(), fmt: () => mins3().toFixed(1) },
+    { k: 'ph', label: 'Chance per hour', show: () => !!mins3(), note: 'Chance of finding the item at least once in an hour of this farm: 1 - (1 - chance per run)^(60 / min per game). Only as good as the minutes.', get: perHour3, fmt: (r) => perHour3(r) ? odds(perHour3(r)) : '-' },
+    { k: 'h50', label: 'hours for 50%', show: () => !!mins3(), note: 'Hours of this farm to have found the item with 50% probability: runs for 50% x min per game / 60.', get: (r) => c3.quest || !(r.runP > 0) ? Infinity : E.trialsFor(r.runP, 0.5) * mins3() / 60, fmt: (r) => c3.quest || !(r.runP > 0) ? '-' : (h => h < 10 ? h.toFixed(2) : countFmt(Math.round(h)))(E.trialsFor(r.runP, 0.5) * mins3() / 60) },
   ];
   /** source key of a popular farm (E.CONFIG.farms) at difficulty d: an act boss's key carries the difficulty */
   const farmKey3 = (f, d) => f.src.indexOf('boss|') === 0 ? f.src + '|' + d : f.src;
+  const syncMin3 = () => {};   // .k = the key of the farm whose override the box shows
   function runTab3() {
     const area = parseInt($('ar3').value || '0', 10);
     const fi = E.CONFIG.farms.findIndex((f) => f.area === area && farmKey3(f, d3Diff()) === $('mo3').value);   // the farm the Area / Source pair matches (a deep link), else Other area
     if ($('pf3').value !== 'other') { if (fi >= 0) $('pf3').value = String(fi); else if (area) $('pf3').value = 'other'; }   // Other stays open while picking there
     $('custom3').hidden = $('pf3').value !== 'other';
+    { const k = minKey3(); if (syncMin3.k !== k) { syncMin3.k = k; $('min3').value = lsMin()[k] || ''; } const m = calcMin3(); $('min3').placeholder = m ? m.toFixed(1) : '-'; }   // the override of this farm (area) in the box; the estimate as its placeholder
     if (!area) { T3.rows = []; T3.render(); $('info3').textContent = $('pf3').value === 'other' ? 'Choose an area (and optionally one monster) to list what it drops, best first. Click an item to search it in tab 1.' : 'Choose a farm to list what it drops, best first (Other area... for any area or monster). Click an item to search it in tab 1.'; return; }
     const sel = S = readSel(), t0 = performance.now(), diff = d3Diff(), key = $('mo3').value;
     const { ctx, list } = getSources(sel);
@@ -396,6 +410,7 @@
     const r = T3.render(), an = c3.run ? E.CONFIG.runs[c3.run].name : $('ar3').selectedOptions[0].textContent.replace(/^Act \d+ - /, '');   // a run can span areas: its own name leads
     $('info3').textContent = an + ' (' + DIFF[diff] + (sel.diff < 0 ? ', difficulty All shows Hell' : '') + '): ' + (c3.one ? srcs[0].name : (c3.run ? '' : 'whole area clear, ') + c3.n + ' source' + (c3.n === 1 ? '' : 's') + ', ' + c3.kills.toFixed(0) + ' kills/run') + '  |  ' +
       r.total.toLocaleString() + ' items (showing ' + r.shown + ')  |  N=' + ctx.N + '  MF=' + sel.mf + '%' + (sel.tz && E.data.tz.herald.length && diff === 2 ? '  |  herald rows are left out (no per-run chance; pick them in tab 1)' : '') + (c3.n ? '' : '  |  no source here with these settings') +
+      (mins3() ? '  |  ' + mins3().toFixed(1) + ' min/game' + (parseFloat($('min3').value) > 0 ? ' (your value)' : ' (rough estimate from Your game; type your own next to Farm)') : '') +
       '  |  ' + Math.round(performance.now() - t0) + ' ms. Click a header to sort, a row to search it in tab 1.';
     sync3();
   }
@@ -434,6 +449,10 @@
     });
     $('ar3').addEventListener('change', () => { fill3(); runTab3(); });
     $('mo3').addEventListener('change', runTab3);
+    $('min3').addEventListener('input', () => {   // an override of the minutes, remembered per farm
+      try { const o = lsMin(), v = parseFloat($('min3').value); if (v > 0) o[minKey3()] = v; else delete o[minKey3()]; localStorage.setItem('d2dc-min3', JSON.stringify(o)); } catch (e) { /* ignore */ }
+      runTab3();
+    });
     $('k3').addEventListener('change', () => { kindSummary3(); runTab3(); });
     document.addEventListener('click', (ev) => { if (!$('k3').contains(ev.target)) $('k3').open = false; });   // the kind list closes on a click elsewhere
     $('n3').addEventListener('change', runTab3);
@@ -1339,6 +1358,7 @@
     $('game').addEventListener('change', updGame);
     for (const k of KEYS) $(k).addEventListener('change', () => {
       saveSel(); updGame();
+      if (FTKEYS.indexOf(k) >= 0) { if ($('ar3').value) runTab3(); return; }   // the farm-time settings only touch tab 2's minutes
       if (k === 's_mode') { switchMode($('s_mode').value).catch((e) => { $('info1').textContent = 'Could not load data: ' + e; }); return; }
       if (k === 's_diff' && bd.sel.length) { updateRanges(); renderSel(); refit(true); }
       if (k === 's_clvl' && bd.sel.length) renderSel();   // per-level stats show their value at this level
