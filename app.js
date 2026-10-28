@@ -1452,7 +1452,7 @@
     // tab 2
     initTab2();
     // about
-    $('about').innerHTML = aboutHtml(); initMfChart();
+    $('about').innerHTML = aboutHtml(); initMfChart(); initAboutCharts();
     // deep links: ?q1=Griffon   or the item builder: ?t2=circ&q=magic&a=%2B%23%25%20Faster%20Cast%20Rate:20 (old form ?q2=circlet&ql=magic&c=... still works)
     const qs = new URLSearchParams(location.search);
     if (qs.get('q1')) {
@@ -1503,8 +1503,14 @@
     });
     hit.addEventListener('mouseleave', () => { xh.setAttribute('visibility', 'hidden'); tip.hidden = true; });
   }
-  const chFrame = (title, aria, g, x0, x1, y0, y1, note) => '<div class="mfchart"><div class="ct">' + title + '</div><svg viewBox="0 0 ' + CH.w + ' ' + CH.h + '" role="img" aria-label="' + aria + '">' + g +
+  const chFrame = (title, aria, g, x0, x1, y0, y1, note, legend, id) => '<div class="mfchart"' + (id === undefined ? '' : ' data-ab="' + id + '"') + '><div class="ct">' + title + '</div>' + (legend || '') + '<svg viewBox="0 0 ' + CH.w + ' ' + CH.h + '" role="img" aria-label="' + aria + '">' + g +
     '<line class="xh" y1="' + y1 + '" y2="' + y0 + '" x1="0" x2="0" visibility="hidden"/><rect class="hit" x="' + x0 + '" y="' + y1 + '" width="' + (x1 - x0) + '" height="' + (y0 - y1) + '"/></svg><div class="mftip" hidden></div>' + (note ? '<div class="note">' + note + '</div>' : '') + '</div>';
+  /** direct end labels, nudged apart: ends = [{ k: quality class, y, t: text }], x = where the labels start */
+  function chEnds(ends, x) {
+    ends.sort((a, b) => a.y - b.y); for (let i = 1; i < ends.length; i++) ends[i].y = Math.max(ends[i].y, ends[i - 1].y + 14);
+    return ends.map((e) => '<text class="lab" x="' + x + '" y="' + (e.y + 4).toFixed(1) + '"><tspan class="sw mf-' + e.k + '">\u25cf</tspan> ' + e.t + '</text>').join('');
+  }
+  const chLegend = (qs) => '<div class="mfleg">' + qs.map((q) => '<span><i class="mf-' + q.k + '"></i>' + q.n + '</span>').join('') + '</div>';
   const chDot = (x, y) => '<circle class="dot" cx="' + x.toFixed(1) + '" cy="' + y.toFixed(1) + '" r="4.5"/>';
   /** chart 1: chance per run against MF (x linear 0-1000, y log in odds so equal steps are equal improvements) */
   function mfRunChart(d, mfNow, pNow) {
@@ -1599,16 +1605,14 @@
     for (const q of MFQ) {
       const pts = []; for (let i = 0; i <= 80; i++) { const v = MFC.lo * Math.pow(MFC.hi / MFC.lo, i / 80); pts.push(mfX(v).toFixed(1) + ',' + mfY(mfEff(v, q.d, true)).toFixed(1)); }
       lines += '<polyline class="mfl mf-' + q.k + '" points="' + pts.join(' ') + '"/>';
-      ends.push({ q, y: mfY(mfEff(MFC.hi, q.d, true)) });
+      ends.push({ k: q.k, y: mfY(mfEff(MFC.hi, q.d, true)), t: q.n + (q.d ? ' (cap ' + q.d + ')' : ' (no cap)') });
     }
-    ends.sort((a, b) => a.y - b.y); for (let i = 1; i < ends.length; i++) ends[i].y = Math.max(ends[i].y, ends[i - 1].y + 14);   // keep the end labels apart
-    for (const e of ends) lines += '<text class="lab" x="' + (x1 + 8) + '" y="' + (e.y + 4) + '"><tspan class="sw mf-' + e.q.k + '">\u25cf</tspan> ' + e.q.n + (e.q.d ? ' (cap ' + e.q.d + ')' : ' (no cap)') + '</text>';
-    const legend = '<div class="mfleg">' + MFQ.map((q) => '<span><i class="mf-' + q.k + '"></i>' + q.n + '</span>').join('') + '</div>';
-    return '<div class="mfchart">' + legend + '<svg viewBox="0 0 ' + MFC.w + ' ' + MFC.h + '" role="img" aria-label="The MF that counts for each item quality against your MF, on log scales">' + g + lines +
+    lines += chEnds(ends, x1 + 8);   // keeps the end labels apart
+    return '<div class="mfchart">' + chLegend(MFQ) + '<svg viewBox="0 0 ' + MFC.w + ' ' + MFC.h + '" role="img" aria-label="The MF that counts for each item quality against your MF, on log scales">' + g + lines +
       '<line class="xh" y1="' + y1 + '" y2="' + y0 + '" x1="0" x2="0" visibility="hidden"/><rect class="hit" x="' + x0 + '" y="' + y1 + '" width="' + (x1 - x0) + '" height="' + (y0 - y1) + '"/></svg><div class="mftip" hidden></div></div>';
   }
   function initMfChart() {   // hover: a crosshair at the pointer's MF and a readout of every quality
-    const box = document.querySelector('#about .mfchart'); if (!box) return;
+    const box = document.querySelector('#about .mfchart:not([data-ab])'); if (!box) return;
     const svg = box.querySelector('svg'), xh = svg.querySelector('.xh'), hit = svg.querySelector('.hit'), tip = box.querySelector('.mftip');
     hit.addEventListener('mousemove', (e) => {
       const r = svg.getBoundingClientRect(), sx = (e.clientX - r.left) * MFC.w / r.width;
@@ -1620,10 +1624,71 @@
     hit.addEventListener('mouseleave', () => { xh.setAttribute('visibility', 'hidden'); tip.hidden = true; });
   }
 
+  // ----- three explanatory charts in the About text: same frame, grid, hover and colours as the Tab 1 charts; each returns [html, hover] and aboutHtml files the hover under its data-ab index -----
+  const abHov = [];
+  const abXT = (x, label) => '<line class="grid" x1="' + x.toFixed(1) + '" x2="' + x.toFixed(1) + '" y1="' + CH.t + '" y2="' + (CH.h - CH.b) + '"/><text class="ax" x="' + x.toFixed(1) + '" y="' + (CH.h - CH.b + 16) + '" text-anchor="middle">' + label + '</text>';   // vertical grid line + x tick label
+  const abAxT = (xl, yl, x0, x1, y0, y1) => '<text class="ax" x="' + (x0 + x1) / 2 + '" y="' + (CH.h - 6) + '" text-anchor="middle">' + xl + '</text><text class="ax" transform="translate(12,' + (y0 + y1) / 2 + ') rotate(-90)" text-anchor="middle">' + yl + '</text>';
+  const abYPct = (ys, x0, x1) => [0, .25, .5, .75, 1].map((c) => '<line class="grid" x1="' + x0 + '" x2="' + x1 + '" y1="' + ys(c) + '" y2="' + ys(c) + '"/><text class="ax" x="' + (x0 - 6) + '" y="' + (ys(c) + 4) + '" text-anchor="end">' + c * 100 + '%</text>').join('');   // y grid 0-100%
+  /** chart A: chance of having found a 1-in-N item after x x N tries, 1 - e^-x (the large-N limit of 1 - (1 - 1/N)^(xN)) */
+  function triesChart(id, note) {
+    const X = 5, x0 = CH.l, x1 = CH.w - CH.r - 10, y0 = CH.h - CH.b, y1 = CH.t, xs = (x) => x0 + x / X * (x1 - x0), ys = (c) => y0 - c * (y0 - y1), cum = (x) => -Math.expm1(-x);
+    let g = ''; for (let i = 0; i <= X; i++) g += abXT(xs(i), i ? i + ' × N' : '0');
+    g += abYPct(ys, x0, x1) + abAxT('Tries, as a multiple of N', 'Chance of having found it', x0, x1, y0, y1);
+    g += '<polyline class="mfl chart-1" points="' + Array.from({ length: 101 }, (_, i) => xs(X * i / 100).toFixed(1) + ',' + ys(cum(X * i / 100)).toFixed(1)).join(' ') + '"/>';
+    for (const [x, t] of [[Math.LN2, '0.69'], [1, '1'], [Math.LN10, '2.3'], [2 * Math.LN10, '4.6']]) {
+      const px = xs(x), py = ys(cum(x)), end = x > 4;
+      g += '<line class="ref" x1="' + x0 + '" x2="' + px.toFixed(1) + '" y1="' + py.toFixed(1) + '" y2="' + py.toFixed(1) + '"/><line class="ref" x1="' + px.toFixed(1) + '" x2="' + px.toFixed(1) + '" y1="' + py.toFixed(1) + '" y2="' + y0 + '"/>' + chDot(px, py) +
+        '<text class="lab" x="' + (px + (end ? -9 : 9)).toFixed(1) + '" y="' + (py + 18).toFixed(1) + '" text-anchor="' + (end ? 'end' : 'start') + '">' + Math.round(cum(x) * 100) + '%: ' + t + ' × N</text>';
+    }
+    return [chFrame('1 in N does not mean N tries', 'Chance of having found a 1 in N item against the number of tries as a multiple of N', g, x0, x1, y0, y1, note, '', id), (sx) => {
+      const x = Math.max(0, Math.min(X, Math.round((sx - x0) / (x1 - x0) * X * 100) / 100)); return { x: xs(x), html: '<b>' + x.toFixed(2) + ' × N tries</b><div>' + (cum(x) * 100).toFixed(1) + '% chance of having found it</div>' };
+    }];
+  }
+  const ABQ = [{ k: 'unique', n: 'Unique', a: 'u' }, { k: 'set', n: 'Set', a: 's' }, { k: 'rare', n: 'Rare', a: 'r' }, { k: 'magic', n: 'Magic', a: 'm' }];
+  /** chart B: chance per check at 0% MF against the level gap, from the ordinary-base row of the quality table: X = max(Ratio - floor(gap / Divisor), Min / 128) */
+  function gapChart(id) {
+    const row = E.data.ratio.find((r) => r.ver === E.CONFIG.itemRatioVersion && !r.uber && !r.cls), G = 80, lo = 7, hi = 480;
+    const x0 = CH.l, x1 = CH.w - 110, y0 = CH.h - CH.b, y1 = CH.t, xs = (v) => x0 + v / G * (x1 - x0), ys = (X) => y1 + (Math.log10(X) - Math.log10(lo)) / (Math.log10(hi) - Math.log10(lo)) * (y0 - y1);   // a smaller X is a better chance: it sits higher
+    const X = (q, v) => { const a = row[q.a]; return Math.max(a[0] - Math.floor(v / a[1]), a[2] / 128); };
+    let g = ''; for (let v = 0; v <= G; v += 20) g += abXT(xs(v), v);
+    for (const n of [10, 20, 50, 100, 200, 400]) g += '<line class="grid" x1="' + x0 + '" x2="' + x1 + '" y1="' + ys(n).toFixed(1) + '" y2="' + ys(n).toFixed(1) + '"/><text class="ax" x="' + (x0 - 6) + '" y="' + (ys(n) + 4).toFixed(1) + '" text-anchor="end">1 in ' + n + '</text>';
+    g += abAxT('Level gap (monster level − base item level)', 'Chance per check at 0% MF (odds, log scale)', x0, x1, y0, y1);
+    const ends = [];
+    for (const q of ABQ) { g += '<polyline class="mfl mf-' + q.k + '" points="' + Array.from({ length: G + 1 }, (_, v) => xs(v).toFixed(1) + ',' + ys(X(q, v)).toFixed(1)).join(' ') + '"/>'; ends.push({ k: q.k, y: ys(X(q, G)), t: q.n }); }
+    g += chEnds(ends, x1 + 8);
+    return [chFrame('Level gap and quality', 'Chance per quality check at zero magic find against the level gap, for unique, set, rare and magic items, on a log scale', g, x0, x1, y0, y1, '', chLegend(ABQ), id), (sx) => {
+      const v = Math.max(0, Math.min(G, Math.round((sx - x0) / (x1 - x0) * G))); return { x: xs(v), html: '<b>Level gap ' + v + '</b>' + ABQ.map((q) => '<div><i class="mf-' + q.k + '"></i>' + q.n + ': 1 in ' + chNum(X(q, v)) + '</div>').join('') };
+    }];
+  }
+  /** the two real tables of chart C: NoDrop and the weight of everything else (the game's own table values) */
+  const ABTC = [{ k: 'magic', n: 'Boss', tc: 'Mephisto (H)', d: 'Mephisto (Hell)' }, { k: 'unique', n: 'Regular monster', tc: 'Act 5 (H) H2H C', d: 'Act 5 (Hell) H2H C' }];
+  const abTcInfo = (t) => { const tc = E.data.tc[t.tc]; return { nd: tc.nd, w: tc.e.reduce((a, e) => a + Math.max(0, e[1]), 0) }; };
+  /** chart C: chance that one pick drops something (not NoDrop) against the players count N, with the engine's own NoDrop adjustment */
+  function playersChart(id) {
+    const x0 = CH.l, x1 = CH.w - 150, y0 = CH.h - CH.b, y1 = CH.t, xs = (n) => x0 + (n - 1) / 7 * (x1 - x0), ys = (c) => y0 - c * (y0 - y1);
+    const inf = ABTC.map(abTcInfo), pk = (i, n) => inf[i].w / (inf[i].w + E.adjNoDrop(inf[i].nd, inf[i].w, n));
+    let g = ''; for (let n = 1; n <= 8; n++) g += abXT(xs(n), n);
+    g += abYPct(ys, x0, x1) + abAxT('Players (N)', 'Chance one pick drops something', x0, x1, y0, y1);
+    const ends = [];
+    ABTC.forEach((t, i) => {
+      g += '<polyline class="mfl mf-' + t.k + '" points="' + Array.from({ length: 8 }, (_, j) => xs(j + 1).toFixed(1) + ',' + ys(pk(i, j + 1)).toFixed(1)).join(' ') + '"/>';
+      for (let n = 1; n <= 8; n++) g += '<circle class="mk mf-' + t.k + '" cx="' + xs(n).toFixed(1) + '" cy="' + ys(pk(i, n)).toFixed(1) + '" r="4.5"/>';
+      ends.push({ k: t.k, y: ys(pk(i, 8)), t: t.n });
+    });
+    g += chEnds(ends, x1 + 12);
+    return [chFrame('More players, fewer empty drops', 'Chance that one pick of a treasure class drops something against the number of players, for a boss and a regular monster', g, x0, x1, y0, y1, '', chLegend(ABTC), id), (sx) => {
+      const n = Math.max(1, Math.min(8, Math.round((sx - x0) / (x1 - x0) * 7 + 1))); return { x: xs(n), html: '<b>N = ' + n + '</b>' + ABTC.map((t, i) => '<div><i class="mf-' + t.k + '"></i>' + t.n + ': ' + (pk(i, n) * 100).toFixed(1) + '%</div>').join('') };
+    }];
+  }
+  function initAboutCharts() {   // hover for the charts above that sit in the About text
+    document.querySelectorAll('#about .mfchart[data-ab]').forEach((b) => chartHover(b, abHov[+b.dataset.ab]));
+  }
+
   function aboutHtml() {
     const C = E.CONFIG, R = C.run, h = (t) => '<h2>' + t + '</h2>', li = (xs) => '<ul>' + xs.map((x) => '<li>' + x + '</li>').join('') + '</ul>';
     const M = (x) => '<span class="math">' + x + '</span>';   // a formula, set in the math font (x is trusted markup: <i> variables, <sup> powers)
     const V = (x) => '<span class="math v"><i>' + x + '</i></span>';   // one variable in running text
+    abHov.length = 0; const ab = (f, note) => { const c = f(abHov.length, note); abHov.push(c[1]); return c[0]; };   // build a chart and file its hover under its data-ab index
     return h('What this is') +
       '<p>A drop calculator for Diablo II: Resurrected, built straight from the game\'s own data tables (game data ' + esc(E.data.meta.gameVersion) + ', ' + (E.mode === 'lod' ? 'Lord of Destruction' : 'Reign of the Warlock') + ' mode). ' +
       'It answers two questions: <i>where does an item drop, and how often</i> (tab 1), and <i>what does a farm drop</i> (tab 2). The item builder (tab 3) works out the odds of a base rolling the affixes you want.</p>' +
@@ -1635,6 +1700,8 @@
         '<b>Runs for 50%</b>: how many runs until you have even odds of having found it: ' + M('<i>n</i> = &lceil;ln 0.5 / ln(1 &minus; <i>P</i>)&rceil;') + '. Hover the cell for other percentages.',
         '<b>Per hour</b> (tab 2): ' + M('1 &minus; (1 &minus; <i>P</i>)<sup>60 / <i>m</i></sup>') + ', with ' + V('m') + ' the minutes per game from the Farming settings in Your game, or your own value.',
         '<b>mlvl</b> is the monster level, which is also the item level of what it drops. Champions add ' + C.champOffset + ', uniques ' + C.uniqueOffset + ', minions of uniques ' + C.minionOffset + '.']) +
+      '<p>A "1 in ' + V('N') + '" chance does not mean you will find it within ' + V('N') + ' tries. After as many tries as the odds say (500 runs at 1 in 500) you have only about 63%; even odds take about 0.7 &times; ' + V('N') + ', and 90% about 2.3 &times; ' + V('N') + '.</p>' +
+      ab(triesChart, 'The curve is ' + M('1 &minus; e<sup>&minus;<i>x</i></sup>') + ', the large-' + V('N') + ' limit of ' + M('1 &minus; (1 &minus; 1 / <i>N</i>)<sup><i>xN</i></sup>') + ', with ' + V('x') + ' the tries in multiples of ' + V('N') + '. It is the same for every item.') +
       h('How much to trust them') + li([
         '<b>Per kill: high.</b> These come straight from the drop tables and are checked against an independent calculation and published figures.',
         '<b>Bosses and fixed farms: high.</b> Bosses, super uniques and their minions are counted exactly (seal pop, council, Pindleskin, ...).',
@@ -1652,11 +1719,14 @@
         ', ' + V('s') + ' being its chance per pick. Tables can contain other tables; their chances multiply. A monster\'s table is upgraded to the best one of its group that its level allows (bosses keep theirs, except in a terror zone). One kill drops at most ' + C.dropCap + ' items, which matters for bosses that drop a lot (Duriel most of all).</p>' +
       '<p><b>Players.</b> More players lower the chance of dropping nothing. The game counts ' + M('<i>N</i> = party nearby + &lfloor;(other players) / 2&rfloor;') + ' and replaces NoDrop with ' +
         M('&lfloor;<i>Items</i> / (1 / (NoDrop / (NoDrop + <i>Items</i>))<sup><i>N</i></sup> &minus; 1)&rfloor;') + ', where ' + V('Items') + ' is the weight of everything else.</p>' +
+      ab(playersChart, 'Real tables: ' + ABTC.map((t) => { const i = abTcInfo(t); return t.d + ' (NoDrop ' + i.nd + ', everything else ' + i.w + ')'; }).join(' and ') + '. ' + V('N') + ' counts party members nearby fully and the other players in the game at half.') +
       '<p><b>Item quality.</b> When a base drops, the game tries unique, then set, rare, magic, superior and normal; the first that succeeds is what you get (if none does, low quality). Each try succeeds with a chance of 1 in ' + V('X') + ', where ' + V('X') + ' is built in three steps:</p><ol>' +
         '<li><b>Start</b> from the quality\'s base number: unique 400, set 160, rare 100, magic 34 for an ordinary base (class-specific bases use other values).</li>' +
         '<li><b>Subtract the level gap</b>: ' + M('(mlvl &minus; qlvl) / Divisor') + ', with Divisor 1 for unique, 2 for set and rare, 3 for magic. So a monster far above the item\'s base level gives better odds.</li>' +
         '<li><b>Apply magic find</b>: the chance is multiplied by ' + M('1 + MF / 100') + ', so 100% MF doubles it. For unique, set and rare items the game first shrinks your MF with a cap for that quality: ' +
           '<b>250 for unique, 500 for set, 600 for rare</b>. The MF that counts gets closer to the cap the more MF you have but never reaches it, and is exactly half the cap when your MF equals the cap (' + M('MF &times; cap / (MF + cap)') + '). Magic items use your full MF.</li></ol>' +
+      '<p>The level gap alone, at 0% MF: uniques gain one step per level of gap, magic one per three levels (set and rare one per two). The monster\'s own quality bonus is not included.</p>' +
+        ab(gapChart) +
         '<table class="mft"><caption>The MF that counts</caption><tr><th>Your MF</th><th>Unique</th><th>Set</th><th>Rare</th><th>Magic</th></tr>' +
         '<tr><td>100%</td><td>71%</td><td>83%</td><td>85%</td><td>100%</td></tr>' +
         '<tr><td>200%</td><td>111%</td><td>142%</td><td>150%</td><td>200%</td></tr>' +
