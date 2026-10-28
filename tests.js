@@ -657,6 +657,10 @@
         const cow = E.CONFIG.farms.find((f) => f.name === 'Cow Level'); FM.cowWalk = [E.farmMinutes(cow, { teleport: 'fast', overhead: 0 }), E.farmMinutes(cow, { teleport: 'none', overhead: 0 })];
         FM.perHour = [[0.01, 2], [0.002, 10], [0.5, 1.5]].map(([p, m]) => [p, m, 1 - Math.pow(1 - p, 60 / m)]);
         F.farmTime = FM; }
+      // magic find in the Tab 1 charts: a rune's chance does not move with MF, a unique's rises (Hell Mephisto)
+      { const cx = E.getCtx({ players: 1, party: 1, ladder: true, tz: false, clvl: 85, mf: 0 }), sm = E.sources(cx).find((s) => s.name === 'Mephisto' && s.diff === 2 && s.rank === 'boss' && !s.quest);
+        const at = (tg, mf) => E.chanceFor(cx, sm, tg, mf).target, ber = { kind: 'base', code: 'r30' }, hc = { kind: 'unique', id: 'Harlequin Crest' };
+        F.mfChart = { src: !!sm, ber: [at(ber, 0), at(ber, 1000)], hc: [at(hc, 0), at(hc, 1000)] }; }
       // seal pop (runSources 'sealpop'): the rows per difficulty / terror zone; per-run chance via chanceFor == via dropsOf (what tab 2 adds up); never above the full clear
       F.sealPop = { rows: {}, worstRun: 0, items: 0, aboveClear: [] };
       for (const tzOn of [false, true]) for (let d = 0; d < 3; d++) {
