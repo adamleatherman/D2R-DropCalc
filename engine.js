@@ -142,18 +142,23 @@
     },
     // --- popular farms (tab 2's Popular farm list): area + source. src '' = whole area clear, 'run|<id>' = a run above, 'boss|<monstats id>' = that
     //     act boss's regular kill (the difficulty is added by the app).
+    // time = rough community-experience estimates for the minutes per game (see farmMinutes; docs/plans/farm-times.md): base = minutes per run for the
+    //     reference player (boss killer, fast teleport, saved map, no sunder); travel = share of base spent moving; nav = extra navigation on a random map (fraction
+    //     of base); density = fight-time factor for an AoE player; immunity = fight-time factor from immune monsters (a sunder charm removes it); extra = fixed
+    //     travel per game outside the area (Cow Level: Wirt's Leg trip).
     farms: [   // in act order: the app groups the list by the act of each farm's area; variants of one farm share the part before ':'
-      { name: 'Andariel', area: 37, src: 'boss|andariel' }, { name: 'Countess', area: 25, src: 'run|countess' },
-      { name: 'The Pit', area: 12, src: 'run|pit' }, { name: 'Cow Level', area: 39, src: '' },
-      { name: 'Ancient Tunnels', area: 65, src: '' }, { name: 'Summoner: boss only', area: 74, src: 'boss|summoner' },
-      { name: 'Summoner: + Arcane Sanctuary ghosts', area: 74, src: 'run|arcane' },
-      { name: 'Travincal council', area: 83, src: 'run|council' }, { name: 'Mephisto: boss only', area: 102, src: 'boss|mephisto' },
-      { name: 'Mephisto: + Bremm (5 council)', area: 102, src: 'run|mephbremm' }, { name: 'Mephisto: + full council (7 council)', area: 102, src: 'run|mephcouncil' },
-      { name: 'Chaos: seal pop', area: 108, src: 'run|sealpop' }, { name: 'Chaos: full clear', area: 108, src: '' },
-      { name: 'Shenk + Eldritch', area: 110, src: 'run|shenk' },
-      { name: 'Pindleskin', area: 121, src: 'run|pindle' }, { name: 'Nihlathak', area: 124, src: 'boss|nihlathakboss' },
-      { name: 'Baal', area: 132, src: 'boss|baalcrab' },
+      { name: 'Andariel', area: 37, src: 'boss|andariel', time: { base: 1.25, travel: 0.6, nav: 0.3, density: 1.25, immunity: 1, extra: 0 } }, { name: 'Countess', area: 25, src: 'run|countess', time: { base: 1.75, travel: 0.7, nav: 0.4, density: 1, immunity: 1.05, extra: 0 } },
+      { name: 'The Pit', area: 12, src: 'run|pit', time: { base: 4, travel: 0.3, nav: 0.15, density: 0.7, immunity: 1.1, extra: 0 } }, { name: 'Cow Level', area: 39, src: '', time: { base: 7.5, travel: 0.2, nav: 0.1, density: 0.5, immunity: 1, extra: 1.75 } },
+      { name: 'Ancient Tunnels', area: 65, src: '', time: { base: 3, travel: 0.3, nav: 0.2, density: 0.7, immunity: 1.05, extra: 0 } }, { name: 'Summoner: boss only', area: 74, src: 'boss|summoner', time: { base: 1, travel: 0.7, nav: 0.4, density: 1, immunity: 1, extra: 0 } },
+      { name: 'Summoner: + Arcane Sanctuary ghosts', area: 74, src: 'run|arcane', time: { base: 4, travel: 0.3, nav: 0.1, density: 0.7, immunity: 1.1, extra: 0 } },
+      { name: 'Travincal council', area: 83, src: 'run|council', time: { base: 1, travel: 0.4, nav: 0.05, density: 1, immunity: 1.1, extra: 0 } }, { name: 'Mephisto: boss only', area: 102, src: 'boss|mephisto', time: { base: 1, travel: 0.7, nav: 0.4, density: 1.35, immunity: 1, extra: 0 } },
+      { name: 'Mephisto: + Bremm (5 council)', area: 102, src: 'run|mephbremm', time: { base: 1.75, travel: 0.6, nav: 0.4, density: 1.25, immunity: 1.05, extra: 0 } }, { name: 'Mephisto: + full council (7 council)', area: 102, src: 'run|mephcouncil', time: { base: 1.75, travel: 0.6, nav: 0.4, density: 1.25, immunity: 1.05, extra: 0 } },
+      { name: 'Chaos: seal pop', area: 108, src: 'run|sealpop', time: { base: 4, travel: 0.4, nav: 0.05, density: 0.85, immunity: 1.25, extra: 0 } }, { name: 'Chaos: full clear', area: 108, src: '', time: { base: 8, travel: 0.25, nav: 0.05, density: 0.8, immunity: 1.25, extra: 0 } },
+      { name: 'Shenk + Eldritch', area: 110, src: 'run|shenk', time: { base: 1.25, travel: 0.5, nav: 0.1, density: 1.2, immunity: 1.1, extra: 0 } },
+      { name: 'Pindleskin', area: 121, src: 'run|pindle', time: { base: 0.75, travel: 0.5, nav: 0, density: 1.2, immunity: 1.15, extra: 0 } }, { name: 'Nihlathak', area: 124, src: 'boss|nihlathakboss', time: { base: 1.75, travel: 0.6, nav: 0.3, density: 1.25, immunity: 1.1, extra: 0 } },
+      { name: 'Baal', area: 132, src: 'boss|baalcrab', time: { base: 5, travel: 0.25, nav: 0.2, density: 0.85, immunity: 1.2, extra: 0 } },
     ],
+    farmTime: { teleport: { fast: 1, slow: 1.35, none: 3 }, walkExtra: 2, overhead: 0.5 },   // travel-time factor per teleport kind; walking doubles a farm's extra; default per-game overhead (minutes)
     maxMlvl: 110,
     // --- per-kill drop cap ---
     // The game's drop routine (decompiled TreasureClassDropper, https://gist.github.com/SeanSullivan86/e912b40bb85f9822b9ef507d91534c88)
@@ -2526,8 +2531,17 @@
       return Math.max(1, Math.ceil(Math.log1p(-q) / Math.log1p(-p)));
     }
 
+    // Minutes per game of a popular farm: opts = { style: 'boss'|'density', teleport: 'fast'|'slow'|'none', map: 'saved'|'random', sunder: bool, overhead }.
+    function farmMinutes(farm, opts) {
+      const t = farm && farm.time; if (!t) return null;
+      const o = opts || {}, FT = CONFIG.farmTime, tp = FT.teleport[o.teleport] || 1, rnd = o.map === 'random';
+      const travel = t.base * t.travel * tp + (rnd ? t.base * t.nav * tp : 0) + t.extra * (o.teleport === 'none' ? FT.walkExtra : 1);
+      const fight = t.base * (1 - t.travel) * (o.style === 'density' ? t.density : 1) * (o.sunder ? 1 : t.immunity);
+      return travel + fight + (o.overhead == null || isNaN(o.overhead) ? FT.overhead : o.overhead);
+    }
+
     return {
-      CONFIG, data: D, DIFFS, items, types, getCtx, playersN, adjNoDrop, dist, upgradeTC, areaSources, DUP_OF, areaRun, areaRolls, listShares, bossPacks,
+      CONFIG, data: D, farmMinutes, DIFFS, items, types, getCtx, playersN, adjNoDrop, dist, upgradeTC, areaSources, DUP_OF, areaRun, areaRolls, listShares, bossPacks,
       mode, heraldsAvailable, sunderChance, sunderPaths, isSunder, adjQuality, heraldSpawnPct, quality, qualityTotals, sources, runSources, srcDist, chanceFor, dropsOf, baseQualityChance, affixLevel, minIlvlForAlvl, eligible, maxSockets, affixProb, rareProbFromSamples, cardOdds, ilvlCurve, minLevels, staffDist, staffBase,
       statList, describe, describeAt, sliderWhat, affixSearch, searchIndex, baseTypes, metaCache, uniqById, setById, uniqByCode, setByCode, prettyId, tzLevel,
       eligibleUniques, eligibleSets, condProb, trialsFor,

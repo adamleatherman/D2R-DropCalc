@@ -637,6 +637,26 @@
           : L.filter((s) => s.area === f.area && s.diff === d && !s.herald && !s.quest && (!f.src || s.key === f.src + '|' + d))).length)]);
         const clr = (a, d) => L.filter((s) => s.area === a && s.diff === d && !s.herald && !s.quest);   // tab 2's whole area clear
         F.pit = [0, 1, 2].map((d) => { const r = E.runSources(cx, 'pit', d, L), c = clr(12, d).concat(clr(16, d)); return [r.length, c.length, r.reduce((t, s) => t + s.perRun, 0), c.reduce((t, s) => t + s.perRun, 0), c.every((s) => r.indexOf(s) >= 0)]; }); }
+      // farm times (farmMinutes, docs/plans/farm-times.md): scenarios A-F against the plan's table, ordering, overrides
+      { const SC = [['boss', 'fast', 'saved', 0], ['boss', 'fast', 'random', 0], ['density', 'fast', 'random', 0], ['density', 'slow', 'random', 0], ['density', 'slow', 'random', 1], ['density', 'none', 'random', 0]];
+        const EXP = { 'Pindleskin': [1.3, 1.3, 1.4, 1.5, 1.5, 2.1], 'Andariel': [1.8, 2.1, 2.2, 2.6, 2.6, 4.5], 'Countess': [2.3, 3.0, 3.0, 3.6, 3.6, 6.8], 'Summoner: boss only': [1.5, 1.9, 1.9, 2.3, 2.3, 4.1],
+          'Summoner: + Arcane Sanctuary ghosts': [4.8, 5.2, 4.3, 4.8, 4.6, 7.5], 'Travincal council': [1.6, 1.6, 1.6, 1.8, 1.7, 2.5], 'Mephisto: boss only': [1.5, 1.9, 2.0, 2.4, 2.4, 4.2],
+          'Mephisto: + Bremm (5 council)': [2.3, 3.0, 3.2, 3.8, 3.7, 6.7], 'Mephisto: + full council (7 council)': [2.3, 3.0, 3.2, 3.8, 3.7, 6.7], 'Shenk + Eldritch': [1.8, 1.9, 2.1, 2.3, 2.3, 3.6],
+          'Nihlathak': [2.3, 2.8, 3.0, 3.6, 3.5, 6.2], 'Ancient Tunnels': [3.6, 4.2, 3.5, 4.1, 4.0, 6.5], 'The Pit': [4.8, 5.4, 4.5, 5.1, 4.9, 8.1], 'Chaos: seal pop': [5.1, 5.3, 4.8, 5.5, 5.0, 8.4],
+          'Chaos: full clear': [10.0, 10.4, 8.9, 9.7, 8.5, 13.7], 'Baal': [6.2, 7.2, 6.6, 7.4, 6.7, 11.1], 'Cow Level': [9.8, 10.5, 7.5, 8.3, 8.3, 13.8] };
+        const mk = (sc, ov) => ({ style: sc[0], teleport: sc[1], map: sc[2], sunder: !!sc[3], overhead: ov });
+        const FM = { missing: [], worst: 0, noTime: E.CONFIG.farms.filter((f) => !f.time).length, order: [], sunder: [], overhead: null, none: E.farmMinutes({ name: 'x' }, {}) };
+        for (const f of E.CONFIG.farms) {
+          const ex = EXP[f.name]; if (!ex) { FM.missing.push(f.name); continue; }
+          SC.forEach((sc, i) => { FM.worst = Math.max(FM.worst, Math.abs(E.farmMinutes(f, mk(sc)) - ex[i])); });
+          const m = (tp, map, st, sd) => E.farmMinutes(f, { style: st || 'boss', teleport: tp, map, sunder: !!sd });
+          FM.order.push([f.name, m('none', 'saved') >= m('slow', 'saved') && m('slow', 'saved') >= m('fast', 'saved'), m('fast', 'random') >= m('fast', 'saved'), m('none', 'random') >= m('slow', 'random') && m('slow', 'random') >= m('fast', 'random')]);
+          FM.sunder.push([f.name, m('fast', 'saved', 'boss', 1) <= m('fast', 'saved', 'boss', 0)]);
+        }
+        FM.overhead = [E.farmMinutes(E.CONFIG.farms[0], { overhead: 0 }), E.farmMinutes(E.CONFIG.farms[0], { overhead: 2 }), E.farmMinutes(E.CONFIG.farms[0], {})];
+        const cow = E.CONFIG.farms.find((f) => f.name === 'Cow Level'); FM.cowWalk = [E.farmMinutes(cow, { teleport: 'fast', overhead: 0 }), E.farmMinutes(cow, { teleport: 'none', overhead: 0 })];
+        FM.perHour = [[0.01, 2], [0.002, 10], [0.5, 1.5]].map(([p, m]) => [p, m, 1 - Math.pow(1 - p, 60 / m)]);
+        F.farmTime = FM; }
       // seal pop (runSources 'sealpop'): the rows per difficulty / terror zone; per-run chance via chanceFor == via dropsOf (what tab 2 adds up); never above the full clear
       F.sealPop = { rows: {}, worstRun: 0, items: 0, aboveClear: [] };
       for (const tzOn of [false, true]) for (let d = 0; d < 3; d++) {
