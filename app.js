@@ -318,7 +318,13 @@
   // One source -> per-kill chance of everything it drops (E.dropsOf, same numbers as chanceFor); an area clear adds up the sources' per-run chances like Tab 1's Group by Area.
   let T3 = null, c3 = { sig: '', rows: [] };
   const d3Diff = () => { const d = parseInt($('s_diff').value, 10); return d < 0 ? 2 : d; };   // All difficulties -> Hell
-  const kind3 = (t) => t.kind !== 'base' ? t.kind : /^r\d\d$/.test(t.code) ? 'rune' : /^(cm[123]|jew|cjw)$/.test(t.code) ? 'charm' : 'base';
+  /** potions (also throwing), arrows, bolts, the plain key and the Town Portal / Identify scrolls and tomes: never listed (the Terror / Hate / Destruction
+   *  keys are quest items, type ques; the Scroll of Knowledge stays) */
+  const junk3 = (code) => { const it = E.items[code]; return !!it && (it.t === 'key' || /^(tsc|isc|tbk|ibk)$/.test(code) || it.anc.some((a) => a === 'poti' || a === 'tpot' || a === 'bowq' || a === 'xboq')); };
+  const kind3 = (t) => t.kind !== 'base' ? t.kind : /^r\d\d$/.test(t.code) ? 'rune' : /^(cm[123]|jew|cjw)$/.test(t.code) ? 'charm' : junk3(t.code) ? 'junk' : 'base';
+  const KINDS3 = ['unique', 'set', 'rune', 'charm', 'base'];
+  const kinds3 = () => Array.from(document.querySelectorAll('#k3 input:checked')).map((i) => i.value);   // none ticked = all kinds
+  function kindSummary3() { const k = kinds3(); $('k3s').textContent = !k.length || k.length === KINDS3.length ? 'All kinds' : k.length <= 2 ? k.map((x) => $('k3').querySelector('input[value="' + x + '"]').parentNode.textContent.trim()).join(', ') : k.length + ' kinds'; }
   const KIND3 = { unique: 'unique', set: 'set item', rune: 'rune', charm: 'charm', base: 'base' };
   const base3 = (r) => r.t.kind === 'base' ? '' : E.items[r.t.code].n;
   const PCT3 = (r) => r.runP;
@@ -359,8 +365,8 @@
       }
       c3 = { sig, rows, one, kills, quest: one && !!srcs[0].quest, n: srcs.length, run, ms: 0 };
     }
-    const k = $('k3').value, f = $('f3').value.trim().toLowerCase();
-    T3.rows = c3.rows.filter((r) => (k === 'all' || (k === 'notable' ? r.kind !== 'base' : r.kind === k)) && (!f || r.text.indexOf(f) >= 0));
+    const ks = kinds3(), f = $('f3').value.trim().toLowerCase();
+    T3.rows = c3.rows.filter((r) => r.kind !== 'junk' && (!ks.length || ks.indexOf(r.kind) >= 0) && (!f || r.text.indexOf(f) >= 0));
     T3.limit = parseInt($('n3').value, 10);
     const r = T3.render(), an = c3.run ? E.CONFIG.runs[c3.run].name : $('ar3').selectedOptions[0].textContent.replace(/^Act \d+ - /, '');   // a run can span areas: its own name leads
     $('info3').textContent = an + ' (' + DIFF[diff] + (sel.diff < 0 ? ', difficulty All shows Hell' : '') + '): ' + (c3.one ? srcs[0].name : (c3.run ? '' : 'whole area clear, ') + c3.n + ' source' + (c3.n === 1 ? '' : 's') + ', ' + c3.kills.toFixed(0) + ' kills/run') + '  |  ' +
@@ -373,7 +379,7 @@
     try {
       const qs = new URLSearchParams(location.search);
       for (const k of ['t3a', 't3m', 't3k']) qs.delete(k);
-      if ($('ar3').value) { qs.set('t3a', $('ar3').value); if ($('mo3').value) qs.set('t3m', $('mo3').value); if ($('k3').value !== 'notable') qs.set('t3k', $('k3').value); }
+      if ($('ar3').value) { qs.set('t3a', $('ar3').value); if ($('mo3').value) qs.set('t3m', $('mo3').value); const ks = kinds3().join(','); if (ks !== 'unique,set,rune,charm') qs.set('t3k', ks || 'all'); }
       history.replaceState(null, '', location.pathname + (qs.toString() ? '?' + qs.toString() : ''));
     } catch (e) { /* ignore */ }
   }
@@ -397,7 +403,9 @@
     });
     $('ar3').addEventListener('change', () => { fill3(); runTab3(); });
     $('mo3').addEventListener('change', runTab3);
-    for (const id of ['k3', 'n3']) $(id).addEventListener('change', runTab3);
+    $('k3').addEventListener('change', () => { kindSummary3(); runTab3(); });
+    document.addEventListener('click', (ev) => { if (!$('k3').contains(ev.target)) $('k3').open = false; });   // the kind list closes on a click elsewhere
+    $('n3').addEventListener('change', runTab3);
     $('f3').addEventListener('input', () => { clearTimeout(runTab3.t); runTab3.t = setTimeout(runTab3, 250); });
   }
 
@@ -1365,7 +1373,11 @@
     if (a3 && Array.from($('ar3').options).some((o) => o.value === a3)) {
       $('ar3').value = a3; fill3();
       if (qs.get('t3m') && Array.from($('mo3').options).some((o) => o.value === qs.get('t3m'))) $('mo3').value = qs.get('t3m');
-      if (qs.get('t3k') && Array.from($('k3').options).some((o) => o.value === qs.get('t3k'))) $('k3').value = qs.get('t3k');
+      if (qs.get('t3k')) {   // t3k = kinds, comma separated; the old single values: notable (the default), all, or one kind
+        const v = qs.get('t3k'), ks = v === 'notable' ? ['unique', 'set', 'rune', 'charm'] : v === 'all' ? KINDS3 : v.split(',');
+        for (const i of document.querySelectorAll('#k3 input')) i.checked = ks.indexOf(i.value) >= 0;
+        kindSummary3();
+      }
       runTab3(); $('t3').click();
     }
   }

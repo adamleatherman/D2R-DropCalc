@@ -219,7 +219,7 @@
       <label title="Choose an area to list what it drops; Difficulty below is the one under the tabs (All = Hell)">Area <select id="ar3"><option value="">Choose an area</option></select></label>
       <label title="Optional: one monster / source of the area; none = a whole area clear">Source <select id="mo3" disabled><option value="">Whole area clear</option></select></label>
       </span>
-      <label>Show <select id="k3"><option value="notable" selected>Uniques, sets, runes, charms</option><option value="all">Everything</option><option value="unique">Uniques</option><option value="set">Set items</option><option value="rune">Runes</option><option value="charm">Charms and jewels</option><option value="base">Other bases</option></select></label>
+      <div class="fld" title="Tick the kinds of item to list; none ticked lists them all. Bases leaves out potions, arrows, bolts, plain keys (not the Terror / Hate / Destruction keys) and Town Portal / Identify scrolls and tomes">Show <details class="ms" id="k3"><summary id="k3s">4 kinds</summary><div class="msl"><label class="chk"><input type="checkbox" value="unique" checked> Uniques</label><label class="chk"><input type="checkbox" value="set" checked> Set items</label><label class="chk"><input type="checkbox" value="rune" checked> Runes</label><label class="chk"><input type="checkbox" value="charm" checked> Charms and jewels</label><label class="chk"><input type="checkbox" value="base"> Bases</label></div></details></div>
       <label>Item filter <input id="f3" placeholder="name or base text" style="width:180px"></label>
       <label>Rows <select id="n3"><option>100</option><option selected>300</option><option>1000</option><option>5000</option></select></label>
     </div>
