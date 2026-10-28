@@ -492,6 +492,7 @@
   const OJ = { odds: { id: 0, w: null }, curve: { id: 0, w: null } };   // the card-odds and the best-item-level jobs: one long-lived worker each
   /** remember a checkbox in localStorage (try/catch: storage can be blocked) */
   const lsGet = (k) => { try { return localStorage.getItem(k) === '1'; } catch (e) { return false; } };
+  const lsOpen = (k) => { try { return localStorage.getItem(k) !== '0'; } catch (e) { return true; } };   // a section that is open unless the user closed it
   const lsSet = (k, v) => { try { localStorage.setItem(k, v ? '1' : '0'); } catch (e) { /* ignore */ } };
   const showOdds = () => $('odds2').checked;
 
@@ -1396,8 +1397,8 @@
     $('qb1').checked = lsGet('d2dc-qb1');
     $('qb1').addEventListener('change', () => { lsSet('d2dc-qb1', $('qb1').checked); T1.render(); });
     $('g1').addEventListener('change', () => { T1.key = 'perrun'; T1.dir = -1; runTab1(); });   // both views start sorted by chance per run
-    $('charts3').open = lsGet('d2dc-charts3'); $('charts3').addEventListener('toggle', () => { lsSet('d2dc-charts3', $('charts3').open); renderCharts3(); });   // only computed while open
-    $('charts1').open = lsGet('d2dc-charts1'); $('charts1').addEventListener('toggle', () => { lsSet('d2dc-charts1', chOpen()); if (chOpen() && target1) runTab1(); });   // only computed while open
+    $('charts3').open = lsOpen('d2dc-charts3'); $('charts3').addEventListener('toggle', () => { lsSet('d2dc-charts3', $('charts3').open); renderCharts3(); });   // only computed while open
+    $('charts1').open = lsOpen('d2dc-charts1'); $('charts1').addEventListener('toggle', () => { lsSet('d2dc-charts1', chOpen()); if (chOpen() && target1) runTab1(); });   // only computed while open
     $('bld1').onclick = () => {   // tab 2 on this base
       const o = TYPEOPTS.find((x) => x.kind === 'base' && x.code === target1.code); if (!o) return;
       $('q2').value = o.label; setType(o); $('t2').click();
