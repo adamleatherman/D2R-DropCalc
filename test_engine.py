@@ -2237,6 +2237,8 @@ def main():
     fact("farm times: no teleport >= slow >= fast, random map >= saved map, sunder charm <= none, for every farm", all(all(o_[1:]) for o_ in FT_["order"]) and all(s_[1] for s_ in FT_["sunder"]), str([o_ for o_ in FT_["order"] if not all(o_[1:])]))
     fact("farm times: overhead is added as given (default 0.25 = 15 s), walking doubles only the Cow Level's Wirt's Leg trip", abs(FT_["overhead"][1] - FT_["overhead"][0] - 2) < 1e-9 and abs(FT_["overhead"][2] - FT_["overhead"][0] - 0.25) < 1e-9 and FT_["cowWalk"][1] > FT_["cowWalk"][0] + 1.75, str(FT_["cowWalk"]))
     fact("farm times: chance per hour = 1 - (1 - p)^(60 / minutes)", all(abs(h_[2] - (1 - (1 - h_[0]) ** (60 / h_[1]))) < 1e-12 for h_ in FT_["perHour"]))
+    MFC_ = FA["mfChart"]
+    fact("tab 1 charts (Hell Mephisto): a rune's chance per kill is the same at 0 and 1000 MF, a unique's is strictly higher (Ber %.3g, Harlequin Crest %.3g -> %.3g)" % (MFC_["ber"][0], MFC_["hc"][0], MFC_["hc"][1]), MFC_["src"] and MFC_["ber"][0] > 0 and MFC_["ber"][0] == MFC_["ber"][1] and MFC_["hc"][1] > MFC_["hc"][0] > 0, str(MFC_))
     fact("The Pit farm = every source of the whole area clears of Pit Level 1 (12) and Pit Level 2 (16), kills/run added up, in every difficulty", all(r_[0] == r_[1] and abs(r_[2] - r_[3]) < 1e-9 and r_[4] and r_[2] > 0 for r_ in FA["pit"]), str(FA["pit"]))
     # ---- cave cells: tools/maze_cells.json is current, consistent and used by data.json
     import maze_cells as MC_

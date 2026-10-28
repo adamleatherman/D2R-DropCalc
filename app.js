@@ -338,6 +338,7 @@
     if (bk) hl += ' &middot; best per kill: ' + esc(srcWhere(bk.src)) + ', <b>' + odds(bk.c.target) + '</b>';
     if (br && runP(br) > 0) hl += ' &middot; best per run: ' + esc(areaMode() ? br.src.areaName + ' (' + DIFF[br.src.diff] + ')' : srcWhere(br.src)) + ', <b>' + runsTxt(runP(br)) + '</b>, ~' + countFmt(E.trialsFor(runP(br), 0.5)) + ' runs for 50% / ~' + countFmt(E.trialsFor(runP(br), 0.9)) + ' for 90%';
     $('hl1').innerHTML = hl;
+    chIn = { sel, ctx, br, bq }; renderCharts1();
     const lo = lowest(all.rows);
     $('low1').textContent = lo ? 'Lowest-level source: monster level ' + lo.src.mlvl + ' (' + srcWhere(lo.src) + '); base qlvl ' + it.q + '.' : 'No source can drop it with these game settings; base qlvl ' + it.q + '.';
     $('head1').hidden = false;
@@ -1395,6 +1396,7 @@
     $('qb1').checked = lsGet('d2dc-qb1');
     $('qb1').addEventListener('change', () => { lsSet('d2dc-qb1', $('qb1').checked); T1.render(); });
     $('g1').addEventListener('change', () => { T1.key = 'perrun'; T1.dir = -1; runTab1(); });   // both views start sorted by chance per run
+    $('charts1').open = lsGet('d2dc-charts1'); $('charts1').addEventListener('toggle', () => { lsSet('d2dc-charts1', chOpen()); if (chOpen() && target1) runTab1(); });   // only computed while open
     $('bld1').onclick = () => {   // tab 2 on this base
       const o = TYPEOPTS.find((x) => x.kind === 'base' && x.code === target1.code); if (!o) return;
       $('q2').value = o.label; setType(o); $('t2').click();
@@ -1468,6 +1470,97 @@
       }
       runTab3(); $('t3').click();
     }
+  }
+
+  // ----- the two small charts in tab 1 ("Charts" under the headline): MF vs chance per run, and runs vs cumulative chance, both at the best-per-run source -----
+  const CH = { w: 640, h: 270, l: 84, r: 24, t: 16, b: 42 };
+  let chCache = null;   // { key, mfs, ps, P }
+  const chOpen = () => $('charts1').open;
+  const chNum = (n) => n < 1e3 ? String(Math.round(n * 10) / 10) : n < 1e4 ? Math.round(n).toLocaleString('en-US') : n < 1e6 ? +(n / 1e3).toPrecision(3) + 'k' : +(n / 1e6).toPrecision(3) + 'M';   // 1 in N, short
+  const chOdds = (p) => p >= 1 ? 'always' : '1 in ' + chNum(1 / p);
+  /** per-kill chance of the target at a source and MF (white-base filter applied like the table) */
+  const chKill = (ctx, src, mf, bq) => { const c = E.chanceFor(ctx, src, target1, mf); return bq ? E.baseQualityChance(c, bq) : c.target; };
+  /** chart data for the best-per-run row br: chance per run at MF 0..1000 (area row: its parts combined like groupAreas) */
+  const chParts = (br) => (br.parts || [br]).filter((r) => r.src.perRun > 0 && !r.src.quest && !r.src.herald);
+  const chRun = (ctx, parts, mf, bq) => -Math.expm1(parts.reduce((a, r) => a + r.src.perRun * Math.log1p(-Math.min(chKill(ctx, r.src, mf, bq), 1)), 0));   // 1 - prod (1 - p_i)^kills_i
+  function chartData(sel, ctx, br, bq) {
+    const parts = chParts(br);
+    const key = target1.kind + (target1.code || target1.id) + '|' + bq + '|' + JSON.stringify(Object.assign({}, sel, { mf: 0 })) + '|' + parts.map((r) => r.src.key).join(',');
+    if (chCache && chCache.key === key) return chCache;
+    const mfs = [0, 25, 50, 75, 100, 150, 200, 250, 300, 350, 400, 450, 500, 600, 700, 800, 900, 1000];
+    const ps = mfs.map((mf) => chRun(ctx, parts, mf, bq));
+    return (chCache = { key, mfs, ps, P: runP(br) });
+  }
+  /** hover on a chart: toX(svg x) -> { x: svg x of the crosshair, html } or null; crosshair + readout box like the About chart */
+  function chartHover(box, toX) {
+    const svg = box.querySelector('svg'), xh = svg.querySelector('.xh'), hit = svg.querySelector('.hit'), tip = box.querySelector('.mftip');
+    hit.addEventListener('mousemove', (e) => {
+      const r = svg.getBoundingClientRect(), v = toX((e.clientX - r.left) * CH.w / r.width); if (!v) return;
+      xh.setAttribute('x1', v.x); xh.setAttribute('x2', v.x); xh.setAttribute('visibility', 'visible'); tip.innerHTML = v.html;
+      tip.hidden = false; const bx = box.getBoundingClientRect(); let left = e.clientX - bx.left + 12; if (left + 190 > bx.width) left -= 210; tip.style.left = left + 'px'; tip.style.top = (e.clientY - bx.top - 10) + 'px';
+    });
+    hit.addEventListener('mouseleave', () => { xh.setAttribute('visibility', 'hidden'); tip.hidden = true; });
+  }
+  const chFrame = (title, aria, g, x0, x1, y0, y1) => '<div class="mfchart"><div class="ct">' + title + '</div><svg viewBox="0 0 ' + CH.w + ' ' + CH.h + '" role="img" aria-label="' + aria + '">' + g +
+    '<line class="xh" y1="' + y1 + '" y2="' + y0 + '" x1="0" x2="0" visibility="hidden"/><rect class="hit" x="' + x0 + '" y="' + y1 + '" width="' + (x1 - x0) + '" height="' + (y0 - y1) + '"/></svg><div class="mftip" hidden></div></div>';
+  const chDot = (x, y) => '<circle class="dot" cx="' + x.toFixed(1) + '" cy="' + y.toFixed(1) + '" r="4.5"/>';
+  /** chart 1: chance per run against MF (x linear 0-1000, y log in odds so equal steps are equal improvements) */
+  function mfRunChart(d, mfNow, pNow) {
+    const x0 = CH.l, x1 = CH.w - CH.r, y0 = CH.h - CH.b, y1 = CH.t, xs = (mf) => x0 + mf / 1000 * (x1 - x0);
+    const pos = d.ps.filter((p) => p > 0); if (!pos.length) return '';
+    let lo = Math.log10(Math.min(...pos)), hi = Math.log10(Math.max(...pos));
+    const flat = hi - lo < 1e-9; if (flat) { lo -= .3; hi += .3; } else { lo -= .12; hi += .12; }
+    const ys = (p) => y0 - (Math.log10(Math.max(p, 1e-300)) - lo) / (hi - lo) * (y0 - y1);
+    let tk = []; for (let k = Math.floor(lo) - 1; k <= Math.ceil(hi); k++) for (const m of [1, 1.5, 2, 3, 5, 7]) tk.push(1 / (m * Math.pow(10, k)));   // p = 1 / (m x 10^k)
+    tk = tk.filter((p) => Math.log10(p) >= lo && Math.log10(p) <= hi && p < 1);
+    if (tk.length > 5) tk = tk.filter((p, i) => i % Math.ceil(tk.length / 5) === 0);
+    if (flat || tk.length < 2) tk = flat ? [d.ps[0]] : [Math.min(...pos), Math.max(...pos)];
+    let g = '';
+    for (const mf of [0, 200, 400, 600, 800, 1000]) g += '<line class="grid" x1="' + xs(mf) + '" x2="' + xs(mf) + '" y1="' + y1 + '" y2="' + y0 + '"/><text class="ax" x="' + xs(mf) + '" y="' + (y0 + 16) + '" text-anchor="middle">' + mf + '%</text>';
+    for (const p of tk) g += '<line class="grid" x1="' + x0 + '" x2="' + x1 + '" y1="' + ys(p).toFixed(1) + '" y2="' + ys(p).toFixed(1) + '"/><text class="ax" x="' + (x0 - 6) + '" y="' + (ys(p) + 4).toFixed(1) + '" text-anchor="end">' + chOdds(p) + '</text>';
+    g += '<text class="ax" x="' + (x0 + x1) / 2 + '" y="' + (CH.h - 6) + '" text-anchor="middle">Your magic find</text><text class="ax" transform="translate(12,' + (y0 + y1) / 2 + ') rotate(-90)" text-anchor="middle">Chance per run (odds, log scale)</text>';
+    g += '<polyline class="mfl chart-1" points="' + d.mfs.map((mf, i) => xs(mf).toFixed(1) + ',' + ys(d.ps[i]).toFixed(1)).join(' ') + '"/>';
+    const m = Math.max(0, Math.min(1000, mfNow)), pm = pNow;
+    g += '<line class="ref" x1="' + xs(m) + '" x2="' + xs(m) + '" y1="' + ys(pm).toFixed(1) + '" y2="' + y0 + '"/>' + chDot(xs(m), ys(pm)) +
+      '<text class="lab" x="' + (xs(m) + (m > 800 ? -9 : 9)).toFixed(1) + '" y="' + (ys(pm) + (flat ? -10 : 18)).toFixed(1) + '" text-anchor="' + (m > 800 ? 'end' : 'start') + '">you: ' + mfNow + '% MF, ' + chOdds(pm) + '</text>';
+    return chFrame('Does magic find help this item?', 'Chance per run of this item against your magic find, at the best source per run', g, x0, x1, y0, y1) + (flat ? '<div class="note">Magic find does not change this item\'s chance.</div>' : '');
+  }
+  /** chart 2: cumulative chance of having found it after n runs, 0 to the runs for 99% */
+  function runsChart(P) {
+    const n99 = E.trialsFor(P, 0.99), x0 = CH.l, x1 = CH.w - CH.r - 10, y0 = CH.h - CH.b, y1 = CH.t, xs = (n) => x0 + n / n99 * (x1 - x0), ys = (c) => y0 - c * (y0 - y1);
+    const raw = n99 / 5, mag = Math.pow(10, Math.floor(Math.log10(raw))), step = Math.max(1, [1, 2, 5, 10].map((k) => k * mag).find((s) => s >= raw));
+    let g = '';
+    for (let n = 0; n <= n99; n += step) g += '<line class="grid" x1="' + xs(n).toFixed(1) + '" x2="' + xs(n).toFixed(1) + '" y1="' + y1 + '" y2="' + y0 + '"/><text class="ax" x="' + xs(n).toFixed(1) + '" y="' + (y0 + 16) + '" text-anchor="middle">' + countFmt(n) + '</text>';
+    for (const c of [0, .25, .5, .75, 1]) g += '<line class="grid" x1="' + x0 + '" x2="' + x1 + '" y1="' + ys(c) + '" y2="' + ys(c) + '"/><text class="ax" x="' + (x0 - 6) + '" y="' + (ys(c) + 4) + '" text-anchor="end">' + c * 100 + '%</text>';
+    g += '<text class="ax" x="' + (x0 + x1) / 2 + '" y="' + (CH.h - 6) + '" text-anchor="middle">Runs</text><text class="ax" transform="translate(12,' + (y0 + y1) / 2 + ') rotate(-90)" text-anchor="middle">Chance of having found it</text>';
+    const cum = (n) => -Math.expm1(n * Math.log1p(-Math.min(P, 1)));
+    g += '<polyline class="mfl chart-1" points="' + Array.from({ length: 101 }, (_, i) => xs(n99 * i / 100).toFixed(1) + ',' + ys(cum(n99 * i / 100)).toFixed(1)).join(' ') + '"/>';
+    for (const q of [.5, .9, .99]) {
+      const n = E.trialsFor(P, q), x = xs(n), y = ys(cum(n)), end = n > n99 * .6;
+      g += '<line class="ref" x1="' + x0 + '" x2="' + x.toFixed(1) + '" y1="' + y.toFixed(1) + '" y2="' + y.toFixed(1) + '"/><line class="ref" x1="' + x.toFixed(1) + '" x2="' + x.toFixed(1) + '" y1="' + y.toFixed(1) + '" y2="' + y0 + '"/>' + chDot(x, y) +
+        '<text class="lab" x="' + (x + (end ? -9 : 9)).toFixed(1) + '" y="' + (y + (end ? 16 : 18)).toFixed(1) + '" text-anchor="' + (end ? 'end' : 'start') + '">' + q * 100 + '%: ' + countFmt(n) + ' runs</text>';
+    }
+    return [chFrame('How many runs until you find it?', 'Chance of having found the item after a number of runs at the best source per run', g, x0, x1, y0, y1), (sx) => {
+      const n = Math.max(0, Math.min(n99, Math.round((sx - x0) / (x1 - x0) * n99))); return { x: xs(n), html: '<b>' + countFmt(n) + ' runs</b><div>' + (cum(n) * 100).toFixed(cum(n) < .1 ? 2 : 1) + '% chance of having found it</div>' };
+    }];
+  }
+  /** (re)draw the charts of the current headline row; only while the Charts section is open */
+  let chIn = null;   // the inputs of the last runTab1: { sel, ctx, br, bq }
+  function renderCharts1() {
+    const box = $('ch1'); if (!chOpen()) return;
+    const c = chIn, P = c && c.br ? runP(c.br) : 0;
+    if (!c || !c.br || !(P > 0)) { box.innerHTML = '<div class="note">No source with a chance per run to chart.</div>'; return; }
+    const d = chartData(c.sel, c.ctx, c.br, c.bq);
+    const h1 = mfRunChart(d, c.sel.mf, chRun(c.ctx, chParts(c.br), Math.min(c.sel.mf, 1000), c.bq));
+    let h2 = '', hv = null;
+    if (P >= 1) h2 = '<div class="note">This drops on every run at this source.</div>'; else { const r = runsChart(P); h2 = r[0]; hv = r[1]; }
+    box.innerHTML = '<div class="charts">' + h1 + h2 + '</div>';
+    const bs = box.querySelectorAll('.mfchart');
+    if (bs[0]) chartHover(bs[0], (sx) => {
+      const v = (sx - CH.l) / (CH.w - CH.l - CH.r) * 1000, i = d.mfs.reduce((a, mf, k) => Math.abs(mf - v) < Math.abs(d.mfs[a] - v) ? k : a, 0), mf = d.mfs[i], p = d.ps[i];   // snaps to the computed MF values
+      return { x: CH.l + mf / 1000 * (CH.w - CH.l - CH.r), html: '<b>' + mf + '% MF</b><div>' + chOdds(p) + ' per run (' + (p * 100).toPrecision(3) + '%)</div>' };
+    });
+    if (hv && bs[1]) chartHover(bs[1], hv);
   }
 
   // ----- the "MF that counts" chart on the About page: log-log lines per quality, direct labels, legend, hover readout -----
