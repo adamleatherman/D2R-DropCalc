@@ -631,6 +631,10 @@
           colossalLow: S.filter((s) => s.area === 137 && s.diff < 2).length, colossalHell: S.filter((s) => s.area === 137 && s.diff === 2).length };
         const grp = E.areaSources(cx).filter((s) => s.rank === 'minion' && s.diff === 2 && (s.area === 83 || s.area === 102));
         F.councilGroups = grp.map((s) => [s.area, s.mon, s.perRun, s.tc]); }
+      // the eight Rainbow Facets: distinct ids from their properties (build.py), each its own search entry with its own chance, together the old combined one
+      { const ids = E.data.uniques.filter((u) => /^Rainbow Facet/.test(u.id)).map((u) => u.id), cx = E.getCtx({ players: 1, party: 1, ladder: true, tz: false, mf: 0 });
+        const src = E.sources(cx).find((s) => s.rank === 'boss' && s.mon === 'diablo' && s.diff === 2), each = ids.map((id) => E.chanceFor(cx, src, { kind: 'unique', id }, 0).target);
+        F.facets = { ids, indexed: E.searchIndex().filter((x) => x.kind === 'unique' && /^Rainbow Facet/.test(x.id)).length, each, spread: Math.max(...each) / Math.min(...each) }; }
       // popular farms (CONFIG.farms, tab 2): each resolves to at least one source in every difficulty, as the app looks it up
       { const cx = E.getCtx({ players: 1, party: 1, ladder: true, tz: false, mf: 0, quest: false }), L = E.areaSources(cx);
         F.farms = E.CONFIG.farms.map((f) => [f.name, [0, 1, 2].map((d) => (f.src.indexOf('run|') === 0 ? E.runSources(cx, f.src.slice(4), d, L)

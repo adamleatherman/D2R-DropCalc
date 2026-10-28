@@ -490,7 +490,7 @@ def build(mode):
                 L["pk"] = r3(res["k"])
 
     # ------------------------------------------------------ uniques / sets / sets
-    uniques = []
+    uniques, urows = [], []
     for r in rd("uniqueitems"):
         if not r.get("index") or not r.get("code"):
             continue
@@ -508,6 +508,26 @@ def build(mode):
             "lr": num(r.get("lvl req")),
             "dc": r.get("DropConditionCalc", ""),
         })
+        urows.append(r)
+    # Uniques sharing one index (the eight Rainbow Facets) get a distinct id and name from their own properties: the engine and the
+    # search match uniques by id, so with one id a "Rainbow Facet" search counted all eight. Facets: the element of the dmg-* property
+    # and the trigger of the death-skill / levelup-skill property, e.g. "Rainbow Facet (Cold, Level up)". Other duplicates keep their id (Azurewrath:
+    # an unused Crystal Sword row next to the real Phase Blade one; the engine keeps the later, spawnable row).
+    ELEM = {"ltng": "Lightning", "cold": "Cold", "fire": "Fire", "pois": "Poison", "mag": "Magic"}
+    dup = {}
+    for u in uniques:
+        dup[u["id"]] = dup.get(u["id"], 0) + 1
+    for u, r in zip(uniques, urows):
+        if dup[u["id"]] < 2:
+            continue
+        props = [r.get("prop%d" % k, "") for k in range(1, 13)]
+        el = next((ELEM.get(p_[4:]) for p_ in props if p_.startswith("dmg-") and ELEM.get(p_[4:])), None)
+        trig = "Death" if "death-skill" in props else "Level up" if "levelup-skill" in props else None
+        if not (el and trig):
+            continue
+        tag = el + ", " + trig
+        u["id"] = u["id"] + " (" + tag + ")"
+        u["n"] = u["n"] + " (" + tag + ")"
     setitems = []
     for r in rd("setitems"):
         if not r.get("index") or not r.get("item"):

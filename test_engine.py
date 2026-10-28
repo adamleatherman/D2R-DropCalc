@@ -2231,6 +2231,9 @@ def main():
     fact("seal pop, terror zone on: the seal bosses use their Desecrated TCs and Diablo his Desecrated one", all(("Desecrated" in r_[5]) == (r_[0] != "minion") for r_ in SP_["rows"]["tz2"]), str(SP_["rows"]["tz2"]))
     fact("seal pop (Hell): per-run chance from dropsOf (tab 2) == 1 - prod (1 - chanceFor)^kills (worst rel %.2g over every 25th of %d items)" % (SP_["worstRun"], SP_["items"]), SP_["worstRun"] < 1e-9 and SP_["items"] > 100)
     fact("seal pop (Hell): no item more likely per run than in a full Chaos Sanctuary clear (its kills are part of the clear)", not SP_["aboveClear"], str(SP_["aboveClear"][:5]))
+    FC_ = FA["facets"]
+    fact("the eight Rainbow Facets have distinct ids by element and trigger (uniqueitems.txt dmg-* and death-skill / levelup-skill), eight search entries, equal odds each",
+         len(set(FC_["ids"])) == 8 and FC_["indexed"] == 8 and all(re.search(r"\((Lightning|Cold|Fire|Poison), (Death|Level up)\)$", i_) for i_ in FC_["ids"]) and FC_["spread"] < 1 + 1e-9, str(FC_["ids"]))
     fact("every popular farm of tab 2 (%d) has at least one source in Normal, Nightmare and Hell" % len(FA["farms"]), all(min(c_) > 0 for _, c_ in FA["farms"]), str([f_ for f_ in FA["farms"] if min(f_[1]) == 0]))
     FT_ = FA["farmTime"]
     fact("farm times (%d farms): every popular farm has time parameters and a row in the plan's table; farmMinutes reproduces scenarios A-F within 0.05 (worst %.3f)" % (len(FA["farms"]), FT_["worst"]), FT_["noTime"] == 0 and not FT_["missing"] and FT_["worst"] < 0.05 + 1e-9 and FT_["none"] is None, str(FT_["missing"]))
