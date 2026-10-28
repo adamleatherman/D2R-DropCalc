@@ -397,7 +397,13 @@
       for (const i of document.querySelectorAll('#r1 input')) i.checked = false;
       rankSummary1(); $('t1').click(); runTab1();
     };
-    $('pf3').innerHTML = '<option value="">Choose a farm</option>' + E.CONFIG.farms.map((f, i) => '<option value="' + i + '">' + esc(f.name) + '</option>').join('') + '<option value="other">Other area...</option>';
+    let act = 0, opts = '';   // one group per act (the farms are in act order)
+    E.CONFIG.farms.forEach((f, i) => {
+      const a = E.data.levels[f.area].act;
+      if (a !== act) { opts += (act ? '</optgroup>' : '') + '<optgroup label="Act ' + a + '">'; act = a; }
+      opts += '<option value="' + i + '">' + esc(f.name) + '</option>';
+    });
+    $('pf3').innerHTML = '<option value="">Choose a farm</option>' + opts + '</optgroup><option value="other">Other area...</option>';
     $('pf3').addEventListener('change', () => {   // a farm sets Area and Source (hidden); a source that does not exist with these settings leaves the whole area clear
       const f = E.CONFIG.farms[parseInt($('pf3').value, 10)];
       if (!f) { $('ar3').value = ''; fill3(); runTab3(); return; }   // Choose a farm / Other area...: start from an empty area (Other shows Area and Source)
@@ -1353,6 +1359,14 @@
       runTab1();
     });
     autocomplete($('q1'), $('ac1'), () => INDEX, (x) => { target1 = x; runTab1(); });
+    // clicking into the search with an item chosen empties it for typing (the item stays as the placeholder); leaving it without picking another restores the item
+    const ph1 = $('q1').placeholder;
+    $('q1').addEventListener('focus', () => { if (target1 && $('q1').value === target1.label) { $('q1').value = ''; $('q1').placeholder = target1.label; $('ac1').hidden = true; } });
+    $('q1').addEventListener('blur', () => {   // not while the pointer is on the suggestion list (a pick, or its scrollbar)
+      if ($('ac1').matches(':hover')) return;
+      $('q1').placeholder = ph1; $('ac1').hidden = true;
+      if (target1 && $('q1').value !== target1.label) $('q1').value = target1.label;
+    });
     $('f1').addEventListener('input', () => { clearTimeout(runTab1.t); runTab1.t = setTimeout(runTab1, 250); });
     $('r1').addEventListener('change', () => { rankSummary1(); runTab1(); });
     $('r1c').addEventListener('click', () => { for (const i of document.querySelectorAll('#r1 input')) i.checked = false; rankSummary1(); runTab1(); });

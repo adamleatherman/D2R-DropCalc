@@ -142,14 +142,14 @@
     },
     // --- popular farms (tab 2's Popular farm list): area + source. src '' = whole area clear, 'run|<id>' = a run above, 'boss|<monstats id>' = that
     //     act boss's regular kill (the difficulty is added by the app).
-    farms: [
+    farms: [   // in act order: the app groups the list by the act of each farm's area; variants of one farm share the part before ':'
       { name: 'Andariel', area: 37, src: 'boss|andariel' }, { name: 'Countess', area: 25, src: 'run|countess' },
       { name: 'The Pit', area: 12, src: 'run|pit' }, { name: 'Cow Level', area: 39, src: '' },
-      { name: 'Ancient Tunnels', area: 65, src: '' }, { name: 'Summoner', area: 74, src: 'boss|summoner' },
-      { name: 'Arcane Sanctuary ghosts + Summoner', area: 74, src: 'run|arcane' },
-      { name: 'Travincal council', area: 83, src: 'run|council' }, { name: 'Mephisto', area: 102, src: 'boss|mephisto' },
-      { name: 'Mephisto + Bremm Sparkfist', area: 102, src: 'run|mephbremm' }, { name: 'Mephisto + council', area: 102, src: 'run|mephcouncil' },
-      { name: 'Chaos seal pop', area: 108, src: 'run|sealpop' }, { name: 'Chaos Sanctuary (full clear)', area: 108, src: '' },
+      { name: 'Ancient Tunnels', area: 65, src: '' }, { name: 'Summoner: boss only', area: 74, src: 'boss|summoner' },
+      { name: 'Summoner: + Arcane Sanctuary ghosts', area: 74, src: 'run|arcane' },
+      { name: 'Travincal council', area: 83, src: 'run|council' }, { name: 'Mephisto: boss only', area: 102, src: 'boss|mephisto' },
+      { name: 'Mephisto: + Bremm (5 council)', area: 102, src: 'run|mephbremm' }, { name: 'Mephisto: + full council (7 council)', area: 102, src: 'run|mephcouncil' },
+      { name: 'Chaos: seal pop', area: 108, src: 'run|sealpop' }, { name: 'Chaos: full clear', area: 108, src: '' },
       { name: 'Shenk + Eldritch', area: 110, src: 'run|shenk' },
       { name: 'Pindleskin', area: 121, src: 'run|pindle' }, { name: 'Nihlathak', area: 124, src: 'boss|nihlathakboss' },
       { name: 'Baal', area: 132, src: 'boss|baalcrab' },
