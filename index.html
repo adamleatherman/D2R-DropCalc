@@ -104,7 +104,9 @@
   .hrow { display:flex; flex-wrap:wrap; align-items:center; gap:4px 12px; } .hrow h1 { margin:0; }
   .theme { margin-left:auto; display:flex; align-items:center; gap:5px; font-size:11px; color:var(--dim); }
   .game { margin-top:6px; } .game > summary { margin:0; padding:3px 8px; background:var(--panel2); border:1px solid var(--line); border-radius:4px; display:inline-block; max-width:100%; } .game > summary::before { content:"▸  "; } .game[open] > summary::before { content:"▾  "; } .game[open] > summary { margin-bottom:8px; }
-  .wh { display:contents; } .ftset { display:contents; } #s_ovh { width:60px; } #min3 { width:70px; }
+  .wh { display:contents; } #s_ovh { width:60px; } #min3 { width:70px; }
+  .sel.farm { margin-top:8px; padding-top:8px; border-top:1px solid var(--line); }   /* the second row of Your game: farm-time settings */
+  .sel .grp { align-self:center; min-width:64px; font:600 12px/1.2 'Cinzel', Georgia, serif; letter-spacing:.03em; color:var(--accent); }
   .head #hl1 b { color:var(--accent); } .head .note { margin:2px 0; } .head button { margin-top:4px; }
   .mem summary { margin:0; font-size:12px; } .mem div { font-size:12px; white-space:normal; text-align:left; } .mem .d { color:var(--dim); }
   .why li { margin:2px 0; }
@@ -129,14 +131,15 @@
       <!-- room for a future "Season" number input next to Ladder -->
       <label>Character level <input type="number" id="s_clvl" min="1" max="99" value="85"></label>
       <label class="chk"><input type="checkbox" id="s_tz"> Terror zone</label>
-      <span class="ftset" title="Rough community-experience estimates for the minutes per game of the popular farms (tab 2): chance per hour and hours for 50%. Each farm's minutes can be overridden in tab 2.">
+      <label id="l_tier" hidden title="Herald tier. The herald drops from the monster's monstats TreasureClassHerald(H) TC, group-upgraded at mlvl + tier boost (0/3/6/9/12). All tiers lists one row per tier.">Herald tier <select id="s_tier"><option value="0">All tiers</option><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option></select></label>
+    </div>
+    <div class="sel farm" title="Rough community-experience estimates for the minutes per game of the popular farms (tab 2): chance per hour and hours for 50%. Each farm's minutes can be overridden in tab 2.">
+      <span class="grp">Farming</span>
       <label title="Boss killer: single-target damage (e.g. Blizzard Sorc). Density farmer: area damage (e.g. Lightning Fury Javazon, Hammerdin): dense areas go faster, single bosses slower">Play style <select id="s_style"><option value="boss" selected>Boss killer</option><option value="density">Density farmer</option></select></label>
       <label title="Travel time per game: fast = max-FCR teleport (e.g. Sorc), slow frames = Enigma on a non-caster (x1.35), no = walking (x3)">Teleport <select id="s_tp"><option value="fast" selected>Yes, fast</option><option value="slow">Yes, slow frames</option><option value="none">No</option></select></label>
       <label title="Saved: the same map every game (offline). Random: a new map every game (online), which adds navigation time">Map <select id="s_map"><option value="saved" selected>Saved</option><option value="random">Random</option></select></label>
       <label class="chk" title="A charm or item that breaks the immunity of your main element: removes the immunity penalty of the farms"><input type="checkbox" id="s_sunder"> Sunder charm</label>
-      <label title="Minutes per game spent creating and loading it">Per-game overhead (min) <input type="number" id="s_ovh" min="0" max="10" step="0.1" value="0.5"></label>
-      </span>
-      <label id="l_tier" hidden title="Herald tier. The herald drops from the monster's monstats TreasureClassHerald(H) TC, group-upgraded at mlvl + tier boost (0/3/6/9/12). All tiers lists one row per tier.">Herald tier <select id="s_tier"><option value="0">All tiers</option><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option></select></label>
+      <label title="Minutes per game spent creating and loading it">Overhead (min) <input type="number" id="s_ovh" min="0" max="10" step="0.1" value="0.5"></label>
     </div>
   </details>
 </header>
