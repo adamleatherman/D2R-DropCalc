@@ -1,6 +1,6 @@
 # Plan: Tal Rasha's Tombs per-run math
 
-Status: not started (written 2026-10-28; tab 1 section and named-runs follow-up added the same day). Related:
+Status: not started (written 2026-10-28; tab 1 section, named-runs follow-up and per-case elite packs added the same day). Related:
 `docs/plans/kill-counts.md` (kills per run in general; its step 1 checks the calibration every area, the tombs included, rests on). Work it on a machine that has the extracted game tables (`excel/`), so `build.py`
 and `test_engine.py` can run.
 
@@ -21,10 +21,11 @@ are plain tombs (with a chest preset). Mean cells per case, already in `tools/ma
 | boss (Kaa) | 1 | 12.71 |
 | plain | 5 | 6.37 |
 
-Kills per run scale with spawn rolls, which scale with cells (`areaRolls` in `engine.js`). So:
+Regular kills per run scale with spawn rolls, which scale with cells (`areaRolls` in `engine.js`); elite packs do not
+(every tomb gets about 8-9 in Hell, see step 3). So:
 
 * **All seven tombs** (the usual farm, especially as a terror zone: levels 66-73 are all in the TZ list) is about
-  18.24 + 12.71 + 5 x 6.37 = 62.8 cells, about **3.4x** what the app shows today.
+  18.24 + 12.71 + 5 x 6.37 = 62.8 cells: about **3.5x** the kills and **6.6x** the elite packs the app shows today.
 * **One random tomb** averages about 9 cells, about **0.5x** what the app shows.
 * Only "clear just the true tomb" matches today's numbers.
 
@@ -52,30 +53,44 @@ Decision (2026-10-28): the merged "Tal Rasha's Tomb" row should mean **all seven
 used (tab 1, tab 2's Other area..., the item builder's farm table), because that is how the tombs are farmed; the true tomb
 alone becomes the special case (a tab 2 farm). Doing it in the engine keeps every tab consistent.
 
-Kills per run of every area row of level 66 are linear in `geo.cells` (rolls = cells x rolls per cell; champion / unique packs
-and their minions too), except the preset monsters (Ancient Kaa, a super unique counted once per game, and the level's `pre`
-monsters, if any). So:
+**Compute each tomb case with its own cells; do not scale the true tomb by one factor.** Regular kills are about linear in
+cells, but champion / unique packs are not: `areaRun` spawns them until the level's MonUMin is reached (Hell 7, MonUMax 9;
+`levels.txt` 66: umin 0/4/7, umax 2/6/9), so even a small plain tomb gets about 8 elite packs. Measured with the current
+engine by overriding `geo.cells` of level 66 (Hell, 1 player, 2026-10-28, before step 1's populated counts):
 
-* In `sources()` (the "regular area monsters" loop, where `run = areaRun(lid, d)` is used), multiply `perRun` of the
-  regular / champion / unique / minion rows of level 66 by `tombs7 = (staff + boss + 5 x plain) / staff` (per difficulty,
-  from `D.levels[66].geo.tomb`; computed in the engine, not by hand). Super unique and boss rows keep `perRun` 1. Mark the
-  rows (e.g. `tombs: 7`) so the UI can label them.
-* Check `areaRun` (`engine.js`, `function areaRun`) for any term that is not linear in cells (e.g. `warpLossRooms`, the
-  `A.pre` preset monsters, `R.mazeSpecialCells`); if one exists, compute each case with its own cells (a small `areaRun`
-  variant taking a cells override) instead of one factor, or note the approximation in the README.
-* Put the factor behind `CONFIG` (e.g. `CONFIG.run.tombsAllSeven: true`) so the tests can compare against the old numbers.
+| Case | Cells | Kills | Elite packs (champion packs + uniques) |
+|---|---|---|---|
+| staff (true tomb) | 18.24 | 626 | 8.99 |
+| boss (Kaa tomb) | 12.71 | 437 | 8.92 |
+| plain | 6.37 | 221 | 8.30 |
+| **all seven** (staff + boss + 5 x plain) | 62.8 | **about 2168** | **about 59.4** |
+
+One factor of 3.44 on the true tomb would give about the same kills (2160) but only about 31 elite packs: half the champions
+and uniques, which matter most for drops. (Community figure for comparison: "7-9 boss / elite packs per tomb in Hell",
+i.e. MonUMin / MonUMax restated; it agrees with the per-case model.)
+
+So:
+
+* Give `areaRun` (`engine.js`, `function areaRun`) a cells override (or a case argument read from `D.levels[66].geo.tomb`),
+  keeping its cache keyed on it.
+* In `sources()` (the "regular area monsters" loop, where `run = areaRun(lid, d)` is used), for level 66 build the rows from
+  `areaRun(staff) + areaRun(boss) + 5 x areaRun(plain)`, per monster type and rank. Keep the per-case values on each row
+  (e.g. `cases: { staff, boss, plain }` = kills per run of that row in one tomb of the case) so runs can pick a case (step 4).
+  Super unique and boss rows keep `perRun` 1 (Ancient Kaa once). Mark the rows (e.g. `tombs: 7`) so the UI can label them.
+* Also check `areaRun` for other terms that are not linear in cells (`warpLossRooms`, `A.pre` preset monsters,
+  `R.mazeSpecialCells`); the per-case computation handles them automatically.
+* Put it behind `CONFIG` (e.g. `CONFIG.run.tombsAllSeven: true`) so the tests can compare against the old numbers.
 
 ### 4. Runs and farms (`engine.js` `CONFIG.runs` / `CONFIG.farms`)
 
-* Add a run option `scale: { <area>: <factor or name> }` to `runSources`, applied to the regular / champion / unique / minion
-  rows of a `clear` area (super uniques and bosses keep 1).
-* `truetomb: { name: "Tal Rasha's Tomb (true tomb only)", area: 66, su: [], boss: [], clear: [66], scale: { 66: 'trueTomb' } }`
-  with `trueTomb` = staff / (staff + boss + 5 x plain), i.e. undoing step 3. Ancient Kaa is not in the true tomb: leave his
-  row out of this run (he is in the boss tomb).
+* Add a run option `tombCase: 'staff' | 'boss' | 'plain'` to `runSources`: for the rows of a `clear` area that carry
+  `cases` (step 3), use `perRun = cases[tombCase]` instead of the all-seven value (super uniques and bosses keep 1).
+* `truetomb: { name: "Tal Rasha's Tomb (true tomb only)", area: 66, su: [], boss: [], clear: [66], tombCase: 'staff' }`.
+  Ancient Kaa is not in the true tomb: leave his row out of this run (he is in the boss tomb).
 * Act 2 farms: `"Tal Rasha's Tombs: all seven"` (`''`, the whole-area clear of 66, now all seven) and
   `"Tal Rasha's Tomb: true tomb"` (`run|truetomb`). The farm list groups by act and puts variants with a shared prefix next to
   each other.
-* Optional: `"Tal Rasha's Tomb: one random tomb"` (scale 1/7 of all seven). Only if it is useful.
+* Optional: `"Tal Rasha's Tomb: one random tomb"` (the all-seven rows / 7). Only if it is useful.
 
 ### 5. Tab 1 (item search)
 
@@ -83,9 +98,9 @@ Per kill nothing changes (all seven tombs share monsters, levels and TCs); only 
 they move by themselves:
 
 * **Group by Area** (`groupAreas` in `app.js`, fed by `allRows` -> `getSources` -> `E.areaSources`): the tomb row's kills per
-  run and chance per run become the all-seven values (about 3.4x). Label it "Tal Rasha's Tombs (all seven)" (from the row
-  mark of step 3) and add a tooltip: "all seven tombs; the true tomb alone is about 1/3.4 of this (tab 2: Tal Rasha's Tomb:
-  true tomb)".
+  run and chance per run become the all-seven values (about 3.5x the kills, about 6.6x the elite packs). Label it "Tal
+  Rasha's Tombs (all seven)" (from the row mark of step 3) and add a tooltip: "all seven tombs; the true tomb alone has
+  about 29% of the kills and 15% of the elite packs (tab 2: Tal Rasha's Tomb: true tomb)".
 * **Monster view**: the tomb monsters' kills/run cells scale the same way, so both views agree; Ancient Kaa stays one kill.
 * "Best per run" in the headline can now pick the tombs where it should.
 * There is no tab 1 -> tab 2 link today; if one is added (see the follow-up below), a tomb row should open the all-seven farm.
@@ -102,9 +117,11 @@ they move by themselves:
 
 `tests.js` (JSON for `test_engine.py`) and `test_engine.py` facts:
 
-* Level-66 area rows: kills per run / old (true tomb) kills per run == (staff + boss + 5 x plain) / staff per difficulty, from
-  the raw `tools/maze_cells.json` (independent of `data.json`), within the non-linear terms found in step 3. Use
-  `CONFIG.run.tombsAllSeven = false` for the old numbers.
+* Level-66 area rows, per difficulty and rank: all-seven kills == staff + boss + 5 x plain of three independent
+  `areaRun` calls with the case cells from the raw `tools/maze_cells.json` (independent of `data.json`). Hell, current
+  engine: about 2168 kills and 59.4 elite packs (step 3 table; they move a little once step 1 adds populated counts).
+* Elite packs per tomb case within MonUMin..MonUMax (Hell 7-9, NM 4-6, Normal 0-2) for every case, the plain tomb
+  included. Use `CONFIG.run.tombsAllSeven = false` for the old numbers.
 * `runSources(ctx, 'truetomb', d)` == the old whole-area clear of 66 without Ancient Kaa (no regression for the true tomb).
 * Ancient Kaa: exactly one kill in the all-seven clear, none in the true-tomb run.
 * Tab 1 per-kill odds of every tomb row unchanged; per-run odds of the area row == 1 - prod (1 - p)^kills with the scaled kills.
@@ -115,7 +132,7 @@ they move by themselves:
 
 ## Checks before committing
 
-* Hell, all seven tombs: kills per run about 3.4x the true tomb (62.8 / 18.24 cells, adjusted for presets).
+* Hell, all seven tombs: about 2168 kills and 59 elite packs per run (true tomb: 626 and 9.0).
 * Popular farms tab: both tomb farms under Act 2; per-run odds of the all-seven farm above the true tomb for every item.
 * Tab 1: an item the tomb monsters drop (e.g. a mid rune) ranks the tombs higher per run than before, Group by Area shows
   "Tal Rasha's Tombs (all seven)" with the tooltip, per-kill odds unchanged.
