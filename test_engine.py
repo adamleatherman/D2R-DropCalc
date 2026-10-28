@@ -2231,6 +2231,7 @@ def main():
     fact("seal pop, terror zone on: the seal bosses use their Desecrated TCs and Diablo his Desecrated one", all(("Desecrated" in r_[5]) == (r_[0] != "minion") for r_ in SP_["rows"]["tz2"]), str(SP_["rows"]["tz2"]))
     fact("seal pop (Hell): per-run chance from dropsOf (tab 2) == 1 - prod (1 - chanceFor)^kills (worst rel %.2g over every 25th of %d items)" % (SP_["worstRun"], SP_["items"]), SP_["worstRun"] < 1e-9 and SP_["items"] > 100)
     fact("seal pop (Hell): no item more likely per run than in a full Chaos Sanctuary clear (its kills are part of the clear)", not SP_["aboveClear"], str(SP_["aboveClear"][:5]))
+    fact("every popular farm of tab 2 (%d) has at least one source in Normal, Nightmare and Hell" % len(FA["farms"]), all(min(c_) > 0 for _, c_ in FA["farms"]), str([f_ for f_ in FA["farms"] if min(f_[1]) == 0]))
     # ---- cave cells: tools/maze_cells.json is current, consistent and used by data.json
     import maze_cells as MC_
     mc_ = json.load(open(os.path.join(HERE, "tools", "maze_cells.json"), encoding="utf-8"))

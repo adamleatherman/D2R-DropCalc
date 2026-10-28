@@ -330,8 +330,12 @@
     { k: 'perrun', label: 'Chance per run', note: 'Chance of finding the item at least once in one run: 1 - (1 - per-kill chance)^(kills/run), over every source of an area clear (kills/run is a rough model; same numbers as Tab 1).', get: PCT3, fmt: (r) => odds(r.runP) },
     { k: 'n50', label: 'runs for 50%', note: 'Runs needed to have found the item with 50% probability: ceil(ln(0.5) / ln(1-p)). Hover a cell for 25/50/75/90/95/99%.', get: PCT3, fmt: (r) => c3.quest ? '-' : countFmt(E.trialsFor(r.runP, 0.5)), rtip: (r) => c3.quest ? 'The quest kill happens once per character and difficulty.' : PCTS.map((q) => q + '%: ' + countFmt(E.trialsFor(r.runP, q / 100)) + ' runs').join('\n') },
   ];
+  /** source key of a popular farm (E.CONFIG.farms) at difficulty d: an act boss's key carries the difficulty */
+  const farmKey3 = (f, d) => f.src.indexOf('boss|') === 0 ? f.src + '|' + d : f.src;
   function runTab3() {
     const area = parseInt($('ar3').value || '0', 10);
+    const fi = E.CONFIG.farms.findIndex((f) => f.area === area && farmKey3(f, d3Diff()) === $('mo3').value);   // the farm the Area / Source pair matches
+    $('pf3').value = fi < 0 ? '' : String(fi);
     if (!area) { T3.rows = []; T3.render(); $('info3').textContent = 'Choose an area (and optionally one monster) to list what it drops, best first. Click an item to search it in tab 1.'; return; }
     const sel = S = readSel(), t0 = performance.now(), diff = d3Diff(), key = $('mo3').value;
     const { ctx, list } = getSources(sel);
@@ -381,6 +385,15 @@
       for (const i of document.querySelectorAll('#r1 input')) i.checked = false;
       rankSummary1(); $('t1').click(); runTab1();
     };
+    $('pf3').innerHTML = '<option value="">Choose a farm</option>' + E.CONFIG.farms.map((f, i) => '<option value="' + i + '">' + esc(f.name) + '</option>').join('');
+    $('pf3').addEventListener('change', () => {   // a farm sets Area and Source; a source that does not exist with these settings leaves the whole area clear
+      const f = E.CONFIG.farms[parseInt($('pf3').value, 10)];
+      if (!f) return;
+      $('ar3').value = String(f.area); fill3();
+      const k = farmKey3(f, d3Diff());
+      if (Array.from($('mo3').options).some((o) => o.value === k)) $('mo3').value = k;
+      runTab3();
+    });
     $('ar3').addEventListener('change', () => { fill3(); runTab3(); });
     $('mo3').addEventListener('change', runTab3);
     for (const id of ['k3', 'n3']) $(id).addEventListener('change', runTab3);
@@ -1225,7 +1238,8 @@
     $('dataInfo').textContent = 'data: D2R ' + E.data.meta.gameVersion + ' (' + (E.mode === 'lod' ? 'Lord of Destruction' : 'Reign of the Warlock') + '), built ' + E.data.meta.built;
     INDEX = E.searchIndex();
     TYPEOPTS = typeOptions();
-    const areas = Object.keys(E.data.levels).filter((id) => !E.DUP_OF[id] && (E.data.levels[id].mon.length || E.data.levels[id].nmon.length || E.data.levels[id].pre))
+    const bossAt = new Set(Object.values(E.data.boss_area).concat(Object.values(E.data.su_area)).map(String));   // The Worldstone Chamber, Colossal Summit: no spawn list, only a boss
+    const areas = Object.keys(E.data.levels).filter((id) => !E.DUP_OF[id] && (E.data.levels[id].mon.length || E.data.levels[id].nmon.length || E.data.levels[id].pre || bossAt.has(id)))
       .map((id) => ({ id, a: E.data.levels[id] })).sort((x, y) => x.a.act - y.a.act || x.id - y.id);
     const cur = $('ar2').value;
     $('ar2').innerHTML = '<option value="">All areas</option>' + areas.map((x) => '<option value="' + x.id + '">Act ' + x.a.act + ' - ' + esc(x.a.name) + (x.a.ho ? ' (Hell only)' : '') + '</option>').join('');
@@ -1290,7 +1304,7 @@
       if (k === 's_clvl' && bd.sel.length) renderSel();   // per-level stats show their value at this level
       updTier(); if (target1) runTab1(); if (bd.an) { syncUrl(); runFarm(); }
       if (bd.type && $('ar2').value) { fillMonsters(); requestTable(); }
-      if ($('ar3').value) { fill3(); runTab3(); }
+      if ($('ar3').value) { const f = E.CONFIG.farms[parseInt($('pf3').value, 10)]; fill3(); if (f) { const fk = farmKey3(f, d3Diff()); if (Array.from($('mo3').options).some((o) => o.value === fk)) $('mo3').value = fk; } runTab3(); }   // a chosen farm follows the difficulty (boss keys carry it)
     });
     $('s_act').addEventListener('change', () => { if (target1) runTab1(); });
     // theme: personal preference, kept out of KEYS / share links

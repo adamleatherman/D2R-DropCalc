@@ -125,11 +125,33 @@
       champPackSize: 3,            // champions per champion pack: 1 + rand(3)+1 = 2-4 (PopulateRoom)
       uniqueMinions: [3, 6],       // minions with a unique (D2GAME_SpawnMinions_6FC6F440(..., 1, 3, 6))
     },
-    // --- named runs: a fixed set of kills in one area instead of a full clear (runSources). su = super uniques (with their own minions), boss = act bosses
-    //     (regular kill, not the quest kill). Seal pop: open the three Chaos Sanctuary seals, kill the seal bosses and their minions, then Diablo.
+    // --- named runs: a fixed set of kills instead of a full clear (runSources). su = super uniques (with their own minions), boss = act bosses (regular
+    //     kill, not the quest kill), from any area; mon = monster types killed at every rank in the run's area; area = where the run is listed. Seal pop: open the three Chaos Sanctuary seals, kill the seal bosses
+    //     and their minions, then Diablo. Of the three Durance of Hate 3 council members only Bremm Sparkfist has minions.
     runs: {
+      countess: { name: 'Countess + minions', area: 25, su: ['The Countess'], boss: [] },
+      arcane: { name: 'Ghosts + Summoner', area: 74, su: [], boss: ['summoner'], mon: ['wraith1', 'wraith2', 'wraith3', 'wraith4', 'wraith5', 'wraith6', 'wraith7', 'wraith8', 'wraith9'] },
+      council: { name: 'Council (Ismail, Geleb, Toorc + minions)', area: 83, su: ['Ismail Vilehand', 'Geleb Flamefinger', 'Toorc Icefist'], boss: [] },
       sealpop: { name: 'Seal pop (seal bosses + minions + Diablo)', area: 108, su: ['Grand Vizier of Chaos', 'Lord De Seis', 'Infector of Souls'], boss: ['diablo'] },
+      mephbremm: { name: 'Mephisto + Bremm Sparkfist + minions', area: 102, su: ['Bremm Sparkfist'], boss: ['mephisto'] },
+      mephcouncil: { name: 'Mephisto + council (Wyand, Maffer, Bremm + minions)', area: 102, su: ['Wyand Voidfinger', 'Maffer Dragonhand', 'Bremm Sparkfist'], boss: ['mephisto'] },
+      shenk: { name: 'Shenk + Eldritch + minions (Bloody Foothills, Frigid Highlands)', area: 110, su: ['Siege Boss', 'Megaflow Rectifier'], boss: [] },
+      pindle: { name: 'Pindleskin + minions', area: 121, su: ['Pindleskin'], boss: [] },
     },
+    // --- popular farms (tab 2's Popular farm list): area + source. src '' = whole area clear, 'run|<id>' = a run above, 'boss|<monstats id>' = that
+    //     act boss's regular kill (the difficulty is added by the app).
+    farms: [
+      { name: 'Andariel', area: 37, src: 'boss|andariel' }, { name: 'Countess', area: 25, src: 'run|countess' },
+      { name: 'The Pit Level 1', area: 12, src: '' }, { name: 'Cow Level', area: 39, src: '' },
+      { name: 'Ancient Tunnels', area: 65, src: '' }, { name: 'Summoner', area: 74, src: 'boss|summoner' },
+      { name: 'Arcane Sanctuary ghosts + Summoner', area: 74, src: 'run|arcane' },
+      { name: 'Travincal council', area: 83, src: 'run|council' }, { name: 'Mephisto', area: 102, src: 'boss|mephisto' },
+      { name: 'Mephisto + Bremm Sparkfist', area: 102, src: 'run|mephbremm' }, { name: 'Mephisto + council', area: 102, src: 'run|mephcouncil' },
+      { name: 'Chaos seal pop', area: 108, src: 'run|sealpop' }, { name: 'Chaos Sanctuary (full clear)', area: 108, src: '' },
+      { name: 'Shenk + Eldritch', area: 110, src: 'run|shenk' },
+      { name: 'Pindleskin', area: 121, src: 'run|pindle' }, { name: 'Nihlathak', area: 124, src: 'boss|nihlathakboss' },
+      { name: 'Baal', area: 132, src: 'boss|baalcrab' },
+    ],
     maxMlvl: 110,
     // --- per-kill drop cap ---
     // The game's drop routine (decompiled TreasureClassDropper, https://gist.github.com/SeanSullivan86/e912b40bb85f9822b9ef507d91534c88)
@@ -858,6 +880,31 @@
       return out;
     }
 
+    /** The rows of a named run (CONFIG.runs) at difficulty d: each listed super unique and act boss once (regular kill, no quest row), wherever it lives,
+     *  each super unique's own minions as a row of their own (in sources() they are merged into the area's minion rows), and every rank of the listed
+     *  monster types (mon) in the run's area, without the minions super uniques bring. list = sources() or areaSources() of ctx (super unique and boss
+     *  rows are never merged; the mon rows come from sources(), unmerged); with the terror zone on only terror-zone rows. [] for an unknown run. */
+    function runSources(ctx, runId, d, list) {
+      const R = CONFIG.runs[runId];
+      if (!R) return [];
+      list = list || sources(ctx);
+      const tz = !!ctx.s.tz, out = [];
+      for (const src of list) {
+        if (src.diff !== d || src.quest || (tz && !src.tz)) continue;
+        if (src.rank === 'super' && R.su.indexOf(src.su) >= 0) {
+          out.push(src);
+          for (const mi of src.minions || []) out.push({ key: 'run|' + runId + '|' + src.su + '|' + mi.id + '|' + d, mon: mi.id, name: D.monsters[mi.id].n + ' (' + src.name + ' minions)',
+            rank: 'minion', diff: d, area: src.area, areaName: src.areaName, act: src.act, mlvl: mi.mlvl, tc: mi.tc, boss: false, perRun: mi.n, tz: src.tz });
+        } else if (src.rank === 'boss' && R.boss.indexOf(src.mon) >= 0) out.push(src);
+      }
+      if (R.mon) for (const src of sources(ctx)) {
+        if (src.diff !== d || src.area !== R.area || (tz && !src.tz) || R.mon.indexOf(src.mon) < 0 || !/^(regular|champion|unique|minion)$/.test(src.rank)) continue;
+        const n = src.perRun - (src.suMin || 0);
+        if (n > 0) out.push(n === src.perRun ? src : Object.assign({}, src, { perRun: n }));
+      }
+      return out;
+    }
+
     const GROUP_LABEL = { champion: 'Champion monsters', unique: 'Unique monsters', minion: 'Minions', herald: 'Heralds' };
     /** sources() with the champions, uniques, minions and heralds of one area merged: in one area / difficulty / rank every monster type ends on the
      *  same group-upgraded TC at the same mlvl (NM/Hell; Normal uses each type's own mlvl), so their per-kill odds are identical. Rows merge only when
@@ -867,25 +914,6 @@
      *  TC ("Herald tier N (mlvl M)"). The Herald TC picked by upgradeTC is the highest group-41 Herald TC at or below mlvl + tier boost whatever the
      *  starting TC, so (mlvl, tier) alone fixes the drop table (verified at every clvl); the TC stays in the key so a rule change splits rows instead of
      *  merging wrong ones. Herald rows carry areas ([{id, name}]), acts (sorted) and the area / act fields 0; areaName says how many areas. */
-    /** The rows of a named run (CONFIG.runs) at difficulty d: each listed super unique and act boss once (regular kill, no quest row), and each super
-     *  unique's own minions as a row of their own (in sources() they are merged into the area's minion rows). list = sources() or areaSources() of ctx
-     *  (super unique and boss rows are never merged); with the terror zone on only terror-zone rows. [] for an unknown run. */
-    function runSources(ctx, runId, d, list) {
-      const R = CONFIG.runs[runId];
-      if (!R) return [];
-      list = list || sources(ctx);
-      const tz = !!ctx.s.tz, out = [];
-      for (const src of list) {
-        if (src.diff !== d || src.area !== R.area || src.quest || (tz && !src.tz)) continue;
-        if (src.rank === 'super' && R.su.indexOf(src.su) >= 0) {
-          out.push(src);
-          for (const mi of src.minions || []) out.push({ key: 'run|' + runId + '|' + src.su + '|' + mi.id + '|' + d, mon: mi.id, name: D.monsters[mi.id].n + ' (' + src.name + ' minions)',
-            rank: 'minion', diff: d, area: src.area, areaName: src.areaName, act: src.act, mlvl: mi.mlvl, tc: mi.tc, boss: false, perRun: mi.n, tz: src.tz });
-        } else if (src.rank === 'boss' && R.boss.indexOf(src.mon) >= 0) out.push(src);
-      }
-      return out;
-    }
-
     function areaSources(ctx) {
       const out = [], groups = new Map(), split = new Map();
       const st = ctx.s.tier, tiers = st >= 1 && st <= 5 ? [st] : [1, 2, 3, 4, 5];

@@ -631,6 +631,10 @@
           colossalLow: S.filter((s) => s.area === 137 && s.diff < 2).length, colossalHell: S.filter((s) => s.area === 137 && s.diff === 2).length };
         const grp = E.areaSources(cx).filter((s) => s.rank === 'minion' && s.diff === 2 && (s.area === 83 || s.area === 102));
         F.councilGroups = grp.map((s) => [s.area, s.mon, s.perRun, s.tc]); }
+      // popular farms (CONFIG.farms, tab 2): each resolves to at least one source in every difficulty, as the app looks it up
+      { const cx = E.getCtx({ players: 1, party: 1, ladder: true, tz: false, mf: 0, quest: false }), L = E.areaSources(cx);
+        F.farms = E.CONFIG.farms.map((f) => [f.name, [0, 1, 2].map((d) => (f.src.indexOf('run|') === 0 ? E.runSources(cx, f.src.slice(4), d, L)
+          : L.filter((s) => s.area === f.area && s.diff === d && !s.herald && !s.quest && (!f.src || s.key === f.src + '|' + d))).length)]); }
       // seal pop (runSources 'sealpop'): the rows per difficulty / terror zone; per-run chance via chanceFor == via dropsOf (what tab 2 adds up); never above the full clear
       F.sealPop = { rows: {}, worstRun: 0, items: 0, aboveClear: [] };
       for (const tzOn of [false, true]) for (let d = 0; d < 3; d++) {
