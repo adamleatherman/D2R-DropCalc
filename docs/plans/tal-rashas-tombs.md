@@ -1,6 +1,7 @@
 # Plan: Tal Rasha's Tombs per-run math
 
-Status: not started (written 2026-10-28; tab 1 section and named-runs follow-up added the same day). Work it on a machine that has the extracted game tables (`excel/`), so `build.py`
+Status: not started (written 2026-10-28; tab 1 section and named-runs follow-up added the same day). Related:
+`docs/plans/kill-counts.md` (kills per run in general; its step 1 checks the calibration every area, the tombs included, rests on). Work it on a machine that has the extracted game tables (`excel/`), so `build.py`
 and `test_engine.py` can run.
 
 ## Problem
