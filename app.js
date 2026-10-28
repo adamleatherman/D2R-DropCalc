@@ -1301,7 +1301,7 @@
     if (!DATAFILE[m]) m = 'rotw';
     if (!ENGINES[m]) {
       const resp = await fetch(DATAFILE[m]);
-      if (!resp.ok) throw new Error(DATAFILE[m] + ' missing - run: python build.py');
+      if (!resp.ok) throw new Error('could not load the game data (' + DATAFILE[m] + ')');
       ENGINES[m] = Engine.create(await resp.json());
     }
     E = ENGINES[m];
@@ -1448,7 +1448,7 @@
     // tab 2
     initTab2();
     // about
-    $('about').innerHTML = aboutHtml();
+    $('about').innerHTML = aboutHtml(); initMfChart();
     // deep links: ?q1=Griffon   or the item builder: ?t2=circ&q=magic&a=%2B%23%25%20Faster%20Cast%20Rate:20 (old form ?q2=circlet&ql=magic&c=... still works)
     const qs = new URLSearchParams(location.search);
     if (qs.get('q1')) {
@@ -1470,6 +1470,45 @@
     }
   }
 
+  // ----- the "MF that counts" chart on the About page: log-log lines per quality, direct labels, legend, hover readout -----
+  const MFQ = [{ k: 'magic', n: 'Magic', d: 0 }, { k: 'unique', n: 'Unique', d: 250 }, { k: 'set', n: 'Set', d: 500 }, { k: 'rare', n: 'Rare', d: 600 }];   // d = cap; magic has none
+  const mfEff = (mf, d, smooth) => d ? (smooth ? mf * d / (mf + d) : Math.floor(mf * d / (mf + d))) : mf;   // smooth: unrounded, for drawing (the game rounds down)
+  const MFC = { w: 640, h: 300, l: 60, r: 120, t: 12, b: 40, lo: 10, hi: 1000 };   // plot box and the MF range (log axes)
+  const mfX = (v) => MFC.l + (Math.log10(v) - Math.log10(MFC.lo)) / (Math.log10(MFC.hi) - Math.log10(MFC.lo)) * (MFC.w - MFC.l - MFC.r);
+  const mfY = (v) => MFC.h - MFC.b - (Math.log10(Math.max(v, 1)) - Math.log10(MFC.lo)) / (Math.log10(MFC.hi) - Math.log10(MFC.lo)) * (MFC.h - MFC.t - MFC.b);
+  function mfChartHtml() {
+    const ticks = [10, 30, 100, 300, 1000], x0 = mfX(MFC.lo), x1 = mfX(MFC.hi), y0 = mfY(MFC.lo), y1 = mfY(MFC.hi);
+    let g = '';
+    for (const t of ticks) g += '<line class="grid" x1="' + mfX(t) + '" x2="' + mfX(t) + '" y1="' + y1 + '" y2="' + y0 + '"/><line class="grid" x1="' + x0 + '" x2="' + x1 + '" y1="' + mfY(t) + '" y2="' + mfY(t) + '"/>' +
+      '<text class="ax" x="' + mfX(t) + '" y="' + (y0 + 16) + '" text-anchor="middle">' + t + '%</text><text class="ax" x="' + (x0 - 6) + '" y="' + (mfY(t) + 4) + '" text-anchor="end">' + t + '%</text>';
+    g += '<text class="ax" x="' + (x0 + x1) / 2 + '" y="' + (MFC.h - 6) + '" text-anchor="middle">Your MF (log scale)</text>' +
+      '<text class="ax" transform="translate(12,' + (y0 + y1) / 2 + ') rotate(-90)" text-anchor="middle">MF that counts (log scale)</text>';
+    let lines = '';
+    const ends = [];
+    for (const q of MFQ) {
+      const pts = []; for (let i = 0; i <= 80; i++) { const v = MFC.lo * Math.pow(MFC.hi / MFC.lo, i / 80); pts.push(mfX(v).toFixed(1) + ',' + mfY(mfEff(v, q.d, true)).toFixed(1)); }
+      lines += '<polyline class="mfl mf-' + q.k + '" points="' + pts.join(' ') + '"/>';
+      ends.push({ q, y: mfY(mfEff(MFC.hi, q.d, true)) });
+    }
+    ends.sort((a, b) => a.y - b.y); for (let i = 1; i < ends.length; i++) ends[i].y = Math.max(ends[i].y, ends[i - 1].y + 14);   // keep the end labels apart
+    for (const e of ends) lines += '<text class="lab" x="' + (x1 + 8) + '" y="' + (e.y + 4) + '"><tspan class="sw mf-' + e.q.k + '">\u25cf</tspan> ' + e.q.n + (e.q.d ? ' (cap ' + e.q.d + ')' : ' (no cap)') + '</text>';
+    const legend = '<div class="mfleg">' + MFQ.map((q) => '<span><i class="mf-' + q.k + '"></i>' + q.n + '</span>').join('') + '</div>';
+    return '<div class="mfchart">' + legend + '<svg viewBox="0 0 ' + MFC.w + ' ' + MFC.h + '" role="img" aria-label="The MF that counts for each item quality against your MF, on log scales">' + g + lines +
+      '<line class="xh" y1="' + y1 + '" y2="' + y0 + '" x1="0" x2="0" visibility="hidden"/><rect class="hit" x="' + x0 + '" y="' + y1 + '" width="' + (x1 - x0) + '" height="' + (y0 - y1) + '"/></svg><div class="mftip" hidden></div></div>';
+  }
+  function initMfChart() {   // hover: a crosshair at the pointer's MF and a readout of every quality
+    const box = document.querySelector('#about .mfchart'); if (!box) return;
+    const svg = box.querySelector('svg'), xh = svg.querySelector('.xh'), hit = svg.querySelector('.hit'), tip = box.querySelector('.mftip');
+    hit.addEventListener('mousemove', (e) => {
+      const r = svg.getBoundingClientRect(), sx = (e.clientX - r.left) * MFC.w / r.width;
+      const mf = Math.round(Math.pow(10, Math.log10(MFC.lo) + (sx - mfX(MFC.lo)) / (mfX(MFC.hi) - mfX(MFC.lo)) * (Math.log10(MFC.hi) - Math.log10(MFC.lo))));
+      xh.setAttribute('x1', mfX(mf)); xh.setAttribute('x2', mfX(mf)); xh.setAttribute('visibility', 'visible');
+      tip.innerHTML = '<b>' + mf + '% MF</b>' + MFQ.map((q) => '<div><i class="mf-' + q.k + '"></i>' + q.n + ': ' + mfEff(mf, q.d) + '%</div>').join('');
+      tip.hidden = false; const bx = box.getBoundingClientRect(); let left = e.clientX - bx.left + 12; if (left + 150 > bx.width) left -= 170; tip.style.left = left + 'px'; tip.style.top = (e.clientY - bx.top - 10) + 'px';
+    });
+    hit.addEventListener('mouseleave', () => { xh.setAttribute('visibility', 'hidden'); tip.hidden = true; });
+  }
+
   function aboutHtml() {
     const C = E.CONFIG, R = C.run, h = (t) => '<h2>' + t + '</h2>', li = (xs) => '<ul>' + xs.map((x) => '<li>' + x + '</li>').join('') + '</ul>';
     const M = (x) => '<span class="math">' + x + '</span>';   // a formula, set in the math font (x is trusted markup: <i> variables, <sup> powers)
@@ -1480,7 +1519,7 @@
       h('Reading the numbers') + li([
         'All chances are shown as odds: "1 in 250" means once every 250 tries on average. Smaller numbers are better.',
         '<b>Per kill</b>: the chance one kill of that monster drops the item.',
-        '<b>Per run</b>: the chance of at least one drop in one run (a whole area cleared, or a farm\'s fixed set of kills): ' + M('<i>P</i> = 1 &minus; (1 &minus; <i>p</i>)<sup><i>k</i></sup>') + ', with ' + V('p') + ' the chance per kill and ' + V('k') + ' the kills per run (several kinds of monster multiply their terms).',
+        '<b>Per run</b>: the chance of at least one drop in one run (a whole area cleared, or a farm\'s fixed set of kills): ' + M('<i>P</i> = 1 &minus; (1 &minus; <i>p</i>)<sup><i>k</i></sup>') + ', with ' + V('p') + ' the chance per kill and ' + V('k') + ' the kills per run. With several kinds of monster in a run, each kind keeps its own chance and kills: ' + M('<i>P</i> = 1 &minus; (1 &minus; <i>p</i><sub>1</sub>)<sup><i>k</i><sub>1</sub></sup> &times; (1 &minus; <i>p</i><sub>2</sub>)<sup><i>k</i><sub>2</sub></sup> &times; &hellip;') + '.',
         '<b>Runs for 50%</b>: how many runs until you have even odds of having found it: ' + M('<i>n</i> = &lceil;ln 0.5 / ln(1 &minus; <i>P</i>)&rceil;') + '. Hover the cell for other percentages.',
         '<b>Per hour</b> (tab 2): ' + M('1 &minus; (1 &minus; <i>P</i>)<sup>60 / <i>m</i></sup>') + ', with ' + V('m') + ' the minutes per game from the Farming settings in Your game, or your own value.',
         '<b>mlvl</b> is the monster level, which is also the item level of what it drops. Champions add ' + C.champOffset + ', uniques ' + C.uniqueOffset + ', minions of uniques ' + C.minionOffset + '.']) +
@@ -1495,14 +1534,50 @@
         '<b>Ladder</b>: hover the Ladder setting to see which items drop on ladder only right now.',
         'Matron\'s Den, Forgotten Sands, Furnace of Pain and Uber Tristram exist in Hell only.',
         '<b>Poison in the item builder</b>: the numbers match the item\'s tooltip, but with only one poison source the real effect is about half the damage over half the time (the game divides the duration by the number of poison sources).']) +
+      h('How the odds are calculated') +
+      '<p><b>Drop tables.</b> Every monster has a <i>treasure class</i>: a list of possible drops, each with a weight, plus a weight for dropping nothing (NoDrop). One pick takes an entry with chance ' +
+        M('<i>w</i> / (<i>W</i> + NoDrop)') + ', where ' + V('w') + ' is its weight and ' + V('W') + ' the total of all weights. A table rolled ' + V('k') + ' times gives an entry at least once with ' + M('1 &minus; (1 &minus; <i>s</i>)<sup><i>k</i></sup>') +
+        ', ' + V('s') + ' being its chance per pick. Tables can contain other tables; their chances multiply. A monster\'s table is upgraded to the best one of its group that its level allows (bosses keep theirs, except in a terror zone). One kill drops at most ' + C.dropCap + ' items, which matters for bosses that drop a lot (Duriel most of all).</p>' +
+      '<p><b>Players.</b> More players lower the chance of dropping nothing. The game counts ' + M('<i>N</i> = party nearby + &lfloor;(other players) / 2&rfloor;') + ' and replaces NoDrop with ' +
+        M('&lfloor;<i>Items</i> / (1 / (NoDrop / (NoDrop + <i>Items</i>))<sup><i>N</i></sup> &minus; 1)&rfloor;') + ', where ' + V('Items') + ' is the weight of everything else.</p>' +
+      '<p><b>Item quality.</b> When a base drops, the game tries unique, then set, rare, magic, superior and normal; the first that succeeds is what you get (if none does, low quality). Each try succeeds with a chance of 1 in ' + V('X') + ', where ' + V('X') + ' is built in three steps:</p><ol>' +
+        '<li><b>Start</b> from the quality\'s base number: unique 400, set 160, rare 100, magic 34 for an ordinary base (class-specific bases use other values).</li>' +
+        '<li><b>Subtract the level gap</b>: ' + M('(mlvl &minus; qlvl) / Divisor') + ', with Divisor 1 for unique, 2 for set and rare, 3 for magic. So a monster far above the item\'s base level gives better odds.</li>' +
+        '<li><b>Apply magic find</b>: the chance is multiplied by ' + M('1 + MF / 100') + ', so 100% MF doubles it. For unique, set and rare items the game first shrinks your MF with a cap for that quality: ' +
+          '<b>250 for unique, 500 for set, 600 for rare</b>. The MF that counts gets closer to the cap the more MF you have but never reaches it, and is exactly half the cap when your MF equals the cap (' + M('MF &times; cap / (MF + cap)') + '). Magic items use your full MF.</li></ol>' +
+        '<table class="mft"><caption>The MF that counts</caption><tr><th>Your MF</th><th>Unique</th><th>Set</th><th>Rare</th><th>Magic</th></tr>' +
+        '<tr><td>100%</td><td>71%</td><td>83%</td><td>85%</td><td>100%</td></tr>' +
+        '<tr><td>200%</td><td>111%</td><td>142%</td><td>150%</td><td>200%</td></tr>' +
+        '<tr><td>300%</td><td>136%</td><td>187%</td><td>200%</td><td>300%</td></tr>' +
+        '<tr><td>500%</td><td>166%</td><td>250%</td><td>272%</td><td>500%</td></tr>' +
+        '<tr><td>1000%</td><td>200%</td><td>333%</td><td>375%</td><td>1000%</td></tr>' + '</table>' +
+        '<p><b>In short, this is diminishing returns on magic find.</b> Each extra point of MF adds less than the one before for uniques, sets and rares, and their curves flatten toward the cap; magic items keep the full value. On log scales:</p>' +
+        mfChartHtml() +
+        '<p>' + V('X') + ' never goes below a floor (unique 50, set about 44, rare 25), so even huge magic find cannot beat 1 in 50 for a unique; a monster\'s own quality bonus (bosses, champions) then improves the chance further. ' +
+        'Example, unique, monster 27 levels above the base: ' + M('400 &minus; 27 = 373') + ', so 1 in 373 at 0 MF; with 300% MF, 136% counts for uniques (table above), so the chance is multiplied by 2.36: ' + M('373 / 2.36 &asymp; 158') + ', 1 in 158. ' +
+        'A unique or set item with no candidate at that item level drops as rare or magic instead. The game\'s integer arithmetic is reproduced exactly.</p>' +
+      '<p><b>Monster level.</b> In Normal it is the monster\'s own level; in Nightmare and Hell it is the area\'s level. Act bosses have fixed levels (Hell: Andariel 75, Mephisto 87, Diablo 94, Baal 99). Champions add ' + C.champOffset + ', uniques and super uniques ' + C.uniqueOffset + '. In a terror zone the level follows your character level, within the zone\'s limits.</p>' +
+      '<p><b>Item builder.</b> An affix can roll when the item\'s affix level reaches it: ' + M('alvl = ilvl &minus; &lfloor;qlvl / 2&rfloor;') + ' for most bases (bases with a magic level add it instead). Magic items get a prefix and a suffix 25% of the time, only a prefix 25%, only a suffix 50%. ' +
+        'Rare items get 3, 4, 5 or 6 affixes with chances 12.5 / 25 / 37.5 / 25% (rare jewels: 3 or 4, 50% each), at most 3 of each side, never two from the same group. Normal and superior white items have a 33% chance of sockets, and any item that can be ethereal a 5% chance of being so. Rare and magic odds are computed exactly, not simulated.</p>' +
+      h('Limitations') + li([
+        'Kills per run assumes you clear the whole area and ignores route length, shrines and monsters you skip.',
+        'Super unique and boss locations are not in the game data; they were mapped by hand from the community references below.',
+        'Runewords, crafting and the game\'s quest conditions are not modelled.',
+        'The rules come from a decompilation of the original game (versions 1.10-1.14) plus D2R\'s own data tables; where D2R changed code without changing the tables, the calculator cannot know.']) +
+      h('Sources') + li([
+        '<a href="https://github.com/ThePhrozenKeep/D2MOO" target="_blank" rel="noopener">D2MOO</a>: community decompilation of the game code (drop, quality, affix and spawn rules)',
+        '<a href="https://gist.github.com/SeanSullivan86/e912b40bb85f9822b9ef507d91534c88" target="_blank" rel="noopener">Decompiled drop routine</a> (treasure classes, the item cap, player count)',
+        '<a href="https://www.purediablo.com/diablo-2/item-generation" target="_blank" rel="noopener">PureDiablo: Item Generation</a> and <a href="https://www.purediablo.com/?p=6422" target="_blank" rel="noopener">Players X Overview</a>',
+        '<a href="http://classic.battle.net/diablo2exp/" target="_blank" rel="noopener">The Arreat Summit</a> (super unique locations)',
+        '<a href="https://diablo2.io/post4136083.html" target="_blank" rel="noopener">diablo2.io datamine thread</a>, <a href="https://www.icy-veins.com/d2/reign-of-the-warlock-endgame-changes-for-diablo-ii-resurrected" target="_blank" rel="noopener">Icy Veins on Reign of the Warlock</a> and <a href="https://news.blizzard.com/en-us/article/24266710/diablo-ii-resurrected-ptr-3-2-now-live" target="_blank" rel="noopener">Blizzard\'s patch notes</a> (heralds, Sunder charms)']) +
       '<details class="tech"><summary>How kills per run are estimated (technical)</summary>' +
       '<p>The game makes one spawn roll for every ' + M('3 &times; 3') + ' subtiles of each room (about 2.7 per tile) and spawns a pack with chance ' + M('MonDen / 100&#8239;000') + '. Walkable floor comes from the real map files (20 placement tries per pack).</p>' +
       '<p><b>The cave generator.</b> Caves, dungeons and tombs are not drawn by hand: every game builds them at random from pre-made room pieces, so their size changes from game to game. ' +
       'This calculator re-runs that building step the way the game does it (rebuilt from the community decompilation of the game code), 2,000 times per level, and uses the average number of rooms that can hold monsters as the cave\'s size.</p><p>' +
       'On top of that, one global factor of ' + R.placeFactor + ' is applied, fitted to a measured Cow Level count (it is not from the game code). Packs are picked from the area\'s monster list by rarity and include party minions. ' +
       'Champion and unique packs follow MonUMin / MonUMax: ' + R.champShare * 100 + '% are champion packs of 2-4, the rest a unique with ' + R.uniqueMinions.join('-') + ' minions. Monsters placed at fixed spots by the map files are added and use up unique slots.</p></details>' +
-      '<details class="tech"><summary>Settings in use (Engine.CONFIG in engine.js)</summary><pre>' + esc(JSON.stringify(C, null, 2)) + '</pre></details>' +
-      h('More') + '<p>Formulas, sources and limitations are in README.md. The game data belongs to Blizzard Entertainment; this is a fan tool.</p>';
+      '<details class="tech"><summary>Settings in use (the calculator\'s constants)</summary><pre>' + esc(JSON.stringify(C, null, 2)) + '</pre></details>' +
+      '<p class="note">Diablo II: Resurrected and its game data belong to Blizzard Entertainment. This is an unofficial fan tool.</p>';
   }
 
 
