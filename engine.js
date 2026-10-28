@@ -126,7 +126,8 @@
       uniqueMinions: [3, 6],       // minions with a unique (D2GAME_SpawnMinions_6FC6F440(..., 1, 3, 6))
     },
     // --- named runs: a fixed set of kills instead of a full clear (runSources). su = super uniques (with their own minions), boss = act bosses (regular
-    //     kill, not the quest kill), from any area; mon = monster types killed at every rank in the run's area; area = where the run is listed. Seal pop: open the three Chaos Sanctuary seals, kill the seal bosses
+    //     kill, not the quest kill), from any area; mon = monster types killed at every rank in the run's area; clear = areas cleared in full (every
+    //     source of a whole area clear); area = where the run is listed. Seal pop: open the three Chaos Sanctuary seals, kill the seal bosses
     //     and their minions, then Diablo. Of the three Durance of Hate 3 council members only Bremm Sparkfist has minions.
     runs: {
       countess: { name: 'Countess + minions', area: 25, su: ['The Countess'], boss: [] },
@@ -137,12 +138,13 @@
       mephcouncil: { name: 'Mephisto + council (Wyand, Maffer, Bremm + minions)', area: 102, su: ['Wyand Voidfinger', 'Maffer Dragonhand', 'Bremm Sparkfist'], boss: ['mephisto'] },
       shenk: { name: 'Shenk + Eldritch + minions (Bloody Foothills, Frigid Highlands)', area: 110, su: ['Siege Boss', 'Megaflow Rectifier'], boss: [] },
       pindle: { name: 'Pindleskin + minions', area: 121, su: ['Pindleskin'], boss: [] },
+      pit: { name: 'The Pit (levels 1 and 2, full clear)', area: 12, su: [], boss: [], clear: [12, 16] },
     },
     // --- popular farms (tab 2's Popular farm list): area + source. src '' = whole area clear, 'run|<id>' = a run above, 'boss|<monstats id>' = that
     //     act boss's regular kill (the difficulty is added by the app).
     farms: [
       { name: 'Andariel', area: 37, src: 'boss|andariel' }, { name: 'Countess', area: 25, src: 'run|countess' },
-      { name: 'The Pit Level 1', area: 12, src: '' }, { name: 'Cow Level', area: 39, src: '' },
+      { name: 'The Pit', area: 12, src: 'run|pit' }, { name: 'Cow Level', area: 39, src: '' },
       { name: 'Ancient Tunnels', area: 65, src: '' }, { name: 'Summoner', area: 74, src: 'boss|summoner' },
       { name: 'Arcane Sanctuary ghosts + Summoner', area: 74, src: 'run|arcane' },
       { name: 'Travincal council', area: 83, src: 'run|council' }, { name: 'Mephisto', area: 102, src: 'boss|mephisto' },
@@ -882,7 +884,8 @@
 
     /** The rows of a named run (CONFIG.runs) at difficulty d: each listed super unique and act boss once (regular kill, no quest row), wherever it lives,
      *  each super unique's own minions as a row of their own (in sources() they are merged into the area's minion rows), and every rank of the listed
-     *  monster types (mon) in the run's area, without the minions super uniques bring. list = sources() or areaSources() of ctx (super unique and boss
+     *  monster types (mon) in the run's area, without the minions super uniques bring, and every source of the areas it clears in full (clear: no herald
+     *  or quest rows, as tab 2's whole area clear). list = sources() or areaSources() of ctx (super unique and boss
      *  rows are never merged; the mon rows come from sources(), unmerged); with the terror zone on only terror-zone rows. [] for an unknown run. */
     function runSources(ctx, runId, d, list) {
       const R = CONFIG.runs[runId];
@@ -891,6 +894,7 @@
       const tz = !!ctx.s.tz, out = [];
       for (const src of list) {
         if (src.diff !== d || src.quest || (tz && !src.tz)) continue;
+        if (R.clear && R.clear.indexOf(src.area) >= 0) { if (!src.herald) out.push(src); continue; }
         if (src.rank === 'super' && R.su.indexOf(src.su) >= 0) {
           out.push(src);
           for (const mi of src.minions || []) out.push({ key: 'run|' + runId + '|' + src.su + '|' + mi.id + '|' + d, mon: mi.id, name: D.monsters[mi.id].n + ' (' + src.name + ' minions)',

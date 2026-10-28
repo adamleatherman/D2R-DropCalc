@@ -2232,6 +2232,7 @@ def main():
     fact("seal pop (Hell): per-run chance from dropsOf (tab 2) == 1 - prod (1 - chanceFor)^kills (worst rel %.2g over every 25th of %d items)" % (SP_["worstRun"], SP_["items"]), SP_["worstRun"] < 1e-9 and SP_["items"] > 100)
     fact("seal pop (Hell): no item more likely per run than in a full Chaos Sanctuary clear (its kills are part of the clear)", not SP_["aboveClear"], str(SP_["aboveClear"][:5]))
     fact("every popular farm of tab 2 (%d) has at least one source in Normal, Nightmare and Hell" % len(FA["farms"]), all(min(c_) > 0 for _, c_ in FA["farms"]), str([f_ for f_ in FA["farms"] if min(f_[1]) == 0]))
+    fact("The Pit farm = every source of the whole area clears of Pit Level 1 (12) and Pit Level 2 (16), kills/run added up, in every difficulty", all(r_[0] == r_[1] and abs(r_[2] - r_[3]) < 1e-9 and r_[4] and r_[2] > 0 for r_ in FA["pit"]), str(FA["pit"]))
     # ---- cave cells: tools/maze_cells.json is current, consistent and used by data.json
     import maze_cells as MC_
     mc_ = json.load(open(os.path.join(HERE, "tools", "maze_cells.json"), encoding="utf-8"))

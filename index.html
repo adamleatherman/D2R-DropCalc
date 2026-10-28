@@ -126,7 +126,7 @@
 </header>
 <nav>
   <button id="t1" class="on">1. Item search</button>
-  <button id="t3">2. What drops here</button>
+  <button id="t3">2. Popular farms</button>
   <button id="t2">3. Item builder</button>
   <button id="t4">About / assumptions</button>
 </nav>
@@ -214,9 +214,11 @@
 
   <section id="tab3" class="tab">
     <div class="row">
-      <label title="A popular farm sets Area and Source together; changing either by hand shows the farm they match, if any">Popular farm <select id="pf3"><option value="">Choose a farm</option></select></label>
+      <label title="A farm to list what it drops; Difficulty is the one under the tabs (All = Hell). Other area... picks any area and source">Farm <select id="pf3"><option value="">Choose a farm</option></select></label>
+      <span id="custom3" hidden>
       <label title="Choose an area to list what it drops; Difficulty below is the one under the tabs (All = Hell)">Area <select id="ar3"><option value="">Choose an area</option></select></label>
       <label title="Optional: one monster / source of the area; none = a whole area clear">Source <select id="mo3" disabled><option value="">Whole area clear</option></select></label>
+      </span>
       <label>Show <select id="k3"><option value="notable" selected>Uniques, sets, runes, charms</option><option value="all">Everything</option><option value="unique">Uniques</option><option value="set">Set items</option><option value="rune">Runes</option><option value="charm">Charms and jewels</option><option value="base">Other bases</option></select></label>
       <label>Item filter <input id="f3" placeholder="name or base text" style="width:180px"></label>
       <label>Rows <select id="n3"><option>100</option><option selected>300</option><option>1000</option><option>5000</option></select></label>

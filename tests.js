@@ -634,7 +634,9 @@
       // popular farms (CONFIG.farms, tab 2): each resolves to at least one source in every difficulty, as the app looks it up
       { const cx = E.getCtx({ players: 1, party: 1, ladder: true, tz: false, mf: 0, quest: false }), L = E.areaSources(cx);
         F.farms = E.CONFIG.farms.map((f) => [f.name, [0, 1, 2].map((d) => (f.src.indexOf('run|') === 0 ? E.runSources(cx, f.src.slice(4), d, L)
-          : L.filter((s) => s.area === f.area && s.diff === d && !s.herald && !s.quest && (!f.src || s.key === f.src + '|' + d))).length)]); }
+          : L.filter((s) => s.area === f.area && s.diff === d && !s.herald && !s.quest && (!f.src || s.key === f.src + '|' + d))).length)]);
+        const clr = (a, d) => L.filter((s) => s.area === a && s.diff === d && !s.herald && !s.quest);   // tab 2's whole area clear
+        F.pit = [0, 1, 2].map((d) => { const r = E.runSources(cx, 'pit', d, L), c = clr(12, d).concat(clr(16, d)); return [r.length, c.length, r.reduce((t, s) => t + s.perRun, 0), c.reduce((t, s) => t + s.perRun, 0), c.every((s) => r.indexOf(s) >= 0)]; }); }
       // seal pop (runSources 'sealpop'): the rows per difficulty / terror zone; per-run chance via chanceFor == via dropsOf (what tab 2 adds up); never above the full clear
       F.sealPop = { rows: {}, worstRun: 0, items: 0, aboveClear: [] };
       for (const tzOn of [false, true]) for (let d = 0; d < 3; d++) {

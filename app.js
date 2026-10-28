@@ -314,7 +314,7 @@
       '  MF=' + sel.mf + '%' + (sel.quest ? '  |  boss quest rows shown (first kill only)' : '') + (bq ? '  |  base quality: ' + BQN[bq] : '') + '  |  ' + Math.round(performance.now() - t0) + ' ms. Click a column header to sort.';
   }
 
-  // ---------------- Tab 3: what drops here (reverse lookup) ----------------
+  // ---------------- Tab 3: popular farms / what drops here (reverse lookup) ----------------
   // One source -> per-kill chance of everything it drops (E.dropsOf, same numbers as chanceFor); an area clear adds up the sources' per-run chances like Tab 1's Group by Area.
   let T3 = null, c3 = { sig: '', rows: [] };
   const d3Diff = () => { const d = parseInt($('s_diff').value, 10); return d < 0 ? 2 : d; };   // All difficulties -> Hell
@@ -334,9 +334,10 @@
   const farmKey3 = (f, d) => f.src.indexOf('boss|') === 0 ? f.src + '|' + d : f.src;
   function runTab3() {
     const area = parseInt($('ar3').value || '0', 10);
-    const fi = E.CONFIG.farms.findIndex((f) => f.area === area && farmKey3(f, d3Diff()) === $('mo3').value);   // the farm the Area / Source pair matches
-    $('pf3').value = fi < 0 ? '' : String(fi);
-    if (!area) { T3.rows = []; T3.render(); $('info3').textContent = 'Choose an area (and optionally one monster) to list what it drops, best first. Click an item to search it in tab 1.'; return; }
+    const fi = E.CONFIG.farms.findIndex((f) => f.area === area && farmKey3(f, d3Diff()) === $('mo3').value);   // the farm the Area / Source pair matches (a deep link), else Other area
+    if ($('pf3').value !== 'other') { if (fi >= 0) $('pf3').value = String(fi); else if (area) $('pf3').value = 'other'; }   // Other stays open while picking there
+    $('custom3').hidden = $('pf3').value !== 'other';
+    if (!area) { T3.rows = []; T3.render(); $('info3').textContent = $('pf3').value === 'other' ? 'Choose an area (and optionally one monster) to list what it drops, best first. Click an item to search it in tab 1.' : 'Choose a farm to list what it drops, best first (Other area... for any area or monster). Click an item to search it in tab 1.'; return; }
     const sel = S = readSel(), t0 = performance.now(), diff = d3Diff(), key = $('mo3').value;
     const { ctx, list } = getSources(sel);
     const run = key.indexOf('run|') === 0 ? key.slice(4) : '';   // a named run (E.CONFIG.runs, e.g. the seal pop): its fixed kills instead of one source or the whole clear
@@ -361,8 +362,8 @@
     const k = $('k3').value, f = $('f3').value.trim().toLowerCase();
     T3.rows = c3.rows.filter((r) => (k === 'all' || (k === 'notable' ? r.kind !== 'base' : r.kind === k)) && (!f || r.text.indexOf(f) >= 0));
     T3.limit = parseInt($('n3').value, 10);
-    const r = T3.render(), an = $('ar3').selectedOptions[0].textContent.replace(/^Act \d+ - /, '');
-    $('info3').textContent = an + ' (' + DIFF[diff] + (sel.diff < 0 ? ', difficulty All shows Hell' : '') + '): ' + (c3.one ? srcs[0].name : (c3.run ? E.CONFIG.runs[c3.run].name : 'whole area clear') + ', ' + c3.n + ' source' + (c3.n === 1 ? '' : 's') + ', ' + c3.kills.toFixed(0) + ' kills/run') + '  |  ' +
+    const r = T3.render(), an = c3.run ? E.CONFIG.runs[c3.run].name : $('ar3').selectedOptions[0].textContent.replace(/^Act \d+ - /, '');   // a run can span areas: its own name leads
+    $('info3').textContent = an + ' (' + DIFF[diff] + (sel.diff < 0 ? ', difficulty All shows Hell' : '') + '): ' + (c3.one ? srcs[0].name : (c3.run ? '' : 'whole area clear, ') + c3.n + ' source' + (c3.n === 1 ? '' : 's') + ', ' + c3.kills.toFixed(0) + ' kills/run') + '  |  ' +
       r.total.toLocaleString() + ' items (showing ' + r.shown + ')  |  N=' + ctx.N + '  MF=' + sel.mf + '%' + (sel.tz && E.data.tz.herald.length && diff === 2 ? '  |  herald rows are left out (no per-run chance; pick them in tab 1)' : '') + (c3.n ? '' : '  |  no source here with these settings') +
       '  |  ' + Math.round(performance.now() - t0) + ' ms. Click a header to sort, a row to search it in tab 1.';
     sync3();
@@ -385,10 +386,10 @@
       for (const i of document.querySelectorAll('#r1 input')) i.checked = false;
       rankSummary1(); $('t1').click(); runTab1();
     };
-    $('pf3').innerHTML = '<option value="">Choose a farm</option>' + E.CONFIG.farms.map((f, i) => '<option value="' + i + '">' + esc(f.name) + '</option>').join('');
-    $('pf3').addEventListener('change', () => {   // a farm sets Area and Source; a source that does not exist with these settings leaves the whole area clear
+    $('pf3').innerHTML = '<option value="">Choose a farm</option>' + E.CONFIG.farms.map((f, i) => '<option value="' + i + '">' + esc(f.name) + '</option>').join('') + '<option value="other">Other area...</option>';
+    $('pf3').addEventListener('change', () => {   // a farm sets Area and Source (hidden); a source that does not exist with these settings leaves the whole area clear
       const f = E.CONFIG.farms[parseInt($('pf3').value, 10)];
-      if (!f) return;
+      if (!f) { $('ar3').value = ''; fill3(); runTab3(); return; }   // Choose a farm / Other area...: start from an empty area (Other shows Area and Source)
       $('ar3').value = String(f.area); fill3();
       const k = farmKey3(f, d3Diff());
       if (Array.from($('mo3').options).some((o) => o.value === k)) $('mo3').value = k;
