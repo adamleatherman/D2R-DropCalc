@@ -72,7 +72,7 @@
       });
       st.shownRows = rows;
       const shown = rows.slice(0, st.limit);
-      let h = '<thead><tr>' + vcols.map((c) => '<th class="' + (c.l ? 'l' : '') + '" data-k="' + c.k + '"' + (c.note ? ' title="' + esc(c.note) + '"' : '') + '>' + esc(c.label) + (c.k === st.key ? (st.dir < 0 ? ' v' : ' ^') : '') + '</th>').join('') + '</tr></thead><tbody>';
+      let h = '<thead><tr>' + vcols.map((c) => '<th class="' + (c.l ? 'l' : '') + (c.hcls ? ' ' + c.hcls : '') + '" data-k="' + c.k + '"' + (c.note ? ' title="' + esc(c.note) + '"' : '') + '>' + esc(c.label) + (c.k === st.key ? (st.dir < 0 ? ' \u25be' : ' \u25b4') : '') + '</th>').join('') + '</tr></thead><tbody>';
       for (const r of shown) h += '<tr' + (st.rowCls ? ' class="' + st.rowCls(r) + '"' : '') + '>' + vcols.map((c) => '<td class="' + (c.l ? 'l' : '') + '"' + (c.rtip ? ' title="' + esc(c.rtip(r)) + '"' : '') + '>' + (c.html ? c.html(r) : esc(c.fmt ? c.fmt(r) : c.get(r))) + '</td>').join('') + '</tr>';
       h += '</tbody>';
       el.innerHTML = h;
@@ -161,13 +161,13 @@
     { k: 'sMf', show: isSun, label: 'Sunder: MF path', note: 'Data-driven: the PreCrafted Sunders are spawnable unique grand charms (rarity 1, lvl 75, DropConditionCalc Hell only), so a unique cm3 roll can pick one.', get: (r) => r.sp ? r.sp.mf : 0, fmt: (r) => odds(r.sp.mf) },
     { k: 'sTotal', show: isSun, label: 'Sunder: total', note: 'Combined chance of both paths.', get: (r) => r.sp ? r.sp.total : 0, fmt: (r) => odds(r.sp.total) },
     { k: 'pbase', show: showQB, label: 'P(base)', get: (r) => r.c.base, fmt: (r) => odds(r.c.base) },
-    { k: 'plow', show: isWhiteBase, label: 'P(low)', note: 'Low quality (crude/cracked/damaged/low quality) base. Boss, champion and unique TCs force Magic=1024, so this is 0 there.', get: (r) => r.c.low, fmt: (r) => odds(r.c.low) },
+    { k: 'plow', show: isWhiteBase, hcls: 'q-low', label: 'P(low)', note: 'Low quality (crude/cracked/damaged/low quality) base. Boss, champion and unique TCs force Magic=1024, so this is 0 there.', get: (r) => r.c.low, fmt: (r) => odds(r.c.low) },
     { k: 'pnorm', show: isWhiteBase, label: 'P(normal)', note: 'Normal quality base (what is left after unique/set/rare/magic/superior/low).', get: (r) => r.c.normal, fmt: (r) => odds(r.c.normal) },
     { k: 'psup', show: isWhiteBase, label: 'P(superior)', note: 'Superior quality base.', get: (r) => r.c.hq, fmt: (r) => odds(r.c.hq) },
-    { k: 'pmag', show: showQB, note: QNOTE, label: 'P(magic)', get: (r) => r.c.magic, fmt: (r) => odds(r.c.magic) },
-    { k: 'prare', show: showQB, note: QNOTE, label: 'P(rare)', get: (r) => r.c.rare, fmt: (r) => odds(r.c.rare) },
-    { k: 'pset', show: showQB, note: QNOTE, label: 'P(set)', get: (r) => r.c.set, fmt: (r) => odds(r.c.set) },
-    { k: 'puni', show: showQB, note: QNOTE, label: 'P(unique)', get: (r) => r.c.unique, fmt: (r) => odds(r.c.unique) },
+    { k: 'pmag', show: showQB, hcls: 'q-magic', note: QNOTE, label: 'P(magic)', get: (r) => r.c.magic, fmt: (r) => odds(r.c.magic) },
+    { k: 'prare', show: showQB, hcls: 'q-rare', note: QNOTE, label: 'P(rare)', get: (r) => r.c.rare, fmt: (r) => odds(r.c.rare) },
+    { k: 'pset', show: showQB, hcls: 'q-set', note: QNOTE, label: 'P(set)', get: (r) => r.c.set, fmt: (r) => odds(r.c.set) },
+    { k: 'puni', show: showQB, hcls: 'q-unique', note: QNOTE, label: 'P(unique)', get: (r) => r.c.unique, fmt: (r) => odds(r.c.unique) },
     { k: 'ptar', label: 'Chance per kill', get note() { return 'Chance that one kill drops the target (shown as odds; sorts by probability).' + (areaMode() ? ' Area rows: the average over all kills of an area clear.' : ''); }, get: (r) => r.c.target, fmt: (r) => odds(r.c.target) },
     { k: 'runs', label: 'kills/run', get: (r) => r.src.perRun, fmt: (r) => runsTxtOf(r.src) },
     { k: 'perrun', label: 'Chance per run', get note() { return 'Chance of finding the target at least once in one run: 1 - (1 - per-kill chance)^(kills/run) (kills/run is a rough model; shown as odds).' + (areaMode() ? ' Area rows combine all their sources the same way.' : ''); }, get: runP, fmt: (r) => odds(runP(r)) },
@@ -442,7 +442,7 @@
   const lsSet = (k, v) => { try { localStorage.setItem(k, v ? '1' : '0'); } catch (e) { /* ignore */ } };
   const showOdds = () => $('odds2').checked;
 
-  const cols2 = srcCols.concat(QS_ALL.map((q) => ({ k: 'p' + q, label: 'P(' + (q === 'sup' ? 'superior' : q === 'low' ? 'low' : q) + ')', show: () => bd.farmQ.indexOf(q) >= 0,
+  const cols2 = srcCols.concat(QS_ALL.map((q) => ({ k: 'p' + q, hcls: { low: 'q-low', magic: 'q-magic', rare: 'q-rare' }[q] || '', label: 'P(' + (q === 'sup' ? 'superior' : q === 'low' ? 'low' : q) + ')', show: () => bd.farmQ.indexOf(q) >= 0,
     note: 'Chance per kill of a ' + QCOLN[q].toUpperCase() + ' item of the type with the combination (exact).', get: (r) => r.pq[q] || 0, fmt: (r) => odds(r.pq[q] || 0) })), [
     { k: 'ptot', label: 'P per kill', note: 'Chance that one kill drops a matching item (sum over every base of the type and the possible qualities; shown as odds, sorts by probability).', get: (r) => r.pTotal, fmt: (r) => odds(r.pTotal) },
     { k: 'runs', label: 'kills/run', get: (r) => r.src.perRun, fmt: (r) => runsTxtOf(r.src) },
