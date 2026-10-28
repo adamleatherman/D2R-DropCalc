@@ -44,9 +44,9 @@
   }
 
   // ---------------- formatting ----------------
-  /** css class of an item name in its in-game drop colour: runes, the Terror / Hate / Destruction keys, Worldstone Shards and the Colossal Ancient
-   *  statue pieces are orange. t = a search index entry ({kind, code, ...}); anything else gets none. */
-  const dropCls = (t) => t && t.kind === 'base' && /^(r\d\d|pk[123]|xa[1-5]|ua[1-5])$/.test(t.code) ? 'drop-orange' : '';
+  /** css class of an item name in its in-game drop colour: uniques gold, set items green; runes, the Terror / Hate / Destruction keys, the four
+   *  essences, Worldstone Shards and the Colossal Ancient statue pieces orange. t = a search index entry ({kind, code, ...}); anything else gets none. */
+  const dropCls = (t) => !t ? '' : t.kind === 'unique' ? 'drop-unique' : t.kind === 'set' ? 'drop-set' : t.kind === 'base' && /^(r\d\d|pk[123]|tes|ceh|bet|fed|xa[1-5]|ua[1-5])$/.test(t.code) ? 'drop-orange' : '';
   /** text (escaped) in the drop colour of item t */
   const dropName = (t, text) => dropCls(t) ? '<span class="' + dropCls(t) + '">' + esc(text) + '</span>' : esc(text);
   /** Every probability is shown as odds: "1 in 4,334,276", "1 in 1.50" below 10, "always" at p >= 1, "-" for none. */
