@@ -2232,6 +2232,11 @@ def main():
     fact("seal pop (Hell): per-run chance from dropsOf (tab 2) == 1 - prod (1 - chanceFor)^kills (worst rel %.2g over every 25th of %d items)" % (SP_["worstRun"], SP_["items"]), SP_["worstRun"] < 1e-9 and SP_["items"] > 100)
     fact("seal pop (Hell): no item more likely per run than in a full Chaos Sanctuary clear (its kills are part of the clear)", not SP_["aboveClear"], str(SP_["aboveClear"][:5]))
     fact("every popular farm of tab 2 (%d) has at least one source in Normal, Nightmare and Hell" % len(FA["farms"]), all(min(c_) > 0 for _, c_ in FA["farms"]), str([f_ for f_ in FA["farms"] if min(f_[1]) == 0]))
+    FT_ = FA["farmTime"]
+    fact("farm times (%d farms): every popular farm has time parameters and a row in the plan's table; farmMinutes reproduces scenarios A-F within 0.05 (worst %.3f)" % (len(FA["farms"]), FT_["worst"]), FT_["noTime"] == 0 and not FT_["missing"] and FT_["worst"] < 0.05 + 1e-9 and FT_["none"] is None, str(FT_["missing"]))
+    fact("farm times: no teleport >= slow >= fast, random map >= saved map, sunder charm <= none, for every farm", all(all(o_[1:]) for o_ in FT_["order"]) and all(s_[1] for s_ in FT_["sunder"]), str([o_ for o_ in FT_["order"] if not all(o_[1:])]))
+    fact("farm times: overhead is added as given (default 0.5), walking doubles only the Cow Level's Wirt's Leg trip", abs(FT_["overhead"][1] - FT_["overhead"][0] - 2) < 1e-9 and abs(FT_["overhead"][2] - FT_["overhead"][0] - 0.5) < 1e-9 and FT_["cowWalk"][1] > FT_["cowWalk"][0] + 1.75, str(FT_["cowWalk"]))
+    fact("farm times: chance per hour = 1 - (1 - p)^(60 / minutes)", all(abs(h_[2] - (1 - (1 - h_[0]) ** (60 / h_[1]))) < 1e-12 for h_ in FT_["perHour"]))
     fact("The Pit farm = every source of the whole area clears of Pit Level 1 (12) and Pit Level 2 (16), kills/run added up, in every difficulty", all(r_[0] == r_[1] and abs(r_[2] - r_[3]) < 1e-9 and r_[4] and r_[2] > 0 for r_ in FA["pit"]), str(FA["pit"]))
     # ---- cave cells: tools/maze_cells.json is current, consistent and used by data.json
     import maze_cells as MC_
