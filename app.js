@@ -355,7 +355,7 @@
   const PCT3 = (r) => r.runP;
   const cols3 = [
     { k: 'name', label: 'Item', l: 1, get: (r) => r.t.name, html: (r) => dropName(r.t, r.t.name, true) + ' <span class="tag ' + r.kind + '">' + (r.kind === 'charm' && /^(jew|cjw)$/.test(r.t.code) ? 'jewel' : KIND3[r.kind]) + '</span>' },   // jewels sit under the "Charms and jewels" filter but keep their own tag
-    { k: 'base', label: 'Base', l: 1, get: base3, html: (r) => esc(base3(r)) },
+    { k: 'base', label: 'Base', l: 1, cls: 'c-base', get: base3, html: (r) => esc(base3(r)) },
     { k: 'pk', get label() { return c3.one ? 'Chance per kill' : 'Chance per kill (average)'; }, note: 'Chance that one kill drops the item (shown as odds). A whole area clear: the average over all its kills.', get: (r) => r.pk, fmt: (r) => odds(r.pk) },
     { k: 'kills', label: 'kills/run', show: () => c3.one, get: () => c3.kills, fmt: () => c3.quest ? 'first kill' : c3.kills < 10 ? c3.kills.toFixed(2) : c3.kills.toFixed(0) },
     { k: 'perrun', label: 'Chance per run', note: 'Chance of finding the item at least once in one run: 1 - (1 - per-kill chance)^(kills/run), over every source of an area clear (kills/run is a rough model; same numbers as Tab 1).', get: PCT3, fmt: (r) => odds(r.runP) },
