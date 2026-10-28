@@ -59,6 +59,9 @@
   .tz { color:var(--tz); font-size:11px; }
   .drop-orange { color:var(--drop-orange); } .drop-unique { color:var(--drop-unique); } .drop-set { color:var(--drop-set); }   /* item names in their in-game drop colour: runes, keys, essences, shards, statue pieces orange; uniques gold; sets green */
   a { color:var(--accent); }
+  /* item tooltip, dark in both themes like the game's */
+  .itip { position:fixed; z-index:50; pointer-events:none; min-width:170px; max-width:340px; padding:7px 12px; text-align:center; font:13px/1.45 "Segoe UI", system-ui, sans-serif; color:#e4e1d8; background:rgba(10,10,12,.95); border:1px solid #5a4a2a; border-radius:2px; box-shadow:0 4px 14px rgba(0,0,0,.5); --drop-orange:#ffa800; --drop-unique:#c7b377; --drop-set:#00ff00; }
+  .itip div:first-child { font-weight:600; } .itip .tip-dim { color:#9a968a; font-size:12px; } .itip .tip-gray { color:#a8a8a8; }
   [hidden] { display:none !important; }
   .il { display:flex; gap:6px; align-items:center; } .il input[type=range] { width:110px; padding:0; }
   .b2grid { display:grid; grid-template-columns:minmax(0,1fr) 340px; gap:10px; align-items:start; }

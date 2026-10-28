@@ -47,8 +47,27 @@
   /** css class of an item name in its in-game drop colour: uniques gold, set items green; runes, the Terror / Hate / Destruction keys, the four
    *  essences, Worldstone Shards and the Colossal Ancient statue pieces orange. t = a search index entry ({kind, code, ...}); anything else gets none. */
   const dropCls = (t) => !t ? '' : t.kind === 'unique' ? 'drop-unique' : t.kind === 'set' ? 'drop-set' : t.kind === 'base' && /^(r\d\d|pk[123]|tes|ceh|bet|fed|xa[1-5]|ua[1-5])$/.test(t.code) ? 'drop-orange' : '';
-  /** text (escaped) in the drop colour of item t */
-  const dropName = (t, text) => dropCls(t) ? '<span class="' + dropCls(t) + '">' + esc(text) + '</span>' : esc(text);
+  const itKey = (t) => t.kind + '|' + (t.kind === 'base' ? t.code : t.id);   // a search index entry's key (data-it of item names)
+  /** text (escaped) in the drop colour of item t; tip = hovering it shows the item tooltip (itemTipHtml) */
+  const dropName = (t, text, tip) => tip && t && t.kind ? '<span class="itn ' + dropCls(t) + '" data-it="' + esc(itKey(t)) + '">' + esc(text) + '</span>'
+    : dropCls(t) ? '<span class="' + dropCls(t) + '">' + esc(text) + '</span>' : esc(text);
+  /** in-game style tooltip of item t: name (and base) in the drop colour, set, type and tier, required level, quality level, sockets.
+   *  No stat lines: data.json has no unique / set item properties (build.py does not export them). */
+  function itemTipHtml(t) {
+    const u = t.kind === 'unique' ? E.uniqById[t.id] : t.kind === 'set' ? E.setById[t.id] : null, it = E.items[u ? u.code : t.code];
+    if (!it) return '';
+    const cls = dropCls(t), ln = (txt, c) => '<div' + (c ? ' class="' + c + '"' : '') + '>' + esc(txt) + '</div>';
+    const tier = it.tier === 1 ? 'Exceptional' : it.tier === 2 ? 'Elite' : '';
+    let h = ln(u ? u.n : it.n, cls);
+    if (u) h += ln(it.n, cls);
+    if (t.kind === 'set') h += ln(u.sn || u.set, 'tip-dim');
+    h += ln(((E.types[it.t] || {}).n || it.t) + (tier ? ' \u00b7 ' + tier : ''), 'tip-dim');
+    const req = u ? u.lr : it.lv;
+    if (req > 0) h += ln('Required Level: ' + req);
+    h += ln('Quality level ' + (u ? u.lvl + ' (base ' + it.q + ')' : it.q), 'tip-dim');
+    if (it.gs > 0) h += ln('Max sockets: ' + it.gs, 'tip-gray');   // gray, like a socketed item in game
+    return h;
+  }
   /** Every probability is shown as odds: "1 in 4,334,276", "1 in 1.50" below 10, "always" at p >= 1, "-" for none. */
   function odds(p) {
     if (!(p > 0)) return '-';
@@ -300,7 +319,7 @@
     // headline: best per kill (monster rows), best per run (area rows in area mode, else monster rows)
     const best = (rs, g) => rs.reduce((a, x) => !a || g(x) > g(a) ? x : a, null);
     const bk = best(mon, (x) => x.c.target), br = best(areaMode() ? rows : mon.filter((x) => !x.src.herald && !x.src.quest), runP);   // a quest kill is not repeatable
-    let hl = '<b>' + dropName(target1, target1.label) + '</b>';
+    let hl = '<b>' + dropName(target1, target1.label, true) + '</b>';
     if (bk) hl += ' &middot; best per kill: ' + esc(srcWhere(bk.src)) + ', <b>' + odds(bk.c.target) + '</b>';
     if (br && runP(br) > 0) hl += ' &middot; best per run: ' + esc(areaMode() ? br.src.areaName + ' (' + DIFF[br.src.diff] + ')' : srcWhere(br.src)) + ', <b>' + runsTxt(runP(br)) + '</b>, ~' + countFmt(E.trialsFor(runP(br), 0.5)) + ' runs for 50% / ~' + countFmt(E.trialsFor(runP(br), 0.9)) + ' for 90%';
     $('hl1').innerHTML = hl;
@@ -334,7 +353,7 @@
   const base3 = (r) => r.t.kind === 'base' ? '' : E.items[r.t.code].n;
   const PCT3 = (r) => r.runP;
   const cols3 = [
-    { k: 'name', label: 'Item', l: 1, get: (r) => r.t.name, html: (r) => dropName(r.t, r.t.name) + ' <span class="tag ' + r.kind + '">' + (r.kind === 'charm' && /^(jew|cjw)$/.test(r.t.code) ? 'jewel' : KIND3[r.kind]) + '</span>' },   // jewels sit under the "Charms and jewels" filter but keep their own tag
+    { k: 'name', label: 'Item', l: 1, get: (r) => r.t.name, html: (r) => dropName(r.t, r.t.name, true) + ' <span class="tag ' + r.kind + '">' + (r.kind === 'charm' && /^(jew|cjw)$/.test(r.t.code) ? 'jewel' : KIND3[r.kind]) + '</span>' },   // jewels sit under the "Charms and jewels" filter but keep their own tag
     { k: 'base', label: 'Base', l: 1, get: base3, html: (r) => esc(base3(r)) },
     { k: 'pk', get label() { return c3.one ? 'Chance per kill' : 'Chance per kill (average)'; }, note: 'Chance that one kill drops the item (shown as odds). A whole area clear: the average over all its kills.', get: (r) => r.pk, fmt: (r) => odds(r.pk) },
     { k: 'kills', label: 'kills/run', show: () => c3.one, get: () => c3.kills, fmt: () => c3.quest ? 'first kill' : c3.kills < 10 ? c3.kills.toFixed(2) : c3.kills.toFixed(0) },
@@ -1359,6 +1378,21 @@
       runTab1();
     });
     autocomplete($('q1'), $('ac1'), () => INDEX, (x) => { target1 = x; runTab1(); });
+    // item tooltip: hovering an item name (data-it) shows itemTipHtml next to the pointer
+    const tip = document.createElement('div'); tip.className = 'itip'; tip.hidden = true; document.body.appendChild(tip);
+    let tipIdx = null, tipSrc = null;
+    const placeTip = (e) => { const w = tip.offsetWidth, h = tip.offsetHeight; let x = e.clientX + 14, y = e.clientY + 18;
+      if (x + w > innerWidth - 8) x = Math.max(8, e.clientX - w - 14); if (y + h > innerHeight - 8) y = Math.max(8, e.clientY - h - 12); tip.style.left = x + 'px'; tip.style.top = y + 'px'; };
+    document.addEventListener('mouseover', (e) => {
+      const el = e.target.closest && e.target.closest('[data-it]');
+      if (!el) { tip.hidden = true; return; }
+      if (tipSrc !== INDEX) { tipIdx = new Map(INDEX.map((x) => [itKey(x), x])); tipSrc = INDEX; }   // rebuilt after a mode switch
+      const t = tipIdx.get(el.dataset.it), h = t ? itemTipHtml(t) : '';
+      if (!h) { tip.hidden = true; return; }
+      tip.innerHTML = h; tip.hidden = false; placeTip(e);
+    });
+    document.addEventListener('mousemove', (e) => { if (!tip.hidden) placeTip(e); });
+    document.documentElement.addEventListener('mouseleave', () => { tip.hidden = true; });   // the pointer left the window
     // clicking into the search with an item chosen empties it for typing (the item stays as the placeholder); leaving it without picking another restores the item
     const ph1 = $('q1').placeholder;
     $('q1').addEventListener('focus', () => { if (target1 && $('q1').value === target1.label) { $('q1').value = ''; $('q1').placeholder = target1.label; $('ac1').hidden = true; } });
