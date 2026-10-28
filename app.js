@@ -1722,11 +1722,11 @@
       ab(playersChart, 'Real tables: ' + ABTC.map((t) => { const i = abTcInfo(t); return t.d + ' (NoDrop ' + i.nd + ', everything else ' + i.w + ')'; }).join(' and ') + '. ' + V('N') + ' counts party members nearby fully and the other players in the game at half.') +
       '<p><b>Item quality.</b> When a base drops, the game tries unique, then set, rare, magic, superior and normal; the first that succeeds is what you get (if none does, low quality). Each try succeeds with a chance of 1 in ' + V('X') + ', where ' + V('X') + ' is built in three steps:</p><ol>' +
         '<li><b>Start</b> from the quality\'s base number: unique 400, set 160, rare 100, magic 34 for an ordinary base (class-specific bases use other values).</li>' +
-        '<li><b>Subtract the level gap</b>: ' + M('(mlvl &minus; qlvl) / Divisor') + ', with Divisor 1 for unique, 2 for set and rare, 3 for magic. So a monster far above the item\'s base level gives better odds.</li>' +
+        '<li><b>Subtract the level gap</b>: ' + M('(mlvl &minus; qlvl) / Divisor') + ', with Divisor 1 for unique, 2 for set and rare, 3 for magic. So a monster far above the item\'s base level gives better odds.' +
+          '<p>The level gap alone, at 0% MF: uniques gain one step per level of gap, magic one per three levels (set and rare one per two). The monster\'s own quality bonus is not included.</p>' +
+          ab(gapChart) + '</li>' +
         '<li><b>Apply magic find</b>: the chance is multiplied by ' + M('1 + MF / 100') + ', so 100% MF doubles it. For unique, set and rare items the game first shrinks your MF with a cap for that quality: ' +
           '<b>250 for unique, 500 for set, 600 for rare</b>. The MF that counts gets closer to the cap the more MF you have but never reaches it, and is exactly half the cap when your MF equals the cap (' + M('MF &times; cap / (MF + cap)') + '). Magic items use your full MF.</li></ol>' +
-      '<p>The level gap alone, at 0% MF: uniques gain one step per level of gap, magic one per three levels (set and rare one per two). The monster\'s own quality bonus is not included.</p>' +
-        ab(gapChart) +
         '<table class="mft"><caption>The MF that counts</caption><tr><th>Your MF</th><th>Unique</th><th>Set</th><th>Rare</th><th>Magic</th></tr>' +
         '<tr><td>100%</td><td>71%</td><td>83%</td><td>85%</td><td>100%</td></tr>' +
         '<tr><td>200%</td><td>111%</td><td>142%</td><td>150%</td><td>200%</td></tr>' +
