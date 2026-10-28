@@ -2213,6 +2213,24 @@ def main():
          and (102, "councilmember2", 2) not in sm_ and (83, "councilmember3", 2) not in sm_, str([sm_.get((83, "councilmember1", d)) for d in range(3)]))
     fact("Baal's five waves (Throne of Destruction 131) bring minions: Warped One, Unraveler, Baal Subject 2's 10 cold mages, Council Member, Venom Lord, Minion of Destruction; Chaos seal bosses (108): megademon3, doomknight1, fingermage3",
          all((131, m_, 2) in sm_ for m_ in ("fallen5", "unraveler5", "skmage_cold3", "baalhighpriest", "venomlord", "baalminion1")) and all((108, m_, 2) in sm_ for m_ in ("megademon3", "doomknight1", "fingermage3")), "Hell 108: " + str([sm_.get((108, m_, 2), (0,))[0] for m_ in ("megademon3", "doomknight1", "fingermage3")]))
+    # ---- seal pop (runSources 'sealpop'): the three seal bosses (1 each), their own minions from superuniques.txt (MinGrp / MaxGrp + difficulty, minion1) and Diablo's regular kill
+    SP_ = FA["sealPop"]
+    sus_ = {r_["Superunique"]: r_ for r_ in rd("superuniques")}
+    exp_sp_ = {}
+    for d_ in range(3):
+        e_ = [("boss", "diablo", "", 1)]
+        for nm_ in ("Grand Vizier of Chaos", "Lord De Seis", "Infector of Souls"):
+            r_ = sus_[nm_]
+            lo_, hi_ = n(r_["MinGrp"]) + d_, n(r_["MaxGrp"]) + d_
+            m1_ = ms_[r_["Class"]].get("minion1")
+            e_ += [("super", r_["Class"], nm_, 1), ("minion", m1_ if m1_ in ms_ else r_["Class"], "", (lo_ + hi_) / 2)]
+        exp_sp_[d_] = sorted(e_)
+    bad_ = [(k_, d_) for k_ in ("noTz", "tz") for d_ in range(3) if sorted((r_[0], r_[1], r_[2], r_[3]) for r_ in SP_["rows"][k_ + str(d_)]) != exp_sp_[d_] or any(r_[6] for r_ in SP_["rows"][k_ + str(d_)])]
+    fact("seal pop rows == Grand Vizier / De Seis / Infector (1 each) + their minions (superuniques.txt MinGrp / MaxGrp + difficulty, minion1) + Diablo (no quest row), Normal / Nightmare / Hell, terror zone off and on",
+         not bad_, str(bad_) + " Hell: " + str(SP_["rows"]["noTz2"]))
+    fact("seal pop, terror zone on: the seal bosses use their Desecrated TCs and Diablo his Desecrated one", all(("Desecrated" in r_[5]) == (r_[0] != "minion") for r_ in SP_["rows"]["tz2"]), str(SP_["rows"]["tz2"]))
+    fact("seal pop (Hell): per-run chance from dropsOf (tab 2) == 1 - prod (1 - chanceFor)^kills (worst rel %.2g over every 25th of %d items)" % (SP_["worstRun"], SP_["items"]), SP_["worstRun"] < 1e-9 and SP_["items"] > 100)
+    fact("seal pop (Hell): no item more likely per run than in a full Chaos Sanctuary clear (its kills are part of the clear)", not SP_["aboveClear"], str(SP_["aboveClear"][:5]))
     # ---- cave cells: tools/maze_cells.json is current, consistent and used by data.json
     import maze_cells as MC_
     mc_ = json.load(open(os.path.join(HERE, "tools", "maze_cells.json"), encoding="utf-8"))

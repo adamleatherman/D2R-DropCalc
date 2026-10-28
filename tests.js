@@ -631,6 +631,26 @@
           colossalLow: S.filter((s) => s.area === 137 && s.diff < 2).length, colossalHell: S.filter((s) => s.area === 137 && s.diff === 2).length };
         const grp = E.areaSources(cx).filter((s) => s.rank === 'minion' && s.diff === 2 && (s.area === 83 || s.area === 102));
         F.councilGroups = grp.map((s) => [s.area, s.mon, s.perRun, s.tc]); }
+      // seal pop (runSources 'sealpop'): the rows per difficulty / terror zone; per-run chance via chanceFor == via dropsOf (what tab 2 adds up); never above the full clear
+      F.sealPop = { rows: {}, worstRun: 0, items: 0, aboveClear: [] };
+      for (const tzOn of [false, true]) for (let d = 0; d < 3; d++) {
+        const cx = E.getCtx({ players: 1, party: 1, ladder: true, tz: tzOn, clvl: 85, tier: 0, mf: 0, quest: true }), L = E.areaSources(cx), R = E.runSources(cx, 'sealpop', d, L);
+        F.sealPop.rows[(tzOn ? 'tz' : 'noTz') + d] = R.map((s) => [s.rank, s.mon, s.su || '', s.perRun, s.mlvl, s.tc, !!s.quest]);
+        if (tzOn || d !== 2) continue;
+        const clear = L.filter((s) => s.area === 108 && s.diff === 2 && !s.herald && !s.quest), lm = (S) => {
+          const m = new Map();
+          for (const s of S) { const dr = E.dropsOf(cx, s, 0); for (const [kind, mm] of [['base', dr.base], ['unique', dr.unique], ['set', dr.set]]) for (const [id, p] of mm) m.set(kind + '|' + id, (m.get(kind + '|' + id) || 0) + s.perRun * Math.log1p(-Math.min(p, 1))); }
+          return m; };
+        const run = lm(R), full = lm(clear);
+        for (const [k, v] of run) {
+          F.sealPop.items++;
+          const [kind, id] = k.split(/\|(.*)/), tg = kind === 'base' ? { kind, code: id } : { kind, id };
+          if (F.sealPop.items % 25 === 1) {   // every 25th item: the same per-run chance from chanceFor
+            const ref = 1 - R.reduce((t, s) => t * Math.pow(1 - E.chanceFor(cx, s, tg, 0).target, s.perRun), 1), got = -Math.expm1(v);
+            F.sealPop.worstRun = Math.max(F.sealPop.worstRun, Math.abs(got - ref) / Math.max(ref, 1e-300)); }
+          if (-Math.expm1(v) > -Math.expm1(full.get(k) || 0) * (1 + 1e-12)) F.sealPop.aboveClear.push(k);
+        }
+      }
     }
     // ---- affix table fit test (fitsCombo, the fast structural test) against the full sweep (feasibleAny) ----
     { const QSA = ['low', 'normal', 'sup', 'magic', 'rare'], T = E.builderTypes(), fit = res.fit = { cases: [], missed: 0, extra: 0, n: 0, bad: [], ms: {} };

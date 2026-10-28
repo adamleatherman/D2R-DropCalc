@@ -335,7 +335,8 @@
     if (!area) { T3.rows = []; T3.render(); $('info3').textContent = 'Choose an area (and optionally one monster) to list what it drops, best first. Click an item to search it in tab 1.'; return; }
     const sel = S = readSel(), t0 = performance.now(), diff = d3Diff(), key = $('mo3').value;
     const { ctx, list } = getSources(sel);
-    const srcs = list.filter((s) => s.area === area && s.diff === diff && (!sel.tz || s.tz) && !s.herald && (key ? s.key === key : !s.quest));   // a whole area clear leaves out the boss quest rows (first kill only)
+    const run = key.indexOf('run|') === 0 ? key.slice(4) : '';   // a named run (E.CONFIG.runs, e.g. the seal pop): its fixed kills instead of one source or the whole clear
+    const srcs = run ? E.runSources(ctx, run, diff, list) : list.filter((s) => s.area === area && s.diff === diff && (!sel.tz || s.tz) && !s.herald && (key ? s.key === key : !s.quest));   // a whole area clear leaves out the boss quest rows (first kill only)
     const sig = JSON.stringify([srcCache.sig, area, diff, key, sel.ladder, sel.mf]);
     if (c3.sig !== sig) {
       const acc = new Map(), kills = srcs.reduce((a, s) => a + s.perRun, 0), one = srcs.length === 1, wsum = srcs.reduce((a, s) => a + (one ? 1 : s.perRun), 0);
@@ -351,13 +352,13 @@
         const a = acc.get(t.kind + '|' + (t.kind === 'base' ? t.code : t.id));
         if (a && a.pw > 0) rows.push({ t, kind: kind3(t), pk: a.pw / wsum, runP: -Math.expm1(a.lm), text: (t.name + ' ' + (t.kind === 'base' ? '' : E.items[t.code].n)).toLowerCase() });
       }
-      c3 = { sig, rows, one, kills, quest: one && !!srcs[0].quest, n: srcs.length, ms: 0 };
+      c3 = { sig, rows, one, kills, quest: one && !!srcs[0].quest, n: srcs.length, run, ms: 0 };
     }
     const k = $('k3').value, f = $('f3').value.trim().toLowerCase();
     T3.rows = c3.rows.filter((r) => (k === 'all' || (k === 'notable' ? r.kind !== 'base' : r.kind === k)) && (!f || r.text.indexOf(f) >= 0));
     T3.limit = parseInt($('n3').value, 10);
     const r = T3.render(), an = $('ar3').selectedOptions[0].textContent.replace(/^Act \d+ - /, '');
-    $('info3').textContent = an + ' (' + DIFF[diff] + (sel.diff < 0 ? ', difficulty All shows Hell' : '') + '): ' + (c3.one ? srcs[0].name : 'whole area clear, ' + c3.n + ' source' + (c3.n === 1 ? '' : 's') + ', ' + c3.kills.toFixed(0) + ' kills/run') + '  |  ' +
+    $('info3').textContent = an + ' (' + DIFF[diff] + (sel.diff < 0 ? ', difficulty All shows Hell' : '') + '): ' + (c3.one ? srcs[0].name : (c3.run ? E.CONFIG.runs[c3.run].name : 'whole area clear') + ', ' + c3.n + ' source' + (c3.n === 1 ? '' : 's') + ', ' + c3.kills.toFixed(0) + ' kills/run') + '  |  ' +
       r.total.toLocaleString() + ' items (showing ' + r.shown + ')  |  N=' + ctx.N + '  MF=' + sel.mf + '%' + (sel.tz && E.data.tz.herald.length && diff === 2 ? '  |  herald rows are left out (no per-run chance; pick them in tab 1)' : '') + (c3.n ? '' : '  |  no source here with these settings') +
       '  |  ' + Math.round(performance.now() - t0) + ' ms. Click a header to sort, a row to search it in tab 1.';
     sync3();
@@ -584,8 +585,9 @@
     const sel = readSel(), { list } = getSources(sel);
     if (d3 !== undefined) sel.diff = d3;
     const rows = list.filter((s) => s.area === area && (sel.diff < 0 || s.diff === sel.diff) && (d3 !== undefined || !sel.act || s.act === sel.act) && (!sel.tz || s.tz) && !s.herald);
-    mo.innerHTML = '<option value="">' + (d3 === undefined ? 'All sources in the area' : 'Whole area clear') + '</option>' + rows.map((s) => '<option value="' + esc(s.key) + '">' + esc(s.name) + (s.rank === 'regular' || s.members ? '' : ' (' + s.rank + ')') + (sel.diff < 0 ? ' - ' + DIFF[s.diff] : '') + '</option>').join('');
-    if (rows.some((s) => s.key === cur)) mo.value = cur;
+    const runs = d3 === undefined ? [] : Object.keys(E.CONFIG.runs).filter((k) => E.CONFIG.runs[k].area === area);   // tab 3 only: named runs of this area (seal pop)
+    mo.innerHTML = '<option value="">' + (d3 === undefined ? 'All sources in the area' : 'Whole area clear') + '</option>' + runs.map((k) => '<option value="run|' + esc(k) + '">' + esc(E.CONFIG.runs[k].name) + '</option>').join('') + rows.map((s) => '<option value="' + esc(s.key) + '">' + esc(s.name) + (s.rank === 'regular' || s.members ? '' : ' (' + s.rank + ')') + (sel.diff < 0 ? ' - ' + DIFF[s.diff] : '') + '</option>').join('');
+    if (rows.some((s) => s.key === cur) || runs.some((k) => 'run|' + k === cur)) mo.value = cur;
   }
   function requestTable() {
     requestOdds();

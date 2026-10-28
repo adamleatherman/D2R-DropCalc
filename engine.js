@@ -125,6 +125,11 @@
       champPackSize: 3,            // champions per champion pack: 1 + rand(3)+1 = 2-4 (PopulateRoom)
       uniqueMinions: [3, 6],       // minions with a unique (D2GAME_SpawnMinions_6FC6F440(..., 1, 3, 6))
     },
+    // --- named runs: a fixed set of kills in one area instead of a full clear (runSources). su = super uniques (with their own minions), boss = act bosses
+    //     (regular kill, not the quest kill). Seal pop: open the three Chaos Sanctuary seals, kill the seal bosses and their minions, then Diablo.
+    runs: {
+      sealpop: { name: 'Seal pop (seal bosses + minions + Diablo)', area: 108, su: ['Grand Vizier of Chaos', 'Lord De Seis', 'Infector of Souls'], boss: ['diablo'] },
+    },
     maxMlvl: 110,
     // --- per-kill drop cap ---
     // The game's drop routine (decompiled TreasureClassDropper, https://gist.github.com/SeanSullivan86/e912b40bb85f9822b9ef507d91534c88)
@@ -789,8 +794,8 @@
         // into one when the area already has the monster type as a minion): +CONFIG.minionOffset on the area level, the monster's regular TC.
         const minRow = new Map();
         for (const r of out) if (r.diff === d && r.rank === 'minion') minRow.set(r.key, r);
-        const suMinions = (su, lid, inTz) => {
-          const A = D.levels[lid];
+        const suMinions = (su, lid, inTz) => {   // returns this super unique's own minions [{id, n, tc, mlvl}] (runSources)
+          const A = D.levels[lid], mine = [];
           let [lo, hi] = su.mg || [0, 0];
           if (lo && hi) { lo += d; hi += d; }
           const list = (hi > 0 ? [[su.mn, hi >= lo ? (lo + hi) / 2 : lo]] : []).concat(su.xm || []);
@@ -799,13 +804,15 @@
             if (!m || !(n > 0)) continue;
             const tcn = pickTC(m, d, 'minion', inTz);
             if (!tcn || !TC[tcn]) continue;
+            const base = d === 0 ? m.lv[0] : A.lvl[d], mlvl = (inTz ? tzLevel(base, s.clvl, d) : base) + CONFIG.minionOffset;
+            mine.push({ id, n, tc: tcn, mlvl });
             const key = id + '|minion|' + lid + '|' + d, ex = minRow.get(key);
             if (ex) { ex.perRun += n; ex.suMin = (ex.suMin || 0) + n; continue; }
-            const base = d === 0 ? m.lv[0] : A.lvl[d];
             const row = { key, mon: id, name: m.n, rank: 'minion', diff: d, area: +lid, areaName: A.name, act: A.act,
-              mlvl: (inTz ? tzLevel(base, s.clvl, d) : base) + CONFIG.minionOffset, tc: tcn, boss: false, perRun: n, tz: inTz, share: 0, suMin: n };   // suMin = the part that comes from super uniques
+              mlvl, tc: tcn, boss: false, perRun: n, tz: inTz, share: 0, suMin: n };   // suMin = the part that comes from super uniques
             out.push(row); minRow.set(key, row);
           }
+          return mine;
         };
         // superuniques
         for (const su of D.su) {
@@ -821,9 +828,10 @@
           const mlvl = (inTz ? tzLevel(base, s.clvl, d) : base) + CONFIG.uniqueOffset;   // super uniques are unique-rank monsters (+3, may exceed the zone max); act bosses get no bonus
           let tcn = (inTz && su.dtc[d]) || su.tc[d];
           if (!tcn || !TC[tcn]) continue;
-          out.push({ key: 'su|' + su.id + '|' + d, mon: su.cls, name: su.n, rank: 'super', diff: d, area: lid,
-            areaName: A.name, act: A.act, mlvl, tc: tcn, boss: false, perRun: 1, tz: inTz });
-          suMinions(su, lid, inTz);
+          const row = { key: 'su|' + su.id + '|' + d, su: su.id, mon: su.cls, name: su.n, rank: 'super', diff: d, area: lid,
+            areaName: A.name, act: A.act, mlvl, tc: tcn, boss: false, perRun: 1, tz: inTz };
+          out.push(row);
+          row.minions = suMinions(su, lid, inTz);
         }
         // act bosses
         for (const id in D.boss_area) {
@@ -859,6 +867,25 @@
      *  TC ("Herald tier N (mlvl M)"). The Herald TC picked by upgradeTC is the highest group-41 Herald TC at or below mlvl + tier boost whatever the
      *  starting TC, so (mlvl, tier) alone fixes the drop table (verified at every clvl); the TC stays in the key so a rule change splits rows instead of
      *  merging wrong ones. Herald rows carry areas ([{id, name}]), acts (sorted) and the area / act fields 0; areaName says how many areas. */
+    /** The rows of a named run (CONFIG.runs) at difficulty d: each listed super unique and act boss once (regular kill, no quest row), and each super
+     *  unique's own minions as a row of their own (in sources() they are merged into the area's minion rows). list = sources() or areaSources() of ctx
+     *  (super unique and boss rows are never merged); with the terror zone on only terror-zone rows. [] for an unknown run. */
+    function runSources(ctx, runId, d, list) {
+      const R = CONFIG.runs[runId];
+      if (!R) return [];
+      list = list || sources(ctx);
+      const tz = !!ctx.s.tz, out = [];
+      for (const src of list) {
+        if (src.diff !== d || src.area !== R.area || src.quest || (tz && !src.tz)) continue;
+        if (src.rank === 'super' && R.su.indexOf(src.su) >= 0) {
+          out.push(src);
+          for (const mi of src.minions || []) out.push({ key: 'run|' + runId + '|' + src.su + '|' + mi.id + '|' + d, mon: mi.id, name: D.monsters[mi.id].n + ' (' + src.name + ' minions)',
+            rank: 'minion', diff: d, area: src.area, areaName: src.areaName, act: src.act, mlvl: mi.mlvl, tc: mi.tc, boss: false, perRun: mi.n, tz: src.tz });
+        } else if (src.rank === 'boss' && R.boss.indexOf(src.mon) >= 0) out.push(src);
+      }
+      return out;
+    }
+
     function areaSources(ctx) {
       const out = [], groups = new Map(), split = new Map();
       const st = ctx.s.tier, tiers = st >= 1 && st <= 5 ? [st] : [1, 2, 3, 4, 5];
@@ -2469,7 +2496,7 @@
 
     return {
       CONFIG, data: D, DIFFS, items, types, getCtx, playersN, adjNoDrop, dist, upgradeTC, areaSources, DUP_OF, areaRun, areaRolls, listShares, bossPacks,
-      mode, heraldsAvailable, sunderChance, sunderPaths, isSunder, adjQuality, heraldSpawnPct, quality, qualityTotals, sources, srcDist, chanceFor, dropsOf, baseQualityChance, affixLevel, minIlvlForAlvl, eligible, maxSockets, affixProb, rareProbFromSamples, cardOdds, ilvlCurve, minLevels, staffDist, staffBase,
+      mode, heraldsAvailable, sunderChance, sunderPaths, isSunder, adjQuality, heraldSpawnPct, quality, qualityTotals, sources, runSources, srcDist, chanceFor, dropsOf, baseQualityChance, affixLevel, minIlvlForAlvl, eligible, maxSockets, affixProb, rareProbFromSamples, cardOdds, ilvlCurve, minLevels, staffDist, staffBase,
       statList, describe, describeAt, sliderWhat, affixSearch, searchIndex, baseTypes, metaCache, uniqById, setById, uniqByCode, setByCode, prettyId, tzLevel,
       eligibleUniques, eligibleSets, condProb, trialsFor,
       builderTypes, builderBases, builderCatalog, builderStats, builderFamilies, familyTable, familyIdOf, allowedValues, snapValue, tierFor, perLevelDiv, perLevelAt, builderAffixTable, baseDropWeights, affixAppearance, planCombo, comboForBase, comboAnalysis, feasibleAny, fitIndex, fitsCombo, statRange, explainCombo, groupName,
