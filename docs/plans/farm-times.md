@@ -61,7 +61,8 @@ chance per hour = 1 - (1 - chance per run)^(60 / time per game)
 | Baal (WSK 2 -> 3 -> Throne, waves, Baal) | 5.00 | 0.25 | 0.20 | 0.85 | 1.20 | 0 |
 | Cow Level (+ Wirt's Leg) | 7.50 | 0.20 | 0.10 | 0.50 | 1.00 | 1.75 |
 
-Resulting minutes per game (incl. 0.5 overhead), for checking the implementation:
+Resulting minutes per game (incl. 0.5 overhead), for checking the implementation (the app's default overhead is 0.25 min = 15 s
+since 2026-10-28; the check table keeps 0.5):
 
 | Farm | A | B | C | D | E | F |
 |---|---|---|---|---|---|---|

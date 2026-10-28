@@ -644,7 +644,7 @@
           'Mephisto: + Bremm (5 council)': [2.3, 3.0, 3.2, 3.8, 3.7, 6.7], 'Mephisto: + full council (7 council)': [2.3, 3.0, 3.2, 3.8, 3.7, 6.7], 'Shenk + Eldritch': [1.8, 1.9, 2.1, 2.3, 2.3, 3.6],
           'Nihlathak': [2.3, 2.8, 3.0, 3.6, 3.5, 6.2], 'Ancient Tunnels': [3.6, 4.2, 3.5, 4.1, 4.0, 6.5], 'The Pit': [4.8, 5.4, 4.5, 5.1, 4.9, 8.1], 'Chaos: seal pop': [5.1, 5.3, 4.8, 5.5, 5.0, 8.4],
           'Chaos: full clear': [10.0, 10.4, 8.9, 9.7, 8.5, 13.7], 'Baal': [6.2, 7.2, 6.6, 7.4, 6.7, 11.1], 'Cow Level': [9.8, 10.5, 7.5, 8.3, 8.3, 13.8] };
-        const mk = (sc, ov) => ({ style: sc[0], teleport: sc[1], map: sc[2], sunder: !!sc[3], overhead: ov });
+        const mk = (sc, ov) => ({ style: sc[0], teleport: sc[1], map: sc[2], sunder: !!sc[3], overhead: ov == null ? 0.5 : ov });   // the plan's A-F table was computed with 0.5 min overhead
         const FM = { missing: [], worst: 0, noTime: E.CONFIG.farms.filter((f) => !f.time).length, order: [], sunder: [], overhead: null, none: E.farmMinutes({ name: 'x' }, {}) };
         for (const f of E.CONFIG.farms) {
           const ex = EXP[f.name]; if (!ex) { FM.missing.push(f.name); continue; }

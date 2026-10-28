@@ -158,7 +158,7 @@
       { name: 'Pindleskin', area: 121, src: 'run|pindle', time: { base: 0.75, travel: 0.5, nav: 0, density: 1.2, immunity: 1.15, extra: 0 } }, { name: 'Nihlathak', area: 124, src: 'boss|nihlathakboss', time: { base: 1.75, travel: 0.6, nav: 0.3, density: 1.25, immunity: 1.1, extra: 0 } },
       { name: 'Baal', area: 132, src: 'boss|baalcrab', time: { base: 5, travel: 0.25, nav: 0.2, density: 0.85, immunity: 1.2, extra: 0 } },
     ],
-    farmTime: { teleport: { fast: 1, slow: 1.35, none: 3 }, walkExtra: 2, overhead: 0.5 },   // travel-time factor per teleport kind; walking doubles a farm's extra; default per-game overhead (minutes)
+    farmTime: { teleport: { fast: 1, slow: 1.35, none: 3 }, walkExtra: 2, overhead: 0.25 },   // travel-time factor per teleport kind; walking doubles a farm's extra; default per-game overhead (minutes: 15 s)
     maxMlvl: 110,
     // --- per-kill drop cap ---
     // The game's drop routine (decompiled TreasureClassDropper, https://gist.github.com/SeanSullivan86/e912b40bb85f9822b9ef507d91534c88)

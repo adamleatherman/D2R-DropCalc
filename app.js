@@ -43,6 +43,20 @@
     };
   }
 
+  /** Ladder tooltip from the data's first/lastLadderSeason (uniques, set items, TCs) and CONFIG.currentSeason: what drops on ladder only right now,
+   *  and which ladder windows have ended (those items drop on both). Follows the game mode and a season bump without edits. */
+  function ladderTip() {
+    const cur = E.CONFIG.currentSeason, now = [], ended = [];
+    const add = (x, kind) => { if (!x.fl) return; const win = 'Season ' + x.fl + (x.ll && x.ll !== x.fl ? '-' + x.ll : '');
+      if (x.fl <= cur && !(x.ll && x.ll < cur)) now.push(kind + x.n + ' (' + win + ')'); else if (x.ll && x.ll < cur) ended.push(kind + x.n + ' (' + win + ')'); };
+    for (const u of E.data.uniques) if (u.sp) add(u, '');
+    for (const s of E.data.sets) if (s.sp) add(s, 'set: ');
+    for (const n in E.data.tc) { const t = E.data.tc[n]; if (t.fl) add({ n: n + ' (drop table)', fl: t.fl, ll: t.ll }, ''); }
+    return 'Ladder-only drops in the game tables (data ' + E.data.meta.gameVersion + ', current season ' + cur + '):\n' + (now.length ? now.map((x) => '  ' + x).join('\n') : '  none in this game mode') +
+      (ended.length ? '\nLadder windows that have ended (now drop on both):\n' + ended.map((x) => '  ' + x).join('\n') : '') +
+      '\nRunewords are not modelled, so their ladder rules are not covered here.';
+  }
+
   // ---------------- formatting ----------------
   /** css class of an item name in its in-game drop colour: uniques gold, set items green; runes, the Terror / Hate / Destruction keys, the four
    *  essences, Worldstone Shards and the Colossal Ancient statue pieces orange. t = a search index entry ({kind, code, ...}); anything else gets none. */
@@ -1295,6 +1309,7 @@
     $('s_mode').value = E.mode;
     $('dataInfo').textContent = 'data: D2R ' + E.data.meta.gameVersion + ' (' + (E.mode === 'lod' ? 'Lord of Destruction' : 'Reign of the Warlock') + '), built ' + E.data.meta.built;
     INDEX = E.searchIndex();
+    $('l_ladder').title = ladderTip();
     TYPEOPTS = typeOptions();
     const bossAt = new Set(Object.values(E.data.boss_area).concat(Object.values(E.data.su_area)).map(String));   // The Worldstone Chamber, Colossal Summit: no spawn list, only a boss
     const areas = Object.keys(E.data.levels).filter((id) => !E.DUP_OF[id] && (E.data.levels[id].mon.length || E.data.levels[id].nmon.length || E.data.levels[id].pre || bossAt.has(id)))
@@ -1456,18 +1471,40 @@
   }
 
   function aboutHtml() {
-    const C = E.CONFIG;
-    return '<p><b>How to read the tables.</b> Probabilities are per kill unless the column says run, and are shown as odds ("1 in N")."P(target)" for a base item equals P(base); for a unique or set item it is the chance of that exact item. ' +
-      'Rank tags: champion (+' + C.champOffset + ' mlvl), unique (+' + C.uniqueOffset + '), minion of a unique (+' + C.minionOffset + '), super = super unique, boss = act boss.</p>' +
-      '<p><b>Per-run numbers are an estimate of one full clear.</b> The game makes one spawn roll per 3x3 subtiles of every room (about 2.7 per tile; caves: the average number of map cells their generator makes, entrances and exits included, at the real cell size) and spawns a pack with chance MonDen/100000. ' +
-      'Not every pack places: each level gets a placement share from its real map layouts (walkable floor of the preset rooms, 20 tries per pack; 1 where the layout is not modelled), times a global factor of ' + C.run.placeFactor + ' (calibrated on a measured Cow Level count, not from the game code). Pack types follow how the game picks from the area monster list and their Rarity; ' +
-      'packs include party minions (e.g. the Fallen with a Fallen Shaman, counted as their own monster). Champion/unique packs follow MonUMin/MonUMax (' + C.run.champShare * 100 + '% champion packs of 2-4, else a unique with ' + C.run.uniqueMinions.join('-') + ' minions). ' +
-      'Treat the numbers as about +/-50%; they rank areas against each other better than they count them. Bosses and super uniques count as one kill per run. Monsters the map files place at fixed spots (Fallen camps, unique and champion packs in treasure rooms, the Act 5 siege) are added where the level generator fixes which presets appear; they also use up unique slots, so such levels get fewer random champion/unique packs. Super uniques bring their minions (Council members, Baal waves, ...) as minion rows of the same area. Tal Rasha Tomb = the true tomb with the orifice (the staff tomb, about 3x a plain tomb), shown once for all seven tombs. Matron Den, Forgotten Sands, Furnace of Pain and Uber Tristram only open in Hell and are not listed for Normal and Nightmare.</p>' +
-      '<p><b>Config in use</b> (Engine.CONFIG in engine.js): <code>' + esc(JSON.stringify(C)) + '</code></p>' +
-      '<p><b>Poison in the item builder.</b> The numbers are what the item tooltip shows: total poison damage (the stored per-frame value x frames / 256) over frames / 25 seconds. Poison from several sources adds the damage per frame, but the durations are summed and divided by the number of poison sources at hit time (LoD 1.10-1.14 decompilation, <code>dwPoisLen /= nPoisonCount</code>), while the tooltip shows the summed duration. A Pestilent + of Anthrax charm reads 451 over 12 seconds but, as the only poison source, deals about 225 over 6 seconds. ' +
-      'The slider of a multi-number stat names what it filters on: maximum damage, chance to cast, or skill level (charged skills: the level reached at item level 99).</p>' +
-      '<p>See README.md for formulas, research sources and limitations.</p>';
+    const C = E.CONFIG, R = C.run, h = (t) => '<h2>' + t + '</h2>', li = (xs) => '<ul>' + xs.map((x) => '<li>' + x + '</li>').join('') + '</ul>';
+    const M = (x) => '<span class="math">' + x + '</span>';   // a formula, set in the math font (x is trusted markup: <i> variables, <sup> powers)
+    const V = (x) => '<span class="math v"><i>' + x + '</i></span>';   // one variable in running text
+    return h('What this is') +
+      '<p>A drop calculator for Diablo II: Resurrected, built straight from the game\'s own data tables (game data ' + esc(E.data.meta.gameVersion) + ', ' + (E.mode === 'lod' ? 'Lord of Destruction' : 'Reign of the Warlock') + ' mode). ' +
+      'It answers two questions: <i>where does an item drop, and how often</i> (tab 1), and <i>what does a farm drop</i> (tab 2). The item builder (tab 3) works out the odds of a base rolling the affixes you want.</p>' +
+      h('Reading the numbers') + li([
+        'All chances are shown as odds: "1 in 250" means once every 250 tries on average. Smaller numbers are better.',
+        '<b>Per kill</b>: the chance one kill of that monster drops the item.',
+        '<b>Per run</b>: the chance of at least one drop in one run (a whole area cleared, or a farm\'s fixed set of kills): ' + M('<i>P</i> = 1 &minus; (1 &minus; <i>p</i>)<sup><i>k</i></sup>') + ', with ' + V('p') + ' the chance per kill and ' + V('k') + ' the kills per run (several kinds of monster multiply their terms).',
+        '<b>Runs for 50%</b>: how many runs until you have even odds of having found it: ' + M('<i>n</i> = &lceil;ln 0.5 / ln(1 &minus; <i>P</i>)&rceil;') + '. Hover the cell for other percentages.',
+        '<b>Per hour</b> (tab 2): ' + M('1 &minus; (1 &minus; <i>P</i>)<sup>60 / <i>m</i></sup>') + ', with ' + V('m') + ' the minutes per game from the Farming settings in Your game, or your own value.',
+        '<b>mlvl</b> is the monster level, which is also the item level of what it drops. Champions add ' + C.champOffset + ', uniques ' + C.uniqueOffset + ', minions of uniques ' + C.minionOffset + '.']) +
+      h('How much to trust them') + li([
+        '<b>Per kill: high.</b> These come straight from the drop tables and are checked against an independent calculation and published figures.',
+        '<b>Bosses and fixed farms: high.</b> Bosses, super uniques and their minions are counted exactly (seal pop, council, Pindleskin, ...).',
+        '<b>Whole-area clears: rough, about +/-50%.</b> Kills per run is an estimate. It ranks areas against each other better than it counts them. Caves are the most reliable (their size comes from re-running the game\'s cave generator, see below); special layouts (Chaos Sanctuary, Arcane Sanctuary) the least.',
+        '<b>Minutes per game: rough guesses</b> from community experience, not measurements. Type your own times next to the farm.']) +
+      h('Good to know') + li([
+        '<b>Tal Rasha\'s Tomb</b> means the true tomb (the one with the orifice), which is about three times the size of a plain tomb.',
+        '<b>Heralds</b> (terror zones) show per-kill odds only: how often a herald appears is not modelled.',
+        '<b>Ladder</b>: hover the Ladder setting to see which items drop on ladder only right now.',
+        'Matron\'s Den, Forgotten Sands, Furnace of Pain and Uber Tristram exist in Hell only.',
+        '<b>Poison in the item builder</b>: the numbers match the item\'s tooltip, but with only one poison source the real effect is about half the damage over half the time (the game divides the duration by the number of poison sources).']) +
+      '<details class="tech"><summary>How kills per run are estimated (technical)</summary>' +
+      '<p>The game makes one spawn roll for every ' + M('3 &times; 3') + ' subtiles of each room (about 2.7 per tile) and spawns a pack with chance ' + M('MonDen / 100&#8239;000') + '. Walkable floor comes from the real map files (20 placement tries per pack).</p>' +
+      '<p><b>The cave generator.</b> Caves, dungeons and tombs are not drawn by hand: every game builds them at random from pre-made room pieces, so their size changes from game to game. ' +
+      'This calculator re-runs that building step the way the game does it (rebuilt from the community decompilation of the game code), 2,000 times per level, and uses the average number of rooms that can hold monsters as the cave\'s size.</p><p>' +
+      'On top of that, one global factor of ' + R.placeFactor + ' is applied, fitted to a measured Cow Level count (it is not from the game code). Packs are picked from the area\'s monster list by rarity and include party minions. ' +
+      'Champion and unique packs follow MonUMin / MonUMax: ' + R.champShare * 100 + '% are champion packs of 2-4, the rest a unique with ' + R.uniqueMinions.join('-') + ' minions. Monsters placed at fixed spots by the map files are added and use up unique slots.</p></details>' +
+      '<details class="tech"><summary>Settings in use (Engine.CONFIG in engine.js)</summary><pre>' + esc(JSON.stringify(C, null, 2)) + '</pre></details>' +
+      h('More') + '<p>Formulas, sources and limitations are in README.md. The game data belongs to Blizzard Entertainment; this is a fan tool.</p>';
   }
+
 
   init().catch((e) => { document.body.insertAdjacentHTML('afterbegin', '<pre style="color:var(--err);padding:10px">' + esc(e.stack || e) + '</pre>'); });
 })();
