@@ -1476,7 +1476,7 @@
   const CH = { w: 640, h: 270, l: 84, r: 24, t: 16, b: 42 };
   let chCache = null;   // { key, mfs, ps, P }
   const chOpen = () => $('charts1').open;
-  const chNum = (n) => n < 1e3 ? String(Math.round(n * 10) / 10) : n < 1e4 ? Math.round(n).toLocaleString('en-US') : n < 1e6 ? +(n / 1e3).toPrecision(3) + 'k' : +(n / 1e6).toPrecision(3) + 'M';   // 1 in N, short
+  const chNum = (n) => n < 1e3 ? String(n < 10 ? Math.round(n * 100) / 100 : Math.round(n)) : n < 1e4 ? Math.round(n).toLocaleString('en-US') : n < 1e6 ? +(n / 1e3).toPrecision(3) + 'k' : +(n / 1e6).toPrecision(3) + 'M';   // 1 in N, short
   const chOdds = (p) => p >= 1 ? 'always' : '1 in ' + chNum(1 / p);
   /** per-kill chance of the target at a source and MF (white-base filter applied like the table) */
   const chKill = (ctx, src, mf, bq) => { const c = E.chanceFor(ctx, src, target1, mf); return bq ? E.baseQualityChance(c, bq) : c.target; };
@@ -1501,8 +1501,8 @@
     });
     hit.addEventListener('mouseleave', () => { xh.setAttribute('visibility', 'hidden'); tip.hidden = true; });
   }
-  const chFrame = (title, aria, g, x0, x1, y0, y1) => '<div class="mfchart"><div class="ct">' + title + '</div><svg viewBox="0 0 ' + CH.w + ' ' + CH.h + '" role="img" aria-label="' + aria + '">' + g +
-    '<line class="xh" y1="' + y1 + '" y2="' + y0 + '" x1="0" x2="0" visibility="hidden"/><rect class="hit" x="' + x0 + '" y="' + y1 + '" width="' + (x1 - x0) + '" height="' + (y0 - y1) + '"/></svg><div class="mftip" hidden></div></div>';
+  const chFrame = (title, aria, g, x0, x1, y0, y1, note) => '<div class="mfchart"><div class="ct">' + title + '</div><svg viewBox="0 0 ' + CH.w + ' ' + CH.h + '" role="img" aria-label="' + aria + '">' + g +
+    '<line class="xh" y1="' + y1 + '" y2="' + y0 + '" x1="0" x2="0" visibility="hidden"/><rect class="hit" x="' + x0 + '" y="' + y1 + '" width="' + (x1 - x0) + '" height="' + (y0 - y1) + '"/></svg><div class="mftip" hidden></div>' + (note ? '<div class="note">' + note + '</div>' : '') + '</div>';
   const chDot = (x, y) => '<circle class="dot" cx="' + x.toFixed(1) + '" cy="' + y.toFixed(1) + '" r="4.5"/>';
   /** chart 1: chance per run against MF (x linear 0-1000, y log in odds so equal steps are equal improvements) */
   function mfRunChart(d, mfNow, pNow) {
@@ -1511,7 +1511,7 @@
     let lo = Math.log10(Math.min(...pos)), hi = Math.log10(Math.max(...pos));
     const flat = hi - lo < 1e-9; if (flat) { lo -= .3; hi += .3; } else { lo -= .12; hi += .12; }
     const ys = (p) => y0 - (Math.log10(Math.max(p, 1e-300)) - lo) / (hi - lo) * (y0 - y1);
-    let tk = []; for (let k = Math.floor(lo) - 1; k <= Math.ceil(hi); k++) for (const m of [1, 1.5, 2, 3, 5, 7]) tk.push(1 / (m * Math.pow(10, k)));   // p = 1 / (m x 10^k)
+    let tk = []; for (let k = Math.floor(-hi) - 1; k <= Math.ceil(-lo) + 1; k++) for (const m of [1, 1.5, 2, 3, 5, 7]) tk.push(1 / (m * Math.pow(10, k)));   // p = 1 / (m x 10^k)
     tk = tk.filter((p) => Math.log10(p) >= lo && Math.log10(p) <= hi && p < 1);
     if (tk.length > 5) tk = tk.filter((p, i) => i % Math.ceil(tk.length / 5) === 0);
     if (flat || tk.length < 2) tk = flat ? [d.ps[0]] : [Math.min(...pos), Math.max(...pos)];
@@ -1523,7 +1523,7 @@
     const m = Math.max(0, Math.min(1000, mfNow)), pm = pNow;
     g += '<line class="ref" x1="' + xs(m) + '" x2="' + xs(m) + '" y1="' + ys(pm).toFixed(1) + '" y2="' + y0 + '"/>' + chDot(xs(m), ys(pm)) +
       '<text class="lab" x="' + (xs(m) + (m > 800 ? -9 : 9)).toFixed(1) + '" y="' + (ys(pm) + (flat ? -10 : 18)).toFixed(1) + '" text-anchor="' + (m > 800 ? 'end' : 'start') + '">you: ' + mfNow + '% MF, ' + chOdds(pm) + '</text>';
-    return chFrame('Does magic find help this item?', 'Chance per run of this item against your magic find, at the best source per run', g, x0, x1, y0, y1) + (flat ? '<div class="note">Magic find does not change this item\'s chance.</div>' : '');
+    return chFrame('Does magic find help this item?', 'Chance per run of this item against your magic find, at the best source per run', g, x0, x1, y0, y1, flat ? 'Magic find does not change this item\'s chance.' : '');
   }
   /** chart 2: cumulative chance of having found it after n runs, 0 to the runs for 99% */
   function runsChart(P) {
@@ -1611,6 +1611,7 @@
       'It answers two questions: <i>where does an item drop, and how often</i> (tab 1), and <i>what does a farm drop</i> (tab 2). The item builder (tab 3) works out the odds of a base rolling the affixes you want.</p>' +
       h('Reading the numbers') + li([
         'All chances are shown as odds: "1 in 250" means once every 250 tries on average. Smaller numbers are better.',
+        'Tab 1 has a "Charts" section: how the chance per run changes with your magic find, and how many runs it takes to find the item.',
         '<b>Per kill</b>: the chance one kill of that monster drops the item.',
         '<b>Per run</b>: the chance of at least one drop in one run (a whole area cleared, or a farm\'s fixed set of kills): ' + M('<i>P</i> = 1 &minus; (1 &minus; <i>p</i>)<sup><i>k</i></sup>') + ', with ' + V('p') + ' the chance per kill and ' + V('k') + ' the kills per run. With several kinds of monster in a run, each kind keeps its own chance and kills: ' + M('<i>P</i> = 1 &minus; (1 &minus; <i>p</i><sub>1</sub>)<sup><i>k</i><sub>1</sub></sup> &times; (1 &minus; <i>p</i><sub>2</sub>)<sup><i>k</i><sub>2</sub></sup> &times; &hellip;') + '.',
         '<b>Runs for 50%</b>: how many runs until you have even odds of having found it: ' + M('<i>n</i> = &lceil;ln 0.5 / ln(1 &minus; <i>P</i>)&rceil;') + '. Hover the cell for other percentages.',
