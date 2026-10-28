@@ -44,6 +44,11 @@
   }
 
   // ---------------- formatting ----------------
+  /** css class of an item name in its in-game drop colour: runes, the Terror / Hate / Destruction keys, Worldstone Shards and the Colossal Ancient
+   *  statue pieces are orange. t = a search index entry ({kind, code, ...}); anything else gets none. */
+  const dropCls = (t) => t && t.kind === 'base' && /^(r\d\d|pk[123]|xa[1-5]|ua[1-5])$/.test(t.code) ? 'drop-orange' : '';
+  /** text (escaped) in the drop colour of item t */
+  const dropName = (t, text) => dropCls(t) ? '<span class="' + dropCls(t) + '">' + esc(text) + '</span>' : esc(text);
   /** Every probability is shown as odds: "1 in 4,334,276", "1 in 1.50" below 10, "always" at p >= 1, "-" for none. */
   function odds(p) {
     if (!(p > 0)) return '-';
@@ -107,7 +112,7 @@
       const words = q.split(/\s+/);
       items = source().filter((x) => { const t = (x.search || x.label).toLowerCase(); return words.every((w) => t.indexOf(w) >= 0); })
         .sort((a, b) => (a.label.toLowerCase().startsWith(q) ? 0 : 1) - (b.label.toLowerCase().startsWith(q) ? 0 : 1)).slice(0, 40);
-      ul.innerHTML = items.map((x, i) => '<li data-i="' + i + '">' + esc(x.label) + '</li>').join('');
+      ul.innerHTML = items.map((x, i) => '<li data-i="' + i + '">' + dropName(x, x.label) + '</li>').join('');
       ul.hidden = !items.length; hi = -1;
     }
     function pick(i) { const x = items[i]; if (!x) return; input.value = x.label; ul.hidden = true; onPick(x); }
@@ -295,7 +300,7 @@
     // headline: best per kill (monster rows), best per run (area rows in area mode, else monster rows)
     const best = (rs, g) => rs.reduce((a, x) => !a || g(x) > g(a) ? x : a, null);
     const bk = best(mon, (x) => x.c.target), br = best(areaMode() ? rows : mon.filter((x) => !x.src.herald && !x.src.quest), runP);   // a quest kill is not repeatable
-    let hl = '<b>' + esc(target1.label) + '</b>';
+    let hl = '<b>' + dropName(target1, target1.label) + '</b>';
     if (bk) hl += ' &middot; best per kill: ' + esc(srcWhere(bk.src)) + ', <b>' + odds(bk.c.target) + '</b>';
     if (br && runP(br) > 0) hl += ' &middot; best per run: ' + esc(areaMode() ? br.src.areaName + ' (' + DIFF[br.src.diff] + ')' : srcWhere(br.src)) + ', <b>' + runsTxt(runP(br)) + '</b>, ~' + countFmt(E.trialsFor(runP(br), 0.5)) + ' runs for 50% / ~' + countFmt(E.trialsFor(runP(br), 0.9)) + ' for 90%';
     $('hl1').innerHTML = hl;
@@ -329,7 +334,7 @@
   const base3 = (r) => r.t.kind === 'base' ? '' : E.items[r.t.code].n;
   const PCT3 = (r) => r.runP;
   const cols3 = [
-    { k: 'name', label: 'Item', l: 1, get: (r) => r.t.name, html: (r) => esc(r.t.name) + ' <span class="tag ' + r.kind + '">' + (r.kind === 'charm' && /^(jew|cjw)$/.test(r.t.code) ? 'jewel' : KIND3[r.kind]) + '</span>' },   // jewels sit under the "Charms and jewels" filter but keep their own tag
+    { k: 'name', label: 'Item', l: 1, get: (r) => r.t.name, html: (r) => dropName(r.t, r.t.name) + ' <span class="tag ' + r.kind + '">' + (r.kind === 'charm' && /^(jew|cjw)$/.test(r.t.code) ? 'jewel' : KIND3[r.kind]) + '</span>' },   // jewels sit under the "Charms and jewels" filter but keep their own tag
     { k: 'base', label: 'Base', l: 1, get: base3, html: (r) => esc(base3(r)) },
     { k: 'pk', get label() { return c3.one ? 'Chance per kill' : 'Chance per kill (average)'; }, note: 'Chance that one kill drops the item (shown as odds). A whole area clear: the average over all its kills.', get: (r) => r.pk, fmt: (r) => odds(r.pk) },
     { k: 'kills', label: 'kills/run', show: () => c3.one, get: () => c3.kills, fmt: () => c3.quest ? 'first kill' : c3.kills < 10 ? c3.kills.toFixed(2) : c3.kills.toFixed(0) },

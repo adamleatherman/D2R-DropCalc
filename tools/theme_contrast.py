@@ -18,7 +18,7 @@ def cr(a, b):
 
 BG = ['bg', 'panel', 'panel2', 'hover']
 tags = ['tag-champion', 'tag-unique', 'tag-minion', 'tag-super', 'tag-boss', 'tag-herald'] + ['side-' + s for s in 'prefix suffix auto staff socket ethereal superior'.split()]
-checks = [('text', BG + ['primary-bg']), ('dim', BG), ('accent', BG + ['primary-bg']), ('good', BG), ('bad', BG), ('tz', BG), ('err', BG)] + [(t, ['panel2', 'hover']) for t in tags] + [('on-accent', ['accent'])]
+checks = [('text', BG + ['primary-bg']), ('dim', BG), ('accent', BG + ['primary-bg']), ('good', BG), ('bad', BG), ('tz', BG), ('drop-orange', BG), ('err', BG)] + [(t, ['panel2', 'hover']) for t in tags] + [('on-accent', ['accent'])]
 bad = 0
 for name, start in (('dark', ':root {'), ('light', ':root[data-theme="light"]')):
     p = pal(start)
