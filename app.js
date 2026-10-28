@@ -91,8 +91,8 @@
       });
       st.shownRows = rows;
       const shown = rows.slice(0, st.limit);
-      let h = '<thead><tr>' + vcols.map((c) => '<th class="' + (c.l ? 'l' : '') + (c.hcls ? ' ' + c.hcls : '') + '" data-k="' + c.k + '"' + (c.note ? ' title="' + esc(c.note) + '"' : '') + '>' + esc(c.label) + (c.k === st.key ? (st.dir < 0 ? ' \u25be' : ' \u25b4') : '') + '</th>').join('') + '</tr></thead><tbody>';
-      for (const r of shown) h += '<tr' + (st.rowCls ? ' class="' + st.rowCls(r) + '"' : '') + '>' + vcols.map((c) => '<td class="' + (c.l ? 'l' : '') + '"' + (c.rtip ? ' title="' + esc(c.rtip(r)) + '"' : '') + '>' + (c.html ? c.html(r) : esc(c.fmt ? c.fmt(r) : c.get(r))) + '</td>').join('') + '</tr>';
+      let h = '<thead><tr>' + vcols.map((c) => '<th class="' + (c.l ? 'l' : '') + (c.hcls ? ' ' + c.hcls : '') + (c.cls ? ' ' + c.cls : '') + '" data-k="' + c.k + '"' + (c.note ? ' title="' + esc(c.note) + '"' : '') + '>' + esc(c.label) + (c.k === st.key ? (st.dir < 0 ? ' \u25be' : ' \u25b4') : '') + '</th>').join('') + '</tr></thead><tbody>';
+      for (const r of shown) h += '<tr' + (st.rowCls ? ' class="' + st.rowCls(r) + '"' : '') + '>' + vcols.map((c) => '<td class="' + (c.l ? 'l' : '') + (c.cls ? ' ' + c.cls : '') + '"' + (c.rtip ? ' title="' + esc(c.rtip(r)) + '"' : '') + '>' + (c.html ? c.html(r) : esc(c.fmt ? c.fmt(r) : c.get(r))) + '</td>').join('') + '</tr>';
       h += '</tbody>';
       el.innerHTML = h;
       return { total: rows.length, shown: shown.length };
@@ -119,7 +119,8 @@
     { k: 'area', label: 'Area', l: 1, get: (r) => r.src.areaName, html: (r) => (r.src.areas ? '<span title="' + esc(r.src.areas.map((a) => a.name).join(', ')) + '">' + esc(r.src.areaName) + '</span>' : esc(r.src.areaName)) + (r.src.tz ? ' <span class="tz">TZ</span>' : '') },
     { k: 'diff', label: 'Diff', l: 1, get: (r) => r.src.diff, fmt: (r) => DIFF[r.src.diff].slice(0, 2) + (r.src.diff == 1 ? 'm' : '') },
     { k: 'act', label: 'Act', get: (r) => r.src.acts ? r.src.acts[0] : r.src.act, fmt: (r) => r.src.acts ? r.src.acts.join(', ') : r.src.act },
-    { k: 'mlvl', label: 'mlvl', get: (r) => r.src.mlvl },
+    { k: 'mlvl', label: 'mlvl', note: 'Monster level = the item level of its drops (champions and uniques include their bonus; items cap at 99). An area row: its lowest to highest.',
+      get: (r) => r.src.mlvl, fmt: (r) => r.src.mlvlLo !== undefined && r.src.mlvlLo !== r.src.mlvl ? r.src.mlvlLo + '-' + r.src.mlvl : r.src.mlvl },
   ];
 
   // ---------------- autocomplete ----------------
@@ -171,11 +172,11 @@
   const runsTxtOf = (src) => src.herald ? 'n/a' : src.quest ? 'first kill' : src.perRun < 10 ? src.perRun.toFixed(2) : src.perRun.toFixed(0);
   const srcLine = (p) => srcCols[0].html(p) + ' <span class="d">' + (p.src.herald ? 'n/a' : odds(runP(p)) + (p.src.quest ? ' on the quest kill' : ' per run')) + '</span>';
   const cols1 = [
-    { k: 'name', get label() { return areaMode() ? 'Sources' : 'Monster'; }, l: 1, get: (r) => r.src.name,
+    { k: 'name', get label() { return areaMode() ? 'Sources' : 'Monster'; }, l: 1, cls: 'c-mon', get: (r) => r.src.name,   // fixed width: a long minion list wraps
       html: (r) => r.parts ? '<details class="mem"><summary>' + r.parts.length + ' source' + (r.parts.length > 1 ? 's' : '') + '</summary>' + r.parts.map((p) => '<div>' + srcLine(p) + '</div>').join('') + '</details>' : srcCols[0].html(r),
       rtip: (r) => r.parts ? r.parts.map((p) => p.src.name + ': ' + odds(runP(p)) + ' per run').join('\n') : '' },
-    srcCols[1], srcCols[2],
-    Object.assign({}, srcCols[3], { show: showQB }), Object.assign({}, srcCols[4], { show: showQB }),
+    srcCols[1], srcCols[2], srcCols[4],
+    Object.assign({}, srcCols[3], { show: showQB }),
     { k: 'sTable', show: isSun, label: 'Sunder: table path', note: 'Data-driven: the Sunder Charms TC. RotW: only inside the Herald Item TCs (herald tier gates the extra item picks). LoD: inside the Hell desecrated champ/unique/super/boss TCs. Incl. player-count NoDrop.', get: (r) => r.sp ? r.sp.table : 0, fmt: (r) => odds(r.sp.table) },
     { k: 'sMf', show: isSun, label: 'Sunder: MF path', note: 'Data-driven: the PreCrafted Sunders are spawnable unique grand charms (rarity 1, lvl 75, DropConditionCalc Hell only), so a unique cm3 roll can pick one.', get: (r) => r.sp ? r.sp.mf : 0, fmt: (r) => odds(r.sp.mf) },
     { k: 'sTotal', show: isSun, label: 'Sunder: total', note: 'Combined chance of both paths.', get: (r) => r.sp ? r.sp.total : 0, fmt: (r) => odds(r.sp.total) },
@@ -230,7 +231,7 @@
       const c = {}; for (const key in parts[0].c) c[key] = wavg(parts, kills, (r) => r.c[key]);
       const sp = parts[0].sp ? { table: wavg(parts, kills, (r) => r.sp.table), mf: wavg(parts, kills, (r) => r.sp.mf), total: wavg(parts, kills, (r) => r.sp.total) } : null;
       parts.sort((x, y) => runP(y) - runP(x));
-      return { src: { name: s0.areaName, areaName: s0.areaName, diff: s0.diff, act: s0.act, tz: s0.tz, rank: 'regular', mlvl: Math.max(...parts.map((r) => r.src.mlvl)), perRun: kills }, c, sp, runP: p, parts };
+      return { src: { name: s0.areaName, areaName: s0.areaName, diff: s0.diff, act: s0.act, tz: s0.tz, rank: 'regular', mlvl: Math.max(...parts.map((r) => r.src.mlvl)), mlvlLo: Math.min(...parts.map((r) => r.src.mlvl)), perRun: kills }, c, sp, runP: p, parts };
     });
   }
   const actsOf = (src) => src.acts || [src.act];
