@@ -1,6 +1,9 @@
 # Plan: stat lines in the item tooltip
 
-Status: not started (written 2026-10-28). Needs a machine with the extracted D2R tables (`excel/`) to run `build.py`.
+Status: done (2026-10-29). Beyond the plan: min / max damage halves are merged into one "Adds" line, description groups (all
+attributes / all resistances) are merged, lines sorted by descpriority, invisible and unknown property codes left out (the build lists the
+unknown ones on spawnable items: RotW's magdam-rand, roguesbow-affix1, skilltab-war), random class skills (Hellfire Torch) shown as
+"+3 to [random class] Skill Levels", charges shown full. Written 2026-10-28.
 
 ## Goal
 

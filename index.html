@@ -80,8 +80,9 @@
   .mftip { position:absolute; pointer-events:none; background:var(--panel); border:1px solid var(--line); border-radius:4px; padding:5px 8px; font-size:12px; color:var(--text); box-shadow:0 2px 8px var(--bevel-lo); white-space:nowrap; }
   #about pre { max-height:320px; overflow:auto; background:var(--panel2); border:1px solid var(--line); border-radius:4px; padding:8px; font-size:12px; }
   /* item tooltip, dark in both themes like the game's */
-  .itip { position:fixed; z-index:50; pointer-events:none; min-width:170px; max-width:340px; padding:7px 12px; text-align:center; font:13px/1.45 "Segoe UI", system-ui, sans-serif; color:#e4e1d8; background:rgba(10,10,12,.95); border:1px solid #5a4a2a; border-radius:2px; box-shadow:0 4px 14px rgba(0,0,0,.5); --drop-orange:#ffa800; --drop-unique:#c7b377; --drop-set:#00ff00; }
+  .itip { position:fixed; z-index:50; pointer-events:none; min-width:170px; max-width:340px; padding:7px 12px; text-align:center; font:13px/1.45 "Segoe UI", system-ui, sans-serif; color:#e4e1d8; background:rgba(10,10,12,.95); border:1px solid #5a4a2a; border-radius:2px; box-shadow:0 4px 14px rgba(0,0,0,.5); --drop-orange:#ffa800; --drop-unique:#c7b377; --drop-set:#00ff00; --tip-stat:#8080ff; --tip-full:#c7b377; }
   .itip div:first-child { font-weight:600; } .itip .tip-dim { color:#9a968a; font-size:12px; } .itip .tip-gray { color:#a8a8a8; }
+  .itip .tip-stat { color:var(--tip-stat); } .itip .tip-set { color:var(--drop-set); } .itip .tip-full { color:var(--tip-full); } .itip .tip-small { font-size:12px; } .itip .tip-gap { margin-top:4px; }
   [hidden] { display:none !important; }
   .il { display:flex; gap:6px; align-items:center; } .il input[type=range] { width:110px; padding:0; }
   .b2grid { display:grid; grid-template-columns:minmax(0,1fr) 340px; gap:10px; align-items:start; }

@@ -532,10 +532,11 @@ def build(mode):
         tag = el + ", " + trig
         u["id"] = u["id"] + " (" + tag + ")"
         u["n"] = u["n"] + " (" + tag + ")"
-    setitems = []
+    setitems, srows = [], []
     for r in rd("setitems"):
         if not r.get("index") or not r.get("item"):
             continue
+        srows.append(r)
         setitems.append({
             "id": r["index"],
             "n": name_of("item-names", r["index"]),
@@ -737,20 +738,99 @@ def build(mode):
         assert len(slots) == label.count("#"), (c, label)
         return mod + [slots]
 
-    def parse_affix(r):
+    def parse_props(r, cols):
+        """Mods of a table row; cols = [(code, param, min, max) column names] in table order"""
         mods = []
-        for i in (1, 2, 3):
-            c = r.get("mod%dcode" % i)
+        for cc, pc, nc, xc in cols:
+            c = r.get(cc)
             if not c:
                 continue
-            par = r.get("mod%dparam" % i, "")
-            mn = num(r.get("mod%dmin" % i), 0)
-            mx = num(r.get("mod%dmax" % i), mn)
+            par = r.get(pc, "")
+            mn = num(r.get(nc), 0)
+            mx = num(r.get(xc), mn)
             pr = props.get(c)
             if pr and pr["st"] and num(ISC.get(pr["st"][0][1], {}).get("descfunc")) in (5, 10):   # descfunc 5/10 show value*100/128 (hit causes monster to flee: 32 -> 25%)
                 mn, mx = round(mn * 100 / 128), round(mx * 100 / 128)
             mods.append(multi_mod(c, par, mn, mx, label_for(c, par)))
         return mods
+
+    def parse_affix(r):
+        return parse_props(r, [("mod%dcode" % i, "mod%dparam" % i, "mod%dmin" % i, "mod%dmax" % i) for i in (1, 2, 3)])
+
+    # Unique / set item stat lines (the item tooltip): the row's properties, then what the game does when it shows them (D2Common ITEMS stat list):
+    # separate min / max damage halves become one "Adds #-# <element> damage" line, single stats that fill a whole description group with one
+    # value become its group line (+2 to All Attributes, All Resistances +#), and the lines are sorted by itemstatcost descpriority (highest first).
+    # Invisible properties (state: a visual effect; bloody / fade; dur, part of the durability line) are left out, and so are codes properties.txt does not have (commented-out
+    # '*hp', or codes the game cannot resolve): they do nothing in game; build reports the ones on spawnable items (UNKNOWN_PROPS).
+    HALVES = {"fire-min": ("fire-max", "dmg-fire", None), "ltng-min": ("ltng-max", "dmg-ltng", None), "cold-min": ("cold-max", "dmg-cold", "cold-len"),
+              "pois-min": ("pois-max", "dmg-pois", "pois-len"), "mag-min": ("mag-max", "dmg-mag", None)}
+    HIDDEN = {"state", "bloody", "fade", "dur"}   # dur: raises the item's durability (its "Durability: x of y" line), not a stat line
+    UNKNOWN_PROPS = set()
+    DGRP = {}
+    for s_, d_ in ISC.items():
+        if d_.get("dgrp"):
+            DGRP.setdefault(d_["dgrp"], set()).add(s_)
+
+    def stat_of(code):
+        p = props.get(code)
+        return p["st"][0][1] if p and len(p["st"]) == 1 else None
+
+    def prio(mod):
+        p = props.get(mod[0])
+        st = [s for _, s in p["st"]] if p else []
+        if mod[0] == "dmg%" or (p and p["f"] == 7 and not st):
+            st = ["item_maxdamage_percent"]
+        if mod[0].startswith("dgrp:"):
+            st = sorted(DGRP[mod[0][5:]])
+        return max([num(ISC.get(s, {}).get("descpriority"), 0) for s in st] or [0])
+
+    def item_mods(mods):
+        out, by = [], {m[0]: m for m in mods}
+        used = set()
+        for m in mods:
+            c = m[0]
+            if c in used or c in HIDDEN:
+                continue
+            if c not in props:
+                UNKNOWN_PROPS.add(c)
+                continue
+            if props.get(c, {}).get("f") == 36:   # random class skills: min / max are the class id range, the level is the property's val1 (Hellfire Torch)
+                v = num(props[c]["val1"])
+                out.append([c, "", v, v, "+# to [random class] Skill Levels"])
+                continue
+            if c in HALVES and HALVES[c][0] in by:   # min + max damage halves -> one "Adds #-# ..." line
+                hi = by[HALVES[c][0]]
+                used.update((c, hi[0]))
+                code, ln = HALVES[c][1], HALVES[c][2]
+                slots = [[m[2], m[3]], [hi[2], hi[3]]]
+                if ln:
+                    used.add(ln)
+                    fr = by[ln][2] if ln in by else 0
+                    if c == "pois-min":   # per frame in 1/256 -> total over the length, plus seconds
+                        if not fr:
+                            out.extend((m, hi))
+                            continue
+                        slots = [[s[0] * fr // 256, s[1] * fr // 256] for s in slots] + [[fr // 25, fr // 25]]
+                lab = label_for(code, "0")
+                if lab.count("#") != len(slots):
+                    out.extend((m, hi))
+                    continue
+                out.append([code, "", slots[1][0], slots[1][1], lab, slots])
+                continue
+            out.append(m)
+        # description groups: every stat of a group present as a single-stat line with one fixed value -> the group line
+        for g, stats in DGRP.items():
+            ms_ = [m for m in out if stat_of(m[0]) in stats and len(m) == 5]
+            if {stat_of(m[0]) for m in ms_} != stats or len(ms_) != len(stats) or len({(m[2], m[3]) for m in ms_}) != 1:
+                continue
+            d = ISC[sorted(stats)[0]]
+            if not ms(d.get("dgrpstrpos")):
+                continue
+            lab = re.sub(r"\s+", " ", tpl(ms(d["dgrpstrpos"])) + (" " + ms(d["dgrpstr2"]) if ms(d.get("dgrpstr2")) else "")).strip()
+            at = out.index(ms_[0])
+            out = [m for m in out if m not in ms_]
+            out.insert(at, ["dgrp:" + g, "", ms_[0][2], ms_[0][3], lab])
+        return sorted(out, key=lambda m: -prio(m))
 
 
     def affix_rows(fname, kind):
@@ -774,6 +854,36 @@ def build(mode):
             })
         return out
 
+
+    for u, r in zip(uniques, urows):
+        if not u["sp"]:   # not reported: never drops
+            seen_ = set(UNKNOWN_PROPS)
+            u["mods"] = item_mods(parse_props(r, [("prop%d" % i, "par%d" % i, "min%d" % i, "max%d" % i) for i in range(1, 13)]))
+            UNKNOWN_PROPS.intersection_update(seen_)
+            continue
+        u["mods"] = item_mods(parse_props(r, [("prop%d" % i, "par%d" % i, "min%d" % i, "max%d" % i) for i in range(1, 13)]))
+    if UNKNOWN_PROPS:
+        print("  %s: unique properties not in properties.txt (left out of the tooltip): %s" % (mode, ", ".join(sorted(UNKNOWN_PROPS))))
+    for u, r in zip(setitems, srows):
+        u["mods"] = item_mods(parse_props(r, [("prop%d" % i, "par%d" % i, "min%d" % i, "max%d" % i) for i in range(1, 10)]))
+        # partial set bonuses shown on the item (green): aprop1a/b with 2 set items worn, aprop2a/b with 3, ... (setitems add func 2: by count)
+        sm = []
+        for k in range(1, 6):
+            for m in item_mods(parse_props(r, [("aprop%d%s" % (k, s), "apar%d%s" % (k, s), "amin%d%s" % (k, s), "amax%d%s" % (k, s)) for s in "ab"])):
+                sm.append([k + 1, m])
+        if sm:
+            u["smods"] = sm
+    # whole-set bonuses (sets.txt): partial PCode2a..5b (2-5 items worn), full FCode1..8
+    setbonus = {}
+    for r in rd("sets"):
+        if not r.get("index"):
+            continue
+        part = []
+        for k in range(2, 6):
+            for m in item_mods(parse_props(r, [("PCode%d%s" % (k, s), "PParam%d%s" % (k, s), "PMin%d%s" % (k, s), "PMax%d%s" % (k, s)) for s in "ab"])):
+                part.append([k, m])
+        full = item_mods(parse_props(r, [("FCode%d" % i, "FParam%d" % i, "FMin%d" % i, "FMax%d" % i) for i in range(1, 9)]))
+        setbonus[r["index"]] = {"p": part, "f": full}
 
     prefixes = affix_rows("magicprefix", "p")
     suffixes = affix_rows("magicsuffix", "s")
@@ -866,7 +976,7 @@ def build(mode):
     return {
         "types": types, "items": items, "tc": tcs, "groups": groups, "levels": levels,
         "monsters": monsters, "su": su, "su_area": SU_AREA, "su_unused": SU_UNUSED, "boss_area": BOSS_AREA,
-        "uniques": uniques, "sets": setitems, "ratio": ratio,
+        "uniques": uniques, "sets": setitems, "setbonus": setbonus, "ratio": ratio,
         "prefixes": prefixes, "suffixes": suffixes, "automagic": automagic, "staff": staff, "qi": [r["m"] for r in qi],
         "tz": tz,
     }

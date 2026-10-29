@@ -2206,6 +2206,35 @@ def main():
     kinds_ = json.load(open(os.path.join(HERE, "tools", "maze_cells.json"), encoding="utf-8"))["levels"]["66"]["tomb_cases"]["kinds"]
     want_ = {c_: [round(sum(v_[d_] for k_, v_ in kk_.items() if pop2_.get(k_)), 3) for d_ in range(3)] for c_, kk_ in kinds_.items()}
     fact("data.json geo.tomb == populated rows of maze_cells.json tomb_cases kinds (%s)" % want_, TB_["tomb"] == want_, str(TB_["tomb"]))
+    # ---- item tooltip stat lines (build.py item_mods -> Engine.itemStats): the in-game text of known items, ranges in parentheses
+    TS_ = FA["tipStats"]
+    WANT_ = {
+        "Harlequin Crest": ["+2 to All Skills", "+2 to all Attributes", "+(1-148) to Life (Based on Character Level)", "+(1-148) to Mana (Based on Character Level)",
+                            "Damage Reduced by 10%", "50% Better Chance of Getting Magic Items"],
+        "The Stone of Jordan": ["+1 to All Skills", "Adds 1-12 lightning damage", "+20 to Mana", "Increase Maximum Mana 25%"],
+        "Annihilus": ["+1 to All Skills", "+(10-20) to all Attributes", "All Resistances +(10-20)", "+(5-10)% to Experience Gained"],
+        "PreCrafted Flame Rift": ["Monster Fire Immunity is Sundered", "Fire Resist -(70-90)%"],
+        "Hellfire Torch": ["5% Chance to cast level 10 Firestorm on striking", "+3 to [random class] Skill Levels", "+(10-20) to all Attributes", "All Resistances +(10-20)",
+                           "+8 to Light Radius", "Level 30 Hydra (10/10 Charges)"],
+        "Tal Rasha's Horadric Crest": ["10% Mana stolen per hit", "10% Life stolen per hit", "+45 Defense", "+60 to Life", "+30 to Mana", "All Resistances +15"],
+    }
+    for id_, want_ in WANT_.items():
+        got_ = (TS_["items"].get(id_) or {}).get("mods")
+        fact("tooltip stats: %s == %s" % (id_, " / ".join(want_)), got_ == want_, str(got_))
+    mg_ = TS_["items"]["Magefist"]["mods"]
+    fact("tooltip stats: Magefist has its class skill tab line and its fire damage (%s)" % " / ".join(mg_), mg_[0].startswith("+1 to Fire Skills") and "Adds 1-6 fire damage" in mg_ and "+(20-30)% Enhanced Defense" in mg_)
+    bb_ = TS_["items"]["Blackbog's Sharp"]["mods"]
+    fact("tooltip stats: Blackbog's Sharp poison as total over seconds, staff-mod style skills (%s)" % " / ".join(bb_), "+488 poison damage over 10 seconds" in bb_ and "+5 to Poison Dagger (Necromancer Only)" in bb_)
+    tal_ = TS_["items"]["Tal Rasha's Horadric Crest"]["set"]
+    fact("tooltip stats: Tal Rasha's Wrappings set bonuses (2 / 3 / 4 items, full set)", tal_["p"] == [[2, "Replenish Life +10"], [3, "65% Better Chance of Getting Magic Items"], [4, "+25% Faster Hit Recovery"]]
+         and "+3 to Sorceress Skill Levels" in tal_["f"] and "All Resistances +50" in tal_["f"], str(tal_))
+    sg_ = TS_["items"]["Sigon's Visor"]["smods"]
+    fact("tooltip stats: Sigon's Visor's own partial bonus (2 items, per-level attack rating /2: +(8-792))", sg_ == [[2, "+(8-792) to Attack Rating (Based on Character Level)"]], str(sg_))
+    fact("tooltip stats: no '#' / NaN / undefined left in any unique, set item or set bonus line (%d lines)" % TS_["nLines"], not TS_["left"] and TS_["nLines"] > 2000, str(TS_["left"]))
+    fact("tooltip stats: unknown item -> null", TS_["unknown"] is None)
+    fact("range format: tooltip in parentheses, builder unchanged (%s)" % " | ".join(TS_["fmt"]),
+         TS_["fmt"] == ["+120-150% Enhanced Defense", "+(120-150)% Enhanced Defense", "+2 to All Skills", "Adds 10-40 fire damage", "Adds (10-15)-(25-40) fire damage",
+                        "+1.5 to Life per Character Level", "+(1-148) to Life (Based on Character Level)"], str(TS_["fmt"]))
     # ---- Pandemonium areas are Hell-only
     P_ = FA["pandemonium"]
     fact("Pandemonium areas 133-136 have no source rows in Normal / Nightmare, but do in Hell (rows %s); Colossal Summit unchanged (%d / %d)" % (P_["hell"], P_["colossalLow"], P_["colossalHell"]),

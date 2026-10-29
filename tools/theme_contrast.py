@@ -32,4 +32,11 @@ for name, start in (('dark', ':root {'), ('light', ':root[data-theme="light"]'))
         m = re.search(r'@media \(prefers-color-scheme: light\) \{ :root:not\(\[data-theme\]\) \{([^}]*)\}', src)
         q = dict(re.findall(r'--([\w-]+):(#[0-9a-fA-F]{6})', m.group(1)))
         print('media palette == light palette:', q == p)
+# the item tooltip is dark in both themes: its own colours against its background rgba(10,10,12,.95) (taken as #0a0a0c)
+i = src.index('.itip {')
+tip = dict(re.findall(r'--([\w-]+):(#[0-9a-fA-F]{6})', src[i:src.index('}', i)]))
+print('== item tooltip (both themes)')
+for fg in ('drop-orange', 'drop-unique', 'drop-set', 'tip-stat', 'tip-full'):
+    v = cr(tip[fg], '#0a0a0c'); bad += v < 4.5
+    print('%-14s %s  tooltip-bg %.2f%s' % (fg, tip[fg], v, '   FAIL' if v < 4.5 else ''))
 sys.exit(1 if bad else 0)

@@ -1133,6 +1133,9 @@
      *  (item_*_perlevel: op 2/4/5, op param 3 -> /8; the two Attack Rating stats item_tohit_perlevel / item_tohitpercent_perlevel have op param 1 -> /2). */
     const perLevelDiv = (key) => (key.indexOf('(Based on Character Level)') < 0 ? 0 : key.indexOf('Attack Rating') >= 0 ? 2 : 8);
     for (const a of allAffixes.concat(D.automagic)) for (const m of a.mods) if (perLevelDiv(m[4]) && m[1] !== '' && m[1] !== undefined) { m[2] = m[3] = +m[1]; }
+    { const fix = (m) => { if (perLevelDiv(m[4]) && m[1] !== '' && m[1] !== undefined) m[2] = m[3] = +m[1]; };   // the same for unique / set item stats (tooltip)
+      for (const u of D.uniques.concat(D.sets)) { (u.mods || []).forEach(fix); (u.smods || []).forEach((x) => fix(x[1])); }
+      for (const k in D.setbonus || {}) { D.setbonus[k].f.forEach(fix); D.setbonus[k].p.forEach((x) => fix(x[1])); } }
     D.automagic.forEach((a, i) => { a.i = i; });   // identity of an automagic row (the item builder lists them by index)
     const autoByGroup = {};
     for (const a of D.automagic) (autoByGroup[a.g] = autoByGroup[a.g] || []).push(a);
@@ -1824,31 +1827,58 @@
 
     /** Description template ("+#% Faster Cast Rate") with its value placeholder filled by a value or a range ("+10-20% Faster Cast Rate").
      *  Templates with several placeholders (damage ranges, poison, skill procs, charges) take `v` instead: one [lowest, highest] per '#' in text order
-     *  (the sixth element of a data mod, merged over rows by mergeSlots); without it the template is returned unchanged. */
-    function describe(tpl, mn, mx, v) {
+     *  (the sixth element of a data mod, merged over rows by mergeSlots); without it the template is returned unchanged.
+     *  opt.paren (the item tooltip, as item guides write it): every varying number in parentheses, "+(120-150)% Enhanced Defense",
+     *  "Adds (10-15)-(25-40) fire damage", fixed numbers plain; per-level stats as their value over character levels 1-99, "+(1-148) to Life
+     *  (Based on Character Level)". */
+    function describe(tpl, mn, mx, v, opt) {
+      const paren = !!(opt && opt.paren);
+      const rng = (a, b) => (a === b ? String(a) : paren ? '(' + a + (a < 0 || b < 0 ? ' to ' : '-') + b + ')' : a + (a < 0 || b < 0 ? ' to ' : '-') + b);
       const at = tpl.indexOf('#');
       if (at >= 0 && tpl.indexOf('#', at + 1) >= 0) {
         if (!v || v.length !== tpl.split('#').length - 1) return tpl;
-        const st = (s) => (s[0] === s[1] ? String(s[0]) : s[0] + '-' + s[1]);
+        const st = (s) => (paren ? rng(s[0], s[1]) : s[0] === s[1] ? String(s[0]) : s[0] + '-' + s[1]);   // (the builder's text stays as before)
         let k = 0, rest = tpl;
         let head = '';
         if (tpl.indexOf('Adds #-# ') === 0) {   // same fixed min and max damage: the game's single form "+# fire damage" (strMod*Damage) instead of "Adds #-# ..." (strMod*DamageRange)
           const a = v[0], b = v[1];
-          head = a[0] === a[1] && b[0] === b[1] && a[0] === b[0] ? '+' + a[0] + ' ' : 'Adds ' + a[0] + '-' + b[1] + ' ';
+          head = a[0] === a[1] && b[0] === b[1] && a[0] === b[0] ? '+' + a[0] + ' ' : 'Adds ' + (paren ? st(a) + '-' + st(b) : a[0] + '-' + b[1]) + ' ';
           rest = tpl.slice(9); k = 2;
         }
         return head + rest.replace(/#/g, () => st(v[k++]));
       }
       if (at < 0) return tpl;
       const dv = perLevelDiv(tpl);
+      if (dv && paren) {   // per character level, tooltip: the value at character level 1 .. 99 (the game truncates rate * level / dv)
+        const val = rng(Math.trunc(mn / dv), Math.trunc(mx * 99 / dv));
+        return tpl.slice(0, at) + val + tpl.slice(at + 1);
+      }
       if (dv) {   // per character level: the rate is mn / dv per level
         const f = (x) => String(Math.round(x / dv * 1000) / 1000);
         const val = mn === mx ? f(mn) : f(mn) + '-' + f(mx);
         return (tpl.slice(0, at) + val + tpl.slice(at + 1)).replace('(Based on Character Level)', 'per Character Level');
       }
-      const val = mn === mx ? String(mn) : (mn < 0 || mx < 0 ? mn + ' to ' + mx : mn + '-' + mx);
+      if (paren && mn < 0 && mx < 0 && mn !== mx) {   // both negative: "Fire Resist -(70-90)%", the sign outside
+        const signed = at > 0 && tpl[at - 1] === '+';
+        return tpl.slice(0, signed ? at - 1 : at) + '-(' + -mx + '-' + -mn + ')' + tpl.slice(at + 1);
+      }
+      const val = rng(mn, mx);
       const signed = at > 0 && tpl[at - 1] === '+';
       return tpl.slice(0, signed && val[0] === '-' ? at - 1 : at) + val + tpl.slice(at + 1);
+    }
+
+    /** Stat lines of a unique or set item for its tooltip (build.py: the row's properties as the game lists them, sorted by descpriority), ranges in
+     *  parentheses: { mods: [text], smods: [[items worn, text]] (set item: green partial bonuses on the item), set: { p: [[items worn, text]], f: [text] }
+     *  (the whole set's bonuses) }. null when the item is unknown. */
+    function itemStats(kind, id) {
+      const u = kind === 'unique' ? uniqById[id] : kind === 'set' ? setById[id] : null;
+      if (!u) return null;
+      // charges: a fresh copy, full charges (the data's charges-left range is what a drop can have left)
+      const txt = (m) => describe(m[4], m[2], m[3], m[5] && m[4].indexOf('Charges)') >= 0 ? [m[5][0], m[5][2], m[5][2]] : m[5], { paren: true });
+      const out = { mods: (u.mods || []).map(txt), smods: (u.smods || []).map((x) => [x[0], txt(x[1])]), set: null };
+      const sb = kind === 'set' && D.setbonus && D.setbonus[u.set];
+      if (sb) out.set = { p: sb.p.map((x) => [x[0], txt(x[1])]), f: sb.f.map(txt) };
+      return out;
     }
 
     /** slot ranges of two mods of one label merged (new array, the data is not touched) */
@@ -2577,7 +2607,7 @@
     return {
       CONFIG, data: D, farmMinutes, DIFFS, items, types, getCtx, playersN, adjNoDrop, dist, upgradeTC, areaSources, DUP_OF, areaLabel, areaRun, areaRolls, listShares, bossPacks,
       mode, heraldsAvailable, sunderChance, sunderPaths, isSunder, adjQuality, heraldSpawnPct, quality, qualityTotals, sources, runSources, srcDist, chanceFor, dropsOf, baseQualityChance, affixLevel, minIlvlForAlvl, eligible, maxSockets, affixProb, rareProbFromSamples, cardOdds, ilvlCurve, minLevels, staffDist, staffBase,
-      statList, describe, describeAt, sliderWhat, affixSearch, searchIndex, baseTypes, metaCache, uniqById, setById, uniqByCode, setByCode, prettyId, tzLevel,
+      statList, describe, describeAt, itemStats, sliderWhat, affixSearch, searchIndex, baseTypes, metaCache, uniqById, setById, uniqByCode, setByCode, prettyId, tzLevel,
       eligibleUniques, eligibleSets, condProb, trialsFor,
       builderTypes, builderBases, builderCatalog, builderStats, builderFamilies, familyTable, familyIdOf, allowedValues, snapValue, tierFor, perLevelDiv, perLevelAt, builderAffixTable, baseDropWeights, affixAppearance, planCombo, comboForBase, comboAnalysis, feasibleAny, fitIndex, fitsCombo, statRange, explainCombo, groupName,
       qualityPossible, ethItem, ethChance, plainSocketMax, plainSocketDist, extrasDist, QUALS, QLABEL, SOCK_KEY, ETH_KEY,

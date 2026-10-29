@@ -655,6 +655,18 @@
         const runP = (rows, t) => -Math.expm1(rows.reduce((a, s) => a + s.perRun * Math.log1p(-Math.min(E.chanceFor(cx, s, t, 0).target, 1)), 0));
         const allRows = L.filter((s) => s.area === 66 && s.diff === 2 && !s.herald && !s.quest);
         F.tombs.farmOrder = ['r08', 'r15', 'r22'].map((code) => { const t = { kind: 'base', code }; return [code, runP(allRows, t), runP(tt, t)]; }); }
+      // item tooltip stat lines (itemStats): known items, no '#' left anywhere, the parenthesised range format vs the builder's
+      { const T = {};
+        for (const [k, id] of [['unique', 'Harlequin Crest'], ['unique', 'The Stone of Jordan'], ['unique', 'Annihilus'], ['unique', 'PreCrafted Flame Rift'], ['unique', 'Magefist'],
+          ['unique', 'Hellfire Torch'], ['unique', "Blackbog's Sharp"], ['set', "Tal Rasha's Horadric Crest"], ['set', "Sigon's Visor"]]) T[id] = E.itemStats(k, id);
+        const left = [], all = [];
+        for (const u of E.data.uniques) { const s = E.itemStats('unique', u.id); all.push(...s.mods); }
+        for (const u of E.data.sets) { const s = E.itemStats('set', u.id); all.push(...s.mods, ...s.smods.map((x) => x[1]), ...(s.set ? s.set.p.map((x) => x[1]).concat(s.set.f) : [])); }
+        for (const x of all) if (x.indexOf('#') >= 0 || /\bNaN\b|undefined/.test(x)) left.push(x);
+        F.tipStats = { items: T, left: left.slice(0, 20), nLines: all.length, unknown: E.itemStats('unique', 'no such item'),
+          fmt: [E.describe('+#% Enhanced Defense', 120, 150), E.describe('+#% Enhanced Defense', 120, 150, null, { paren: true }), E.describe('+# to All Skills', 2, 2, null, { paren: true }),
+            E.describe('Adds #-# fire damage', 25, 40, [[10, 15], [25, 40]]), E.describe('Adds #-# fire damage', 25, 40, [[10, 15], [25, 40]], { paren: true }),
+            E.describe('+# to Life (Based on Character Level)', 12, 12), E.describe('+# to Life (Based on Character Level)', 12, 12, null, { paren: true })] }; }
       // super unique minions (rows with suMin: the part of a minion row that comes from super uniques) and the Hell-only Pandemonium areas
       { const cx = E.getCtx({ players: 1, party: 1, ladder: true, tz: false, mf: 0 }), S = E.sources(cx);
         F.suMinions = S.filter((s) => s.suMin > 0).map((s) => [s.area, s.mon, s.diff, s.suMin, s.perRun, s.tc, s.mlvl]);

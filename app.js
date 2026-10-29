@@ -79,6 +79,16 @@
     const req = u ? u.lr : it.lv;
     if (req > 0) h += ln('Required Level: ' + req);
     h += ln('Quality level ' + (u ? u.lvl + ' (base ' + it.q + ')' : it.q), 'tip-dim');
+    const st = u ? E.itemStats(t.kind, t.id) : null;   // stat lines as the game lists them (magic blue), ranges in parentheses
+    if (st) {
+      for (const x of st.mods) h += ln(x, 'tip-stat');
+      for (const [n, x] of st.smods) h += ln(x + ' (' + n + ' items)', 'tip-set');   // the item's own set bonuses (green in game)
+      if (st.set && (st.set.p.length || st.set.f.length)) {
+        h += ln((u.sn || u.set) + ' bonuses', 'tip-dim tip-gap');
+        for (const [n, x] of st.set.p) h += ln(x + ' (' + n + ' items)', 'tip-set tip-small');
+        for (const x of st.set.f) h += ln(x + ' (full set)', 'tip-full tip-small');
+      }
+    }
     if (it.gs > 0) h += ln('Max sockets: ' + it.gs, 'tip-gray');   // gray, like a socketed item in game
     return h;
   }
