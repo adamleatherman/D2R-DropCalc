@@ -1,6 +1,7 @@
 # Plan: time per run, chance per hour
 
-Status: not started (written 2026-10-28). Pure UI / engine work: no game tables needed.
+Status: done (written and implemented 2026-10-28; merged as `41a1cdc`). The default per-game overhead ended up 0.25 min
+(15 s), not the 0.5 below. Tune the per-farm numbers in `CONFIG.farms[].time` (`engine.js`).
 
 ## Goal
 

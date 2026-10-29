@@ -801,7 +801,7 @@ def run_engine():
         if not b:
             raise SystemExit("no Edge/Chrome found for the headless run")
         out = subprocess.run([b, "--headless=new", "--disable-gpu", "--virtual-time-budget=60000", "--dump-dom",
-                              "http://127.0.0.1:%d/test.html" % port], capture_output=True, text=True, timeout=180).stdout
+                              "http://127.0.0.1:%d/test.html" % port], capture_output=True, text=True, encoding="utf-8", timeout=180).stdout
         m = re.search(r'<pre id="out">(.*?)</pre>', out, re.S)
         if not m:
             raise SystemExit("no output from test page")
@@ -809,7 +809,7 @@ def run_engine():
         js = json.loads(html.unescape(m.group(1)))
         # the old Tab 2 deep link (?q2=&ql=&c=) must still resolve in the real page (builder, main thread: ?noworker)
         dl = subprocess.run([b, "--headless=new", "--disable-gpu", "--virtual-time-budget=60000", "--dump-dom",
-                             "http://127.0.0.1:%d/index.html?noworker&mode=rotw&q2=Monarch&ql=magic&c=Socketed%%20(%%23):4" % port], capture_output=True, text=True, timeout=180).stdout
+                             "http://127.0.0.1:%d/index.html?noworker&mode=rotw&q2=Monarch&ql=magic&c=Socketed%%20(%%23):4" % port], capture_output=True, text=True, encoding="utf-8", timeout=180).stdout
         t = re.search(r'<div class="box" id="res2">(.*?)</div>\s*<div class="note" id="finfo2">(.*?)</div>', dl, re.S)
         js["deeplink"] = html.unescape(re.sub(r"<[^>]+>", " ", t.group(1) + " | " + t.group(2))) if t else ""
         return js
