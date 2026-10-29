@@ -1783,6 +1783,11 @@ def main():
     check("Jeweler's (Monarch, 4 sockets): magic only", 1 if (CB["monarch sockets 4"]["magic"] and not CB["monarch sockets 4"]["rare"]) else 0, 1, 0)
     check("Chromatic-class automagic (auric shield, group 304): offered on magic, never on rare", 1 if (B["chromatic"]["magic"] > 0 and B["chromatic"]["rare"] == 0) else 0, 1, 0, str(B["chromatic"]))
     # ---- labels with several numbers (poison, elemental damage, charged skills, chance to cast): tooltip text per row, merged text, thresholds
+    # ---- popular item presets of the item builder (CONFIG.itemPresets): each one loads in both modes (Warlock ones RotW only)
+    PR = js["presets"]
+    check("item presets: %d presets in %d groups" % (PR["n"], len(PR["groups"])), 1 if PR["n"] >= 40 and len(PR["groups"]) >= 6 else 0, 1)
+    for mode_ in ("rotw", "lod"):
+        check("item presets load in %s (type / base, stat keys, quality feasible)" % mode_, len(PR["bad"][mode_]), 0, note="; ".join(PR["bad"][mode_])[:400])
     LB = B["labels"]
     idx_sk = {r["*Id"]: r for r in RU.skills}
     def sk_levels(sid, lvl):

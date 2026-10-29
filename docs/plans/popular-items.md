@@ -1,6 +1,11 @@
 # Plan: popular item presets in the item builder
 
-Status: not started (written 2026-10-28). Pure engine / UI work: no game tables needed.
+Status: phase 1 done (2026-10-29): 67 presets in `CONFIG.itemPresets` (engine.js), a Popular items list in the builder, a test that
+every preset loads in both modes. Differences from the table below: picks are stats only (under "Stats (any affix that gives them)", no
+affix families, which keeps the presets independent of family ids); rare amulets are 2/10 (amulets roll at most 10% FCR, 20 needs a craft);
+the 7 MF charm has a 5@ variant but no 20 life one (MF and life are both suffixes); tri-res boots are fire / cold / lightning >= 30; Spirit
+and Infinity bases load as normal quality (switch to superior by hand); the chosen preset is not stored in the URL (the link already holds
+the full builder state). Phase 2 not started. Written 2026-10-28.
 
 ## Goal
 

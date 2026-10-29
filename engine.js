@@ -6,6 +6,56 @@
 (function (root) {
   'use strict';
 
+  // ---------------- popular item presets (item builder) ----------------
+  // Community staples (not prices): Loot Goblin's item valuation guide, itemd2r.com "items worth keeping", almarsguides.com "Loot Worth
+  // Keeping" (docs/plans/popular-items.md). One preset = { name, group, t: builder type code | b: base code, tr: tier (optional), q: quality,
+  // a: [[builder stat key, minimum]] } (minimum 'max' = the stat's best roll on the selection); rotw: 1 = keys only RotW has (Warlock).
+  // The variants (per resistance, skill tab, class, base) are generated here.
+  const ITEM_PRESETS = (() => {
+    const out = [], add = (group, name, o) => out.push(Object.assign({ group, name }, o));
+    const LIFE = '+# to Life', RES = { Fire: 'Fire Resist +#%', Cold: 'Cold Resist +#%', Lightning: 'Lightning Resist +#%', Poison: 'Poison Resist +#%' };
+    // charms
+    add('Charms', '3/20/20 small charm', { t: 'scha', q: 'magic', a: [['+# to Maximum Damage', 3], ['+# to Attack Rating', 20], [LIFE, 20]] });
+    add('Charms', '5@/20 small charm (all res / life)', { t: 'scha', q: 'magic', a: [['All Resistances +#', 5], [LIFE, 20]] });
+    for (const r in RES) add('Charms', '11 ' + r.toLowerCase() + ' res / 20 life small charm', { t: 'scha', q: 'magic', a: [[RES[r], 11], [LIFE, 20]] });
+    add('Charms', '17 mana / 20 life small charm', { t: 'scha', q: 'magic', a: [['+# to Mana', 17], [LIFE, 20]] });
+    add('Charms', '7 MF small charm', { t: 'scha', q: 'magic', a: [['#% Better Chance of Getting Magic Items', 7]] });   // MF and life are both suffixes: no 7 MF / 20 life
+    add('Charms', '7 MF / 5@ small charm', { t: 'scha', q: 'magic', a: [['#% Better Chance of Getting Magic Items', 7], ['All Resistances +#', 5]] });
+    const TABS = [['Warcries', 'Barbarian'], ['Combat Skills', 'Paladin'], ['Lightning Skills', 'Sorceress'], ['Cold Skills', 'Sorceress'], ['Fire Skills', 'Sorceress'],
+      ['Elemental Skills', 'Druid'], ['Javelin and Spear Skills', 'Amazon'], ['Traps', 'Assassin'], ['Poison and Bone Skills', 'Necromancer'], ['Summoning Skills', 'Necromancer']];
+    for (const [tab, cls] of TABS) {
+      const k = '+# to ' + tab + ' (' + cls + ' Only)', n = tab.replace(/ Skills$/, '') + (tab === 'Combat Skills' || tab === 'Summoning Skills' ? ' (' + cls + ')' : '');
+      add('Skillers', n + ' skiller / 40 life', { t: 'lcha', q: 'magic', a: [[k, 1], [LIFE, 40]] });
+      add('Skillers', n + ' skiller / 12 FHR', { t: 'lcha', q: 'magic', a: [[k, 1], ['+#% Faster Hit Recovery', 12]] });
+    }
+    // jewels
+    add('Jewels', '15/40 jewel (IAS / enhanced damage)', { t: 'jewl', q: 'magic', a: [['+#% Increased Attack Speed', 15], ['+#% Enhanced Damage', 40]] });
+    add('Jewels', '15 IAS / 15@ jewel', { t: 'jewl', q: 'magic', a: [['+#% Increased Attack Speed', 15], ['All Resistances +#', 15]] });
+    add('Jewels', '15 IAS / max damage jewel', { t: 'jewl', q: 'magic', a: [['+#% Increased Attack Speed', 15], ['+# to Maximum Damage', 'max']] });
+    // class items (staff mods are the "+3 to <skill>" lines)
+    add('Class items', '6-point Tornado pelt', { t: 'pelt', q: 'magic', a: [['+# to Tornado (Druid Only)', 3], ['+# to Elemental Skills (Druid Only)', 3]] });
+    add('Class items', 'Bone Spear wand: +3 / +2 Poison and Bone / 20 FCR', { t: 'wand', q: 'magic', a: [['+# to Bone Spear (Necromancer Only)', 3], ['+# to Poison and Bone Skills (Necromancer Only)', 2], ['+#% Faster Cast Rate', 20]] });
+    add('Class items', '6-point Blizzard orb / 20 FCR', { t: 'orb', q: 'magic', a: [['+# to Blizzard (Sorceress Only)', 3], ['+# to Cold Skills (Sorceress Only)', 3], ['+#% Faster Cast Rate', 20]] });
+    add('Class items', '6-point Hydra orb / 20 FCR', { t: 'orb', q: 'magic', a: [['+# to Hydra (Sorceress Only)', 3], ['+# to Fire Skills (Sorceress Only)', 3], ['+#% Faster Cast Rate', 20]] });
+    add('Class items', '6-point Battle Orders helm', { t: 'phlm', q: 'magic', a: [['+# to Battle Orders (Barbarian Only)', 3], ['+# to Warcries (Barbarian Only)', 3]] });
+    add('Class items', '3/3/3 Lightning Sentry claw', { t: 'h2h', q: 'magic', a: [['+# to Lightning Sentry (Assassin Only)', 3], ['+# to Death Sentry (Assassin Only)', 3], ['+# to Traps (Assassin Only)', 3]] });
+    add('Class items', '+3 Javelin / 20 IAS gloves', { t: 'glov', q: 'magic', a: [['+# to Javelin and Spear Skills (Amazon Only)', 3], ['+#% Increased Attack Speed', 20]] });
+    // jewelry and gear: rare amulets top out at 10% FCR (20 needs a crafted amulet), circlets reach 20
+    const CLS = ['Amazon', 'Assassin', 'Barbarian', 'Druid', 'Necromancer', 'Paladin', 'Sorceress', 'Warlock'];
+    const clsKey = (c) => c === 'Warlock' ? '+# to Warlock Skills' : '+# to ' + c + ' Skill Levels';
+    for (const c of CLS) add('Amulets and circlets', '2/10 ' + c + ' amulet', { t: 'amul', q: 'rare', a: [[clsKey(c), 2], ['+#% Faster Cast Rate', 10]], rotw: c === 'Warlock' ? 1 : 0 });
+    for (const c of CLS) add('Amulets and circlets', '2/20/2 ' + c + ' circlet', { t: 'circ', q: 'rare', a: [[clsKey(c), 2], ['+#% Faster Cast Rate', 20], ['Socketed (#)', 2]], rotw: c === 'Warlock' ? 1 : 0 });
+    add('Rings and boots', '10 FCR ring', { t: 'ring', q: 'rare', a: [['+#% Faster Cast Rate', 10]] });
+    add('Rings and boots', '30 FRW tri-res boots (30 fire / cold / lightning)', { t: 'boot', q: 'rare', a: [['+#% Faster Run/Walk', 30], [RES.Fire, 30], [RES.Cold, 30], [RES.Lightning, 30]] });
+    // runeword bases
+    add('Runeword bases', 'Jmod: Jeweler\'s Monarch of Deflecting', { b: 'uit', q: 'magic', a: [['Socketed (#)', 4], ['+#% Faster Block Rate', 20], ['#% Increased Chance of Blocking', 20]] });
+    for (const [b, n] of [['utp', 'Archon Plate'], ['uui', 'Dusk Shroud'], ['xtp', 'Mage Plate']]) add('Runeword bases', 'Enigma / CoH base: 3 socket superior ' + n + ' (15% ED)', { b, q: 'sup', a: [['Socketed (#)', 3], ['+#% Enhanced Defense', 15]] });
+    for (const [b, n] of [['uit', 'Monarch'], ['crs', 'Crystal Sword']]) add('Runeword bases', 'Spirit base: 4 socket ' + n, { b, q: 'normal', a: [['Socketed (#)', 4]] });
+    for (const [b, n] of [['7s8', 'Thresher'], ['7wc', 'Giant Thresher'], ['7pa', 'Cryptic Axe']]) add('Runeword bases', 'Infinity / Insight base: ethereal 4 socket ' + n, { b, q: 'normal', a: [['Ethereal', 1], ['Socketed (#)', 4]] });
+    add('Runeword bases', 'Grief base: 5 socket superior Phase Blade', { b: '7cr', q: 'sup', a: [['Socketed (#)', 5]] });
+    return out;
+  })();
+
   // ======================================================================
   //  CONFIG - every assumption that is not read from the game's data files.
   //  Sources are documented in README.md ("Research results").
@@ -164,6 +214,7 @@
       { name: 'Pindleskin', area: 121, src: 'run|pindle', time: { base: 0.75, travel: 0.5, nav: 0, density: 1.2, immunity: 1.15, extra: 0 } }, { name: 'Nihlathak', area: 124, src: 'boss|nihlathakboss', time: { base: 1.75, travel: 0.6, nav: 0.3, density: 1.25, immunity: 1.1, extra: 0 } },
       { name: 'Baal', area: 132, src: 'boss|baalcrab', time: { base: 5, travel: 0.25, nav: 0.2, density: 0.85, immunity: 1.2, extra: 0 } },
     ],
+    itemPresets: ITEM_PRESETS,   // popular item presets of the item builder (above)
     farmTime: { teleport: { fast: 1, slow: 1.35, none: 3 }, walkExtra: 2, overhead: 0.25 },   // travel-time factor per teleport kind; walking doubles a farm's extra; default per-game overhead (minutes: 15 s)
     maxMlvl: 110,
     // --- per-kill drop cap ---

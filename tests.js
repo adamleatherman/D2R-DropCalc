@@ -884,6 +884,22 @@
       app(ES, 'shared group: boots', 'utb', 99);
       E.CONFIG.gameMode = 'rotw';
     }
+    // ---- popular item presets (CONFIG.itemPresets): the type or base exists, every stat key is a builder stat of it, its quality is feasible ----
+    res.presets = { n: E.CONFIG.itemPresets.length, groups: Array.from(new Set(E.CONFIG.itemPresets.map((p) => p.group))), bad: { rotw: [], lod: [] } };
+    for (const [mode, EE] of [['rotw', E], ['lod', EL]]) {
+      E.CONFIG.gameMode = mode;
+      for (const p of E.CONFIG.itemPresets) {
+        if (p.rotw && mode === 'lod') continue;
+        const ty = p.t ? EE.builderTypes().find((t) => t.code === p.t) : null, codes = p.b ? (EE.items[p.b] ? [p.b] : []) : ty ? EE.builderBases(p.t, p.tr === undefined ? -1 : p.tr) : [];
+        if (!codes.length) { res.presets.bad[mode].push(p.name + ': no type / base ' + (p.b || p.t)); continue; }
+        const st = new Map(EE.builderStats(codes).map((x) => [x.key, x])), miss = p.a.filter(([k]) => !st.has(k)).map(([k]) => k);
+        if (miss.length) { res.presets.bad[mode].push(p.name + ': stat keys missing: ' + miss.join(', ')); continue; }
+        const conds = p.a.map(([k, v]) => ({ key: k, min: v === 'max' ? st.get(k).max : v }));
+        const an = EE.comboAnalysis(codes, conds, { qualities: [p.q] });
+        if (!an[p.q].ok) res.presets.bad[mode].push(p.name + ': not possible as ' + p.q + ' (' + an[p.q].why.join(' ') + ')');
+      }
+    }
+    E.CONFIG.gameMode = 'rotw';
     res.sourcesCount = E.sources(ctxFor(1, 1)).length;
     res.config = E.CONFIG;
   } catch (e) { res.errors.push(String(e.stack || e)); }

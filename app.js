@@ -1185,6 +1185,7 @@
   }
 
   function setType(opt) {
+    $('pr2').value = '';
     bd.type = opt; bd.sel = []; bd.picks = [];
     refreshBuilder();
   }
@@ -1225,6 +1226,7 @@
     $('odds2').checked = lsGet('d2dc-odds2');
     TA.onRow = onPickRow;
     autocomplete($('q2'), $('ac2'), () => TYPEOPTS, (x) => setType(x));
+    $('pr2').addEventListener('change', () => { const p = E.CONFIG.itemPresets[parseInt($('pr2').value, 10)]; if (p) { loadPreset(p); $('pr2').value = E.CONFIG.itemPresets.indexOf(p); } });
     // stat-first entry: any affix that gives the stat counts (the stat goes under "Stats (any affix that gives them)" in the card)
     autocomplete($('st2'), $('acst2'), () => bd.type ? Array.from(bd.stats.values()).filter((st) => !bd.sel.some((s) => s.key === st.key)).map((st) => ({ key: st.key, label: st.text, search: st.text + ' ' + st.key })) : [],
       (x) => { $('st2').value = ''; if (addStat(x.key)) { renderSel(); refit(true); changed(); } });
@@ -1261,7 +1263,7 @@
     $('clr2').onclick = () => { bd.sel = []; bd.picks = []; renderSel(); refit(true); bd.farm = null; changed({ noFarm: true }); };
     $('new2').onclick = () => {   // start over: no type, tier All, quality Auto, no picks (item level, area and monster stay)
       clearTimeout(anTimer); clearTimeout(farmTimer);
-      $('q2').value = ''; $('tr2').value = '-1'; $('ql2').value = '';
+      $('q2').value = ''; $('tr2').value = '-1'; $('ql2').value = ''; $('pr2').value = '';
       Object.assign(bd, { type: null, codes: [], stats: new Map(), fams: new Map(), sel: [], picks: [], rows: [], an: null, farm: null, farmQ: [] }); fitIdx = null;
       renderSel(); requestTable();
       $('res2').innerHTML = ''; T2.rows = []; T2.render(); $('finfo2').textContent = ''; $('tinfo2').textContent = '';
@@ -1290,6 +1292,24 @@
       syncRows(+row.dataset.i);
       changed(); refit(); requestOdds();
     });
+  }
+  /** the popular item presets of this mode (E.CONFIG.itemPresets; LoD has no Warlock), as [index, preset] */
+  const presets2 = () => E.CONFIG.itemPresets.map((p, i) => [i, p]).filter(([, p]) => !(p.rotw && E.mode === 'lod'));
+  /** the Popular items list, one group per preset group (in CONFIG order) */
+  function fillPresets() {
+    let grp = '', opts = '';
+    for (const [i, p] of presets2()) {
+      if (p.group !== grp) { opts += (grp ? '</optgroup>' : '') + '<optgroup label="' + esc(p.group) + '">'; grp = p.group; }
+      opts += '<option value="' + i + '">' + esc(p.name) + '</option>';
+    }
+    $('pr2').innerHTML = '<option value="">Choose an item</option>' + opts + (grp ? '</optgroup>' : '');
+  }
+  /** a preset loaded the way a link loads (applyUrl2): type or base, tier, quality, stats with their minimums ('max' = the best roll: addStat clamps) */
+  function loadPreset(p) {
+    const qs = new URLSearchParams();
+    qs.set(p.b ? 'b2' : 't2', p.b || p.t); qs.set('tr2', p.tr === undefined ? -1 : p.tr); qs.set('q', p.q);
+    for (const [k, v] of p.a) qs.append('a', k + ':' + (v === 'max' ? 1e9 : v));
+    return applyUrl2(qs);
   }
   /** apply the builder part of the URL (new ?t2/?b2/?a, or the old ?q2=&ql=&c= deep link); true when it set a type */
   function applyUrl2(qs) {
@@ -1333,6 +1353,7 @@
     INDEX = E.searchIndex();
     $('l_ladder').title = ladderTip();
     TYPEOPTS = typeOptions();
+    fillPresets();
     const bossAt = new Set(Object.values(E.data.boss_area).concat(Object.values(E.data.su_area)).map(String));   // The Worldstone Chamber, Colossal Summit: no spawn list, only a boss
     const areas = Object.keys(E.data.levels).filter((id) => !E.DUP_OF[id] && (E.data.levels[id].mon.length || E.data.levels[id].nmon.length || E.data.levels[id].pre || bossAt.has(id)))
       .map((id) => ({ id, a: E.data.levels[id] })).sort((x, y) => x.a.act - y.a.act || x.id - y.id);
