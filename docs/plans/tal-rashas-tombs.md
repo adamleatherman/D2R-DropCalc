@@ -1,6 +1,8 @@
 # Plan: Tal Rasha's Tombs per-run math
 
-Status: not started (written 2026-10-28; tab 1 section, named-runs follow-up and per-case elite packs added the same day). Related:
+Status: steps 1-7 done (2026-10-29): populated cells per case as preset kinds in `tomb_cases.kinds` (build.py applies each mode's
+Populate), Hell all seven = about 2135 kills / 59.4 packs, true tomb 621 / 9.0. Farm times for the two tomb farms are estimates (all
+seven base 10 min). Not done: the optional "one random tomb" farm, and the follow-up (named runs in tab 1) below. Written 2026-10-28. Related:
 `docs/plans/kill-counts.md` (kills per run in general; its step 1 checks the calibration every area, the tombs included, rests on). Work it on a machine that has the extracted game tables (`excel/`), so `build.py`
 and `test_engine.py` can run.
 

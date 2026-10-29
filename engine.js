@@ -121,6 +121,8 @@
                                    // (not modelled) and this factor is the whole 0.56 there.
       mazeSpecialCells: 0.5,       // fallback only (a maze level without geo.sim): extra maze cells per entrance / exit / waypoint preset in caves of 3+ cells (each replaces a dead end or adds a cell; 0.5 = half add)
       warpLossRooms: 1,            // rooms of spawn rolls lost per warp / waypoint (no spawns within WarpDist)
+      tombsAllSeven: true,         // Tal Rasha's Tomb (66, listed once for 66-72) = all seven tombs: staff + boss (Kaa) + 5 plain tombs, each with its own cells
+                                   // (geo.tomb); false = the old numbers, the staff (true) tomb alone
       champShare: 0.2,             // a champion-or-unique pack is a champion pack 20% of the time (monumod.txt constants row 0)
       champPackSize: 3,            // champions per champion pack: 1 + rand(3)+1 = 2-4 (PopulateRoom)
       uniqueMinions: [3, 6],       // minions with a unique (D2GAME_SpawnMinions_6FC6F440(..., 1, 3, 6))
@@ -139,6 +141,8 @@
       shenk: { name: 'Shenk + Eldritch + minions (Bloody Foothills, Frigid Highlands)', area: 110, su: ['Siege Boss', 'Megaflow Rectifier'], boss: [] },
       pindle: { name: 'Pindleskin + minions', area: 121, su: ['Pindleskin'], boss: [] },
       pit: { name: 'The Pit (levels 1 and 2, full clear)', area: 12, su: [], boss: [], clear: [12, 16] },
+      // tombCase: the clear rows of Tal Rasha's Tomb in ONE tomb of that case (row.cases, areaRun) instead of all seven
+      truetomb: { name: "Tal Rasha's Tomb: the true tomb only (full clear, no Ancient Kaa)", area: 66, su: [], boss: [], clear: [66], tombCase: 'staff' },
     },
     // --- popular farms (tab 2's Popular farm list): area + source. src '' = whole area clear, 'run|<id>' = a run above, 'boss|<monstats id>' = that
     //     act boss's regular kill (the difficulty is added by the app).
@@ -149,6 +153,8 @@
     farms: [   // in act order: the app groups the list by the act of each farm's area; variants of one farm share the part before ':'
       { name: 'Andariel', area: 37, src: 'boss|andariel', time: { base: 1.25, travel: 0.6, nav: 0.3, density: 1.25, immunity: 1, extra: 0 } }, { name: 'Countess', area: 25, src: 'run|countess', time: { base: 1.75, travel: 0.7, nav: 0.4, density: 1, immunity: 1.05, extra: 0 } },
       { name: 'The Pit', area: 12, src: 'run|pit', time: { base: 4, travel: 0.3, nav: 0.15, density: 0.7, immunity: 1.1, extra: 0 } }, { name: 'Cow Level', area: 39, src: '', time: { base: 7.5, travel: 0.2, nav: 0.1, density: 0.5, immunity: 1, extra: 1.75 } },
+      { name: "Tal Rasha's Tombs: all seven", area: 66, src: '', time: { base: 10, travel: 0.3, nav: 0.15, density: 0.7, immunity: 1.15, extra: 0 } },
+      { name: "Tal Rasha's Tombs: true tomb", area: 66, src: 'run|truetomb', time: { base: 2.5, travel: 0.35, nav: 0.2, density: 0.75, immunity: 1.15, extra: 0 } },
       { name: 'Ancient Tunnels', area: 65, src: '', time: { base: 3, travel: 0.3, nav: 0.2, density: 0.7, immunity: 1.05, extra: 0 } }, { name: 'Summoner: boss only', area: 74, src: 'boss|summoner', time: { base: 1, travel: 0.7, nav: 0.4, density: 1, immunity: 1, extra: 0 } },
       { name: 'Summoner: + Arcane Sanctuary ghosts', area: 74, src: 'run|arcane', time: { base: 4, travel: 0.3, nav: 0.1, density: 0.7, immunity: 1.1, extra: 0 } },
       { name: 'Travincal council', area: 83, src: 'run|council', time: { base: 1, travel: 0.4, nav: 0.05, density: 1, immunity: 1.1, extra: 0 } }, { name: 'Mephisto: boss only', area: 102, src: 'boss|mephisto', time: { base: 1, travel: 0.7, nav: 0.4, density: 1.35, immunity: 1, extra: 0 } },
@@ -179,6 +185,8 @@
     // kills/run stays per area (one tomb per run); DUP_OF[copy id] = kept id.
     const DUP_OF = {};
     { const seen = new Map(); for (const lid of Object.keys(D.levels).sort((a, b) => a - b)) { const k = JSON.stringify(D.levels[lid]); if (seen.has(k)) DUP_OF[lid] = seen.get(k); else seen.set(k, lid); } }
+    // display name of an area: Tal Rasha's Tomb (66) stands for all seven tombs while CONFIG.run.tombsAllSeven (areaRun)
+    const areaLabel = (lid) => { const A = D.levels[lid]; return A.geo && A.geo.tomb && CONFIG.run.tombsAllSeven ? "Tal Rasha's Tombs (all seven)" : A.name; };
     const TC = D.tc;
     const items = D.items;
     const types = D.types;
@@ -622,7 +630,7 @@
     // Spawn rules from the D2MOO decompilation (LoD 1.10-1.14; not verified for D2R), see README "Per-run estimate".
     const ROLLS8 = Math.floor(Math.floor(40 / 3) * 40 / 3);   // 173 spawn rolls in an 8x8-tile room: one per 3x3 subtiles (PopulateRoom: (dx/3)*dy/3)
     /** spawn rolls and populated rooms of one area at difficulty d (before placement losses) */
-    function areaRolls(A, d) {
+    function areaRolls(A, d, cellsOverride) {
       const R = CONFIG.run, g = A.geo;
       if (!g) return { rolls: 0, rooms: 0 };
       let rolls, rooms;
@@ -635,7 +643,7 @@
         // bigger ones add mazeSpecialCells per special on average.
         const specials = Math.max(2, A.nw + A.wp);
         const big = g.w > 24 || g.h > 24;   // 32x32+ cells are whole preset pieces (ice pools, Nihlathak halls): no extra special cells
-        const cells = g.sim ? g.cells[d] : g.cells[d] + (g.fixed || big ? 0 : specials * (g.cells[d] <= 2 ? 1 : R.mazeSpecialCells));
+        const cells = cellsOverride !== undefined ? cellsOverride : g.sim ? g.cells[d] : g.cells[d] + (g.fixed || big ? 0 : specials * (g.cells[d] <= 2 ? 1 : R.mazeSpecialCells));
         const single = g.w <= 12 && g.h <= 12;
         rolls = cells * (single ? Math.floor(Math.floor(5 * g.w / 3) * 5 * g.h / 3) : g.w * g.h * ROLLS8 / 64);
         rooms = cells * (single ? 1 : Math.ceil(g.w / 8) * Math.ceil(g.h / 8));
@@ -714,11 +722,27 @@
     const runCache = new Map();
     /** Expected kills per full clear of level lid at difficulty d by monster type and rank -> {kills: Map id -> {regular, champion, unique, minion},
      *  share: Map id -> E[pack share], packs, bosses, rolls, rooms}. Cached per CONFIG.run. */
-    function areaRun(lid, d) {
-      const R = CONFIG.run, key = lid + '|' + d + '|' + JSON.stringify(R);
+    /** One whole-area clear. Tal Rasha's Tomb (geo.tomb, CONFIG.run.tombsAllSeven): the seven tombs are three cases with their own populated cells
+     *  (tools/maze_cells.py tomb_split: the staff tomb, the boss tomb with Ancient Kaa, five plain tombs), each run on its own because the champion /
+     *  unique packs do not scale with cells (every tomb fills up to its MonUMin); the result adds staff + boss + 5 x plain and keeps each case's
+     *  kills in `cases` (one tomb of that case). */
+    function areaRun(lid, d, cells) {
+      const R = CONFIG.run, key = lid + '|' + d + '|' + cells + '|' + JSON.stringify(R);
       if (runCache.has(key)) return runCache.get(key);
       const A = D.levels[lid], list = d === 0 ? A.mon : A.nmon;
-      const { rolls, rooms } = areaRolls(A, d);
+      const T = A.geo && A.geo.tomb;
+      if (cells === undefined && R.tombsAllSeven && T) {
+        const cs = { staff: areaRun(lid, d, T.staff[d]), boss: areaRun(lid, d, T.boss[d]), plain: areaRun(lid, d, T.plain[d]) }, mul = { staff: 1, boss: 1, plain: 5 };
+        const kills = new Map(), res = { kills, share: cs.staff.share, packs: 0, bosses: 0, rolls: 0, rooms: 0, cases: {} };
+        for (const c in cs) {
+          for (const f of ['packs', 'bosses', 'rolls', 'rooms']) res[f] += cs[c][f] * mul[c];
+          for (const [id, k] of cs[c].kills) { const o = kills.get(id) || {}; for (const rk in k) o[rk] = (o[rk] || 0) + k[rk] * mul[c]; kills.set(id, o); }
+          res.cases[c] = cs[c].kills;
+        }
+        runCache.set(key, res);
+        return res;
+      }
+      const { rolls, rooms } = areaRolls(A, d, cells);
       const packs = rolls * (Math.min(A.den[d], 10000) + 1) / 100000 * (A.pl ?? 1) * R.placeFactor;   // rand % 100000 <= MonDen per roll; pl = map layout
       const pk = A.pk ? A.pk[d] : 0, pb = A.pb || {};   // preset monsters (tools/preset_monsters.py): units counting as uniques, unique / champion packs
       const bosses = Math.min(packs, bossPacks(packs, rooms, A.umin[d], A.umax[d], pk));
@@ -801,19 +825,22 @@
             const share = run.share.get(id) || 0;
             const lv0 = lvOf(m);
             const recs = ['regular', 'champion', 'unique', 'minion'].filter((rk) => (inList && rk !== 'minion') || k[rk] > 0).map((rk) => [rk, lv0 + OFF[rk], k[rk] || 0]);
+            const casesOf = (rk) => { const o = {}; for (const c in run.cases) o[c] = (run.cases[c].get(id) || {})[rk] || 0; return o; };   // tombs: kills in one tomb of each case
             if (inList && d === 2 && inTz && heraldsAvailable(s) && !m.nh) {
               // herald TC from monstats TreasureClassHerald(H), group-upgraded at mlvl + tier boost
               const tier = Math.max(1, Math.min(5, s.tier || 1));
               const hb = (D.tz.herald[tier - 1] || { boost: 0 }).boost;
               const htc = (m.tc[d] || {}).hr;
               if (htc && TC[htc]) out.push({ key: id + '|herald|' + lid + '|' + d, mon: id, name: m.n, rank: 'herald', diff: d, area: +lid,
-                areaName: A.name, act: A.act, mlvl: lv0 + CONFIG.uniqueOffset, tc: htc, boss: false, perRun: 0, tz: true, herald: true, tier, tcBoost: hb });
+                areaName: areaLabel(lid), act: A.act, mlvl: lv0 + CONFIG.uniqueOffset, tc: htc, boss: false, perRun: 0, tz: true, herald: true, tier, tcBoost: hb });
             }
             for (const [rank, mlvl, perRun] of recs) {
               const tcn = pickTC(m, d, rank, inTz);
               if (!tcn || !TC[tcn]) continue;
-              out.push({ key: id + '|' + rank + '|' + lid + '|' + d, mon: id, name: m.n, rank, diff: d, area: +lid,
-                areaName: A.name, act: A.act, mlvl, tc: tcn, boss: false, perRun, tz: inTz, share });
+              const row = { key: id + '|' + rank + '|' + lid + '|' + d, mon: id, name: m.n, rank, diff: d, area: +lid,
+                areaName: areaLabel(lid), act: A.act, mlvl, tc: tcn, boss: false, perRun, tz: inTz, share };
+              if (run.cases) { row.cases = casesOf(rank); row.tombs = 7; }
+              out.push(row);
             }
           }
         }
@@ -837,7 +864,7 @@
             mine.push({ id, n, tc: tcn, mlvl });
             const key = id + '|minion|' + lid + '|' + d, ex = minRow.get(key);
             if (ex) { ex.perRun += n; ex.suMin = (ex.suMin || 0) + n; continue; }
-            const row = { key, mon: id, name: m.n, rank: 'minion', diff: d, area: +lid, areaName: A.name, act: A.act,
+            const row = { key, mon: id, name: m.n, rank: 'minion', diff: d, area: +lid, areaName: areaLabel(lid), act: A.act,
               mlvl, tc: tcn, boss: false, perRun: n, tz: inTz, share: 0, suMin: n };   // suMin = the part that comes from super uniques
             out.push(row); minRow.set(key, row);
           }
@@ -858,7 +885,7 @@
           let tcn = (inTz && su.dtc[d]) || su.tc[d];
           if (!tcn || !TC[tcn]) continue;
           const row = { key: 'su|' + su.id + '|' + d, su: su.id, mon: su.cls, name: su.n, rank: 'super', diff: d, area: lid,
-            areaName: A.name, act: A.act, mlvl, tc: tcn, boss: false, perRun: 1, tz: inTz };
+            areaName: areaLabel(lid), act: A.act, mlvl, tc: tcn, boss: false, perRun: 1, tz: inTz };
           out.push(row);
           row.minions = suMinions(su, lid, inTz);
         }
@@ -875,12 +902,12 @@
           const tcn = pickTC(m, d, 'regular', inTz);
           if (!tcn || !TC[tcn]) continue;
           out.push({ key: 'boss|' + id + '|' + d, mon: id, name: m.n, rank: 'boss', diff: d, area: lid,
-            areaName: A.name, act: A.act, mlvl, tc: tcn, boss: true, perRun: 1, tz: inTz, quest: false });
+            areaName: areaLabel(lid), act: A.act, mlvl, tc: tcn, boss: true, perRun: 1, tz: inTz, quest: false });
           // setting `quest`: the quest kill as a row of its own next to the regular one (first kill only, so no kills per run); none when the
           // quest TC is the regular one (Andariel)
           const qtc = s.quest && m.qtc && m.qtc[d] && TC[m.qtc[d]] && m.qtc[d] !== tcn && (!inTz || CONFIG.questOverridesTz) ? m.qtc[d] : null;
           if (qtc) out.push({ key: 'boss|' + id + '|' + d + '|quest', mon: id, name: m.n + ' (quest)', rank: 'boss', diff: d, area: lid,
-            areaName: A.name, act: A.act, mlvl, tc: qtc, boss: true, perRun: 0, tz: inTz, quest: true });
+            areaName: areaLabel(lid), act: A.act, mlvl, tc: qtc, boss: true, perRun: 0, tz: inTz, quest: true });
           for (const su of D.su) if (su.cls === id && D.su_area[su.id] === lid) suMinions(su, lid, inTz);   // the super unique row of the same boss (Radament, Summoner, Nihlathak, Griswold)
         }
       }
@@ -899,7 +926,12 @@
       const tz = !!ctx.s.tz, out = [];
       for (const src of list) {
         if (src.diff !== d || src.quest || (tz && !src.tz)) continue;
-        if (R.clear && R.clear.indexOf(src.area) >= 0) { if (!src.herald) out.push(src); continue; }
+        if (R.clear && R.clear.indexOf(src.area) >= 0) {
+          if (src.herald) continue;
+          if (!R.tombCase) out.push(src);
+          else if (src.cases) out.push(Object.assign({}, src, { perRun: src.cases[R.tombCase], tombs: 1 }));   // one tomb of that case
+          continue;   // tombCase: the area's super uniques / bosses (Ancient Kaa is in the boss tomb) are not part of the run
+        }
         if (src.rank === 'super' && R.su.indexOf(src.su) >= 0) {
           out.push(src);
           for (const mi of src.minions || []) out.push({ key: 'run|' + runId + '|' + src.su + '|' + mi.id + '|' + d, mon: mi.id, name: D.monsters[mi.id].n + ' (' + src.name + ' minions)',
@@ -935,6 +967,7 @@
         let g = groups.get(key);
         if (!g) {
           g = Object.assign({}, src, { key, members: [], mon: '', perRun: 0, share: 0 });
+          if (src.cases) g.cases = { staff: 0, boss: 0, plain: 0 };
           if (src.herald) { g.area = 0; g.act = 0; g.areas = []; g.acts = []; g.seen = new Set(); }
           groups.set(key, g); out.push(g);
           split.set(where, (split.get(where) || 0) + 1);
@@ -945,6 +978,7 @@
           if (!g.seen.has(src.mon)) { g.seen.add(src.mon); g.mon += (g.mon ? ' ' : '') + src.mon; }
         } else g.mon += (g.mon ? ' ' : '') + src.mon;
         g.perRun += src.perRun; g.share += src.share || 0;
+        if (g.cases && src.cases) for (const c in src.cases) g.cases[c] += src.cases[c];
       }
       for (const g of groups.values()) {
         const where = [g.rank, g.area, g.diff, g.tz ? 1 : 0, g.tier || 0].join('|');
@@ -2541,7 +2575,7 @@
     }
 
     return {
-      CONFIG, data: D, farmMinutes, DIFFS, items, types, getCtx, playersN, adjNoDrop, dist, upgradeTC, areaSources, DUP_OF, areaRun, areaRolls, listShares, bossPacks,
+      CONFIG, data: D, farmMinutes, DIFFS, items, types, getCtx, playersN, adjNoDrop, dist, upgradeTC, areaSources, DUP_OF, areaLabel, areaRun, areaRolls, listShares, bossPacks,
       mode, heraldsAvailable, sunderChance, sunderPaths, isSunder, adjQuality, heraldSpawnPct, quality, qualityTotals, sources, runSources, srcDist, chanceFor, dropsOf, baseQualityChance, affixLevel, minIlvlForAlvl, eligible, maxSockets, affixProb, rareProbFromSamples, cardOdds, ilvlCurve, minLevels, staffDist, staffBase,
       statList, describe, describeAt, sliderWhat, affixSearch, searchIndex, baseTypes, metaCache, uniqById, setById, uniqByCode, setByCode, prettyId, tzLevel,
       eligibleUniques, eligibleSets, condProb, trialsFor,

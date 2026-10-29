@@ -836,20 +836,22 @@ class RunRef:
         self.pl = {int(k): v.get("pl", 1) for k, v in lv_.items()}
         # cave cells: populated cells of the replayed maze generator (tools/maze_cells.py, checked separately below); lvlmaze Rooms rule as the fallback
         self.sim = {int(k): v["geo"]["cells"] for k, v in lv_.items() if v.get("geo", {}).get("sim")}
+        # Tal Rasha's Tomb: populated cells per tomb case (staff / boss / plain, maze_cells.py tomb_split; checked separately below)
+        self.tomb = {int(k): v["geo"]["tomb"] for k, v in lv_.items() if v.get("geo", {}).get("tomb")}
         # preset monsters (tools/preset_monsters.py; the extraction from the .ds1 files is checked separately below): fixed monsters "pre", unique /
         # champion packs "pb", and "pk" = uniques already placed when the random packs roll
         self.pre = {int(k): v.get("pre", []) for k, v in lv_.items()}
         self.pb = {int(k): v.get("pb", {}) for k, v in lv_.items()}
         self.pk = {int(k): v.get("pk", [0, 0, 0]) for k, v in lv_.items()}
 
-    def rolls(self, lid, d):
+    def rolls(self, lid, d, cells=None):
         r, suf = self.lv[lid], ["", "(N)", "(H)"][d]
         specials = sum(1 for i in range(8) if n(r.get("Vis%d" % i)) > 0) + (1 if r.get("Waypoint") and n(r.get("Waypoint"), 255) < 255 else 0)
         mz = self.mz.get(lid)
         if n(r["DrlgType"]) == 1 and mz:
             w, h = n(mz["SizeX"]), n(mz["SizeY"])
             base_ = n(mz["Rooms" + suf])
-            cells = self.sim[lid][d] if lid in self.sim else base_ + (0 if lid in self.FIXED or w > 24 or h > 24 else max(2, specials) * (1 if base_ <= 2 else self.c["mazeSpecialCells"]))
+            cells = cells if cells is not None else self.sim[lid][d] if lid in self.sim else base_ + (0 if lid in self.FIXED or w > 24 or h > 24 else max(2, specials) * (1 if base_ <= 2 else self.c["mazeSpecialCells"]))
             if w <= 12 and h <= 12:
                 rolls, rooms = cells * ((5 * w // 3) * 5 * h // 3), cells
             else:
@@ -919,10 +921,25 @@ class RunRef:
         return sum((c - s0) * pc for c, pc in enumerate(dist))
 
     def area(self, lid, d):
+        """one whole-area clear; Tal Rasha's Tomb with tombsAllSeven = staff + boss + 5 plain tombs, each case its own clear (its own MonUMin fill)"""
+        if lid in self.tomb and self.c.get("tombsAllSeven"):
+            out = {"rolls": 0, "rooms": 0, "packs": 0, "bosses": 0, "kills": {}}
+            for case, mul in (("staff", 1), ("boss", 1), ("plain", 5)):
+                one = self.area_one(lid, d, self.tomb[lid][case][d])
+                for f in ("rolls", "rooms", "packs", "bosses"):
+                    out[f] += one[f] * mul
+                for mid, ks in one["kills"].items():
+                    for rk, x in ks.items():
+                        out["kills"].setdefault(mid, {})
+                        out["kills"][mid][rk] = out["kills"][mid].get(rk, 0) + x * mul
+            return out
+        return self.area_one(lid, d)
+
+    def area_one(self, lid, d, cells=None):
         r, suf = self.lv[lid], ["", "(N)", "(H)"][d]
         pre = "" if d == 0 else "n"
         lst = [r["%smon%d" % (pre, i)] for i in range(1, 26) if r.get("%smon%d" % (pre, i))]
-        rolls, rooms = self.rolls(lid, d)
+        rolls, rooms = self.rolls(lid, d, cells)
         packs = rolls * (min(n(r["MonDen" + suf]), 10000) + 1) / 100000 * self.pl.get(lid, 1) * self.c["placeFactor"]
         bosses = min(packs, self.bosses(packs, rooms, n(r["MonUMin" + suf]), n(r["MonUMax" + suf]), self.pk[lid][d]))
         sh = self.shares(lst, n(r["NumMon"]), n(r.get("rangedspawn")))
@@ -2165,6 +2182,30 @@ def main():
     fact("All tiers (Hell, clvl 85): Herald tier 1-5 rows over all terror-zone areas, each equal to that tier's per-monster herald in Blood Moor (Flame Rift)", H_["names"] == ["Herald tier %d (mlvl 90)" % t for t in range(1, 6)] and H_["worst"] < 1e-9, " / ".join("%.3g" % x for x in H_["p"]))
     T_ = FA["talTombs"]
     fact("the seven identical Tal Rasha's Tombs (66-72) are listed once, as area 66; no other area is a copy (copies %s)" % T_["dupOf"], T_["dupOf"] == [[k, 66] for k in range(67, 73)] and T_["areas"] == [66] and T_["maxRowsPerMon"] == 1, "areas %s, rows per monster %s" % (T_["areas"], T_["maxRowsPerMon"]))
+    # ---- Tal Rasha's Tombs: all seven by default (staff + boss + 5 plain, each case on its own), the true tomb as a run
+    TB_ = FA["tombs"]
+    for d_, x_ in enumerate(TB_["d"]):
+        dn_ = ["Normal", "Nightmare", "Hell"][d_]
+        fact("Tal Rasha's Tombs (%s): all-seven kills == staff + boss + 5 x plain (%.0f; cases %s)" % (dn_, x_["kills"], " / ".join("%.0f" % k for k in x_["caseKills"])),
+             abs(x_["kills"] - x_["sum"]) < 1e-6 * x_["sum"] and abs(x_["elite"] - x_["eliteSum"]) < 1e-9 * max(1, x_["eliteSum"]) and x_["rowsMatch"])
+        lo_, hi_ = TB_["umin"][d_], TB_["umax"][d_]
+        fact("Tal Rasha's Tombs (%s): champion / unique packs of every tomb case near MonUMin..MonUMax %d..%d (%s)" % (dn_, lo_, hi_, " / ".join("%.2f" % e for e in x_["caseElite"])),
+             all(lo_ - 1 <= e <= hi_ + 1e-9 for e in x_["caseElite"]) and min(x_["caseElite"]) > 0, "a plain tomb fills up to about MonUMin like a big one")
+        fact("Tal Rasha's Tombs (%s): Ancient Kaa is one kill in the all-seven clear" % dn_, x_["kaa"] == [["Ancient Kaa the Soulless", 1]], str(x_["kaa"]))
+    H2_ = TB_["d"][2]
+    fact("Tal Rasha's Tombs (Hell): about 2135 kills and 59 champion / unique packs per run (true tomb %.0f and %.1f)" % (TB_["oldKills"], TB_["oldElite"]),
+         2000 < H2_["kills"] < 2300 and 55 < H2_["elite"] < 63 and 3.2 < H2_["kills"] / TB_["oldKills"] < 3.7, "%.0f kills, %.1f packs" % (H2_["kills"], H2_["elite"]))
+    fact("the true-tomb run == the old whole-area clear of 66 without Ancient Kaa (row by row, worst rel diff %.2g; staff-tomb cells of tomb_split vs the main run)" % TB_["worstTrue"],
+         TB_["worstTrue"] < 0.01 and TB_["trueKaa"] == 0, "%.0f kills" % TB_["trueKills"])
+    fact("tomb per-kill odds unchanged by all-seven (Hell, Mal rune)", TB_["perKillSame"])
+    fact("area 66 is named Tal Rasha's Tombs (all seven) (old: %s)" % TB_["oldName"], TB_["names"] == ["Tal Rasha's Tombs (all seven)"] and TB_["oldName"] == "Tal Rasha's Tomb", str(TB_["names"]))
+    fact("popular farms: both tomb farms (all seven = whole area clear, true tomb = run|truetomb)",
+         TB_["farms"] == [["Tal Rasha's Tombs: all seven", 66, ""], ["Tal Rasha's Tombs: true tomb", 66, "run|truetomb"]], str(TB_["farms"]))
+    fact("per run, all seven tombs beat the true tomb (Hell; %s)" % ", ".join("%s %.3g vs %.3g" % tuple(f) for f in TB_["farmOrder"]), all(f[1] > f[2] > 0 for f in TB_["farmOrder"]))
+    pop2_ = {r_["Name"]: n(r_["Populate"]) for r_ in reversed(rd("lvlprest"))}
+    kinds_ = json.load(open(os.path.join(HERE, "tools", "maze_cells.json"), encoding="utf-8"))["levels"]["66"]["tomb_cases"]["kinds"]
+    want_ = {c_: [round(sum(v_[d_] for k_, v_ in kk_.items() if pop2_.get(k_)), 3) for d_ in range(3)] for c_, kk_ in kinds_.items()}
+    fact("data.json geo.tomb == populated rows of maze_cells.json tomb_cases kinds (%s)" % want_, TB_["tomb"] == want_, str(TB_["tomb"]))
     # ---- Pandemonium areas are Hell-only
     P_ = FA["pandemonium"]
     fact("Pandemonium areas 133-136 have no source rows in Normal / Nightmare, but do in Hell (rows %s); Colossal Summit unchanged (%d / %d)" % (P_["hell"], P_["colossalLow"], P_["colossalHell"]),

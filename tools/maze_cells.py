@@ -1392,17 +1392,25 @@ def simulate(seeds, only=None):
 
 
 def tomb_split(seeds):
-    """Tal Rasha's Tomb 1 (66) mean cells by case, DrlgDrlg.cpp: staff tomb and boss tomb are two different random tombs of the seven -> {difficulty: {case: [mean cells, runs]}}"""
-    res = {}
+    """Tal Rasha's Tomb 1 (66) by case, DrlgDrlg.cpp: staff tomb and boss tomb are two different random tombs of the seven, the other five are plain.
+    -> {difficulty: {case: [mean cells, runs]}, "kinds": {case: {lvlprest name: [mean rows per tomb, per difficulty]}}}; build.py applies this mode's
+    Populate to the kinds (like kinds_mean) to get the populated cells of each case"""
+    res, kinds = {}, defaultdict(lambda: defaultdict(lambda: [0.0, 0.0, 0.0]))
     for d in range(3):
         rng = random.Random(66 * 1000 + 500 + d)
-        cases = defaultdict(list)
+        cases, kc = defaultdict(list), defaultdict(Counter)
         for _ in range(seeds):
             a, b = rng.sample(range(7), 2)
             staff, boss = TOMBS[0] + a, TOMBS[0] + b
             lv = run(TOMBS[0], d, rng, staff, boss)
-            cases["staff" if staff == TOMBS[0] else "boss" if boss == TOMBS[0] else "plain"].append(len(lv.rooms))
+            c = "staff" if staff == TOMBS[0] else "boss" if boss == TOMBS[0] else "plain"
+            cases[c].append(len(lv.rooms))
+            kc[c].update(row_of(r.prest)["Name"] if r.prest else "(none)" for r in lv.rooms)
         res["d%d" % d] = {c: [round(sum(v) / len(v), 2), len(v)] for c, v in sorted(cases.items())}
+        for c, v in cases.items():
+            for k, x in kc[c].items():
+                kinds[c][k][d] = round(x / len(v), 4)
+    res["kinds"] = {c: {k: v for k, v in sorted(kk.items(), key=lambda kv: -max(kv[1]))} for c, kk in sorted(kinds.items())}
     return res
 
 

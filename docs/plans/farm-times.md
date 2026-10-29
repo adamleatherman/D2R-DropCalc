@@ -56,6 +56,8 @@ chance per hour = 1 - (1 - chance per run)^(60 / time per game)
 | Shenk + Eldritch | 1.25 | 0.50 | 0.10 | 1.20 | 1.10 | 0 |
 | Nihlathak | 1.75 | 0.60 | 0.30 | 1.25 | 1.10 | 0 |
 | Ancient Tunnels | 3.00 | 0.30 | 0.20 | 0.70 | 1.05 | 0 |
+| Tal Rasha's Tombs: all seven (added with the tombs plan) | 10.00 | 0.30 | 0.15 | 0.70 | 1.15 | 0 |
+| Tal Rasha's Tombs: true tomb | 2.50 | 0.35 | 0.20 | 0.75 | 1.15 | 0 |
 | The Pit (both levels) | 4.00 | 0.30 | 0.15 | 0.70 | 1.10 | 0 |
 | Chaos: seal pop | 4.00 | 0.40 | 0.05 | 0.85 | 1.25 | 0 |
 | Chaos: full clear | 8.00 | 0.25 | 0.05 | 0.80 | 1.25 | 0 |
@@ -78,6 +80,8 @@ since 2026-10-28; the check table keeps 0.5):
 | Shenk + Eldritch | 1.8 | 1.9 | 2.1 | 2.3 | 2.3 | 3.6 |
 | Nihlathak | 2.3 | 2.8 | 3.0 | 3.6 | 3.5 | 6.2 |
 | Ancient Tunnels | 3.6 | 4.2 | 3.5 | 4.1 | 4.0 | 6.5 |
+| Tal Rasha's Tombs: all seven | 11.5 | 13.0 | 10.6 | 12.2 | 11.5 | 19.6 |
+| Tal Rasha's Tombs: true tomb | 3.2 | 3.7 | 3.3 | 3.8 | 3.6 | 6.0 |
 | The Pit (both levels) | 4.8 | 5.4 | 4.5 | 5.1 | 4.9 | 8.1 |
 | Chaos: seal pop | 5.1 | 5.3 | 4.8 | 5.5 | 5.0 | 8.4 |
 | Chaos: full clear | 10.0 | 10.4 | 8.9 | 9.7 | 8.5 | 13.7 |

@@ -130,7 +130,7 @@
   const rankTag = (r) => r === 'regular' ? '' : r === 'herald' ? ' <span class="tag herald" title="' + esc(HERALD_TIP) + '">herald</span>' : ' <span class="tag ' + r + '">' + r + '</span>';
   const srcCols = [
     { k: 'name', label: 'Monster', l: 1, get: (r) => r.src.name, html: (r) => (r.src.members ? '<span title="' + esc(r.src.members.join(', ')) + '">' + esc(r.src.name) + '</span>' : esc(r.src.name)) + rankTag(r.src.rank) },
-    { k: 'area', label: 'Area', l: 1, get: (r) => r.src.areaName, html: (r) => (r.src.areas ? '<span title="' + esc(r.src.areas.map((a) => a.name).join(', ')) + '">' + esc(r.src.areaName) + '</span>' : esc(r.src.areaName)) + (r.src.tz ? ' <span class="tz">TZ</span>' : '') },
+    { k: 'area', label: 'Area', l: 1, get: (r) => r.src.areaName, html: (r) => (r.src.areas ? '<span title="' + esc(r.src.areas.map((a) => a.name).join(', ')) + '">' + esc(r.src.areaName) + '</span>' : r.src.tombs === 7 ? '<span title="' + esc(TOMBS_TIP) + '">' + esc(r.src.areaName) + '</span>' : esc(r.src.areaName)) + (r.src.tz ? ' <span class="tz">TZ</span>' : '') },
     { k: 'diff', label: 'Diff', l: 1, get: (r) => r.src.diff, fmt: (r) => DIFF[r.src.diff].slice(0, 2) + (r.src.diff == 1 ? 'm' : '') },
     { k: 'act', label: 'Act', get: (r) => r.src.acts ? r.src.acts[0] : r.src.act, fmt: (r) => r.src.acts ? r.src.acts.join(', ') : r.src.act },
     { k: 'mlvl', label: 'mlvl', note: 'Monster level = the item level of its drops (champions and uniques include their bonus; items cap at 99). An area row: its lowest to highest.',
@@ -245,7 +245,7 @@
       const c = {}; for (const key in parts[0].c) c[key] = wavg(parts, kills, (r) => r.c[key]);
       const sp = parts[0].sp ? { table: wavg(parts, kills, (r) => r.sp.table), mf: wavg(parts, kills, (r) => r.sp.mf), total: wavg(parts, kills, (r) => r.sp.total) } : null;
       parts.sort((x, y) => runP(y) - runP(x));
-      return { src: { name: s0.areaName, areaName: s0.areaName, diff: s0.diff, act: s0.act, tz: s0.tz, rank: 'regular', mlvl: Math.max(...parts.map((r) => r.src.mlvl)), mlvlLo: Math.min(...parts.map((r) => r.src.mlvl)), perRun: kills }, c, sp, runP: p, parts };
+      return { src: { name: s0.areaName, areaName: s0.areaName, diff: s0.diff, act: s0.act, tz: s0.tz, rank: 'regular', mlvl: Math.max(...parts.map((r) => r.src.mlvl)), mlvlLo: Math.min(...parts.map((r) => r.src.mlvl)), perRun: kills, tombs: parts.some((r) => r.src.tombs === 7) ? 7 : 0 }, c, sp, runP: p, parts };
     });
   }
   const actsOf = (src) => src.acts || [src.act];
@@ -259,6 +259,7 @@
     if (areas.length === src.areas.length) return src;
     return Object.assign({}, src, { areas, acts: Array.from(new Set(areas.map((a) => E.data.levels[a.id].act))).sort(), areaName: areas.length + ' of ' + src.areas.length + ' terror-zone areas' });
   }
+  const TOMBS_TIP = "All seven tombs in one run: the true (staff) tomb, Ancient Kaa's tomb and five plain tombs, each with its own size. The true tomb alone has about 29% of the kills and 15% of the champion / unique packs (tab 2: Tal Rasha's Tombs: true tomb).";
   const srcWhere = (src) => src.name + ' in ' + src.areaName + ' (' + DIFF[src.diff] + ')';
   const runsTxt = (p) => p >= 1 ? 'always' : odds(p) + ' runs';
   const lowest = (rows) => rows.reduce((a, r) => !a || r.src.mlvl < a.src.mlvl ? r : a, null);
@@ -1321,7 +1322,7 @@
     const areas = Object.keys(E.data.levels).filter((id) => !E.DUP_OF[id] && (E.data.levels[id].mon.length || E.data.levels[id].nmon.length || E.data.levels[id].pre || bossAt.has(id)))
       .map((id) => ({ id, a: E.data.levels[id] })).sort((x, y) => x.a.act - y.a.act || x.id - y.id);
     const cur = $('ar2').value;
-    $('ar2').innerHTML = '<option value="">All areas</option>' + areas.map((x) => '<option value="' + x.id + '">Act ' + x.a.act + ' - ' + esc(x.a.name) + (x.a.ho ? ' (Hell only)' : '') + '</option>').join('');
+    $('ar2').innerHTML = '<option value="">All areas</option>' + areas.map((x) => '<option value="' + x.id + '">Act ' + x.a.act + ' - ' + esc(E.areaLabel(x.id)) + (x.a.ho ? ' (Hell only)' : '') + '</option>').join('');
     if (areas.some((x) => x.id === cur)) $('ar2').value = cur;
     fillMonsters();
     const cur3 = $('ar3').value;

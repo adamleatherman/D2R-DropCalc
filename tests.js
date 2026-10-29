@@ -622,8 +622,39 @@
           const cx0 = E.getCtx({ players: 1, party: 1, ladder: true, tz: true, clvl: 85, tier: 0, mf: 0 }); const pg = E.chanceFor(cx0, g, tg, 0).target, pr = E.chanceFor(E.getCtx({ players: 1, party: 1, ladder: true, tz: true, clvl: 85, tier: g.tier, mf: 0 }), r, tg, 0).target;
           worst = Math.max(worst, Math.abs(pg - pr) / Math.max(pr, 1e-300)); }
         F.heraldTiers = { names, worst, p: all.map((g) => E.chanceFor(E.getCtx({ players: 1, party: 1, ladder: true, tz: true, clvl: 85, tier: 0, mf: 0 }), g, tg, 0).target) }; }
-      { const cx = E.getCtx({ players: 1, party: 1, ladder: true, tz: false, mf: 0 }); const t = E.areaSources(cx).filter((s) => s.diff === 2 && s.areaName === "Tal Rasha's Tomb");
+      { const cx = E.getCtx({ players: 1, party: 1, ladder: true, tz: false, mf: 0 }); const t = E.areaSources(cx).filter((s) => s.diff === 2 && /^Tal Rasha's Tomb/.test(s.areaName));
         F.talTombs = { dupOf: Object.keys(E.DUP_OF).sort((a, b) => a - b).map((k) => [+k, +E.DUP_OF[k]]), areas: Array.from(new Set(t.map((s) => s.area))), maxRowsPerMon: Math.max(...Object.values(t.filter((s) => s.rank === 'regular').reduce((o, s) => (o[s.mon] = (o[s.mon] || 0) + 1, o), {}))) }; }
+      // Tal Rasha's Tombs: area 66 = all seven tombs (staff + boss + 5 plain, each its own areaRun with geo.tomb cells); the true-tomb run = one staff tomb
+      { const T = E.data.levels[66].geo.tomb, all = (ranks, r) => { let t = 0; for (const [, k] of r.kills) for (const rk of ranks) t += k[rk] || 0; return t; }, RK = ['regular', 'champion', 'unique', 'minion'];
+        const cx = E.getCtx({ players: 1, party: 1, ladder: true, tz: false, mf: 0 }), L = E.areaSources(cx), S = E.sources(cx), tg = { kind: 'base', code: 'r08' };
+        F.tombs = { tomb: T, umin: E.data.levels[66].umin, umax: E.data.levels[66].umax, d: [] };
+        for (const d of [0, 1, 2]) {
+          const r = E.areaRun(66, d), c = { staff: E.areaRun(66, d, T.staff[d]), boss: E.areaRun(66, d, T.boss[d]), plain: E.areaRun(66, d, T.plain[d]) };
+          const rows = S.filter((s) => s.area === 66 && s.diff === d && s.cases);
+          F.tombs.d.push({ kills: all(RK, r), sum: all(RK, c.staff) + all(RK, c.boss) + 5 * all(RK, c.plain), elite: r.bosses, eliteSum: c.staff.bosses + c.boss.bosses + 5 * c.plain.bosses,
+            caseElite: [c.staff.bosses, c.boss.bosses, c.plain.bosses], caseKills: [all(RK, c.staff), all(RK, c.boss), all(RK, c.plain)],
+            rowsMatch: rows.length > 0 && rows.every((s) => Math.abs(s.perRun - (s.suMin || 0) - (s.cases.staff + s.cases.boss + 5 * s.cases.plain)) <= 1e-9 * Math.max(1, s.perRun)),   // suMin: Ancient Kaa's minions
+            kaa: S.filter((s) => s.area === 66 && s.diff === d && s.rank === 'super').map((s) => [s.name, s.perRun]) });
+        }
+        const tt = E.runSources(cx, 'truetomb', 2, L), names = E.areaSources(cx).filter((s) => s.area === 66).map((s) => s.areaName);
+        const perKill = (ctx) => Object.fromEntries(E.sources(ctx).filter((s) => s.area === 66 && s.diff === 2).map((s) => [s.key, E.chanceFor(ctx, s, tg, 0).target]));
+        const pk1 = perKill(cx);
+        E.CONFIG.run.tombsAllSeven = false;
+        const cx0 = E.getCtx({ players: 1, party: 1, ladder: true, tz: false, mf: 0 }), old = E.sources(cx0).filter((s) => s.area === 66 && s.diff === 2 && /^(regular|champion|unique|minion)$/.test(s.rank));
+        const pk0 = perKill(cx0), oldName = old[0].areaName, oldRun = E.areaRun(66, 2);
+        E.CONFIG.run.tombsAllSeven = true;
+        // the true tomb run vs the old whole-area clear without Ancient Kaa's minions (suMin): kills per run in total and of the regular rows one by one
+        const oldReg = Object.fromEntries(old.filter((s) => s.rank === 'regular').map((s) => [s.key, s.perRun])), ttReg = Object.fromEntries(tt.filter((s) => s.rank === 'regular').map((s) => [s.key, s.perRun]));
+        const oldTot = old.reduce((a, s) => a + s.perRun - (s.suMin || 0), 0), ttTot = tt.reduce((a, s) => a + s.perRun, 0);
+        let worstTrue = Math.abs(ttTot - oldTot) / oldTot; for (const k in oldReg) worstTrue = Math.max(worstTrue, Math.abs((ttReg[k] || 0) - oldReg[k]) / Math.max(oldReg[k], 1));
+        Object.assign(F.tombs, { trueKills: tt.reduce((a, s) => a + s.perRun, 0), trueKaa: tt.filter((s) => s.rank === 'super').length, worstTrue,
+          oldKills: all(RK, oldRun), oldElite: oldRun.bosses, oldName, names: Array.from(new Set(names)),
+          perKillSame: Object.keys(pk0).length > 0 && Object.keys(pk0).every((k) => pk1[k] === pk0[k]),
+          farms: E.CONFIG.farms.filter((f) => /^Tal Rasha/.test(f.name)).map((f) => [f.name, f.area, f.src]) });
+        // the all-seven farm beats the true tomb per run (same rows, more kills)
+        const runP = (rows, t) => -Math.expm1(rows.reduce((a, s) => a + s.perRun * Math.log1p(-Math.min(E.chanceFor(cx, s, t, 0).target, 1)), 0));
+        const allRows = L.filter((s) => s.area === 66 && s.diff === 2 && !s.herald && !s.quest);
+        F.tombs.farmOrder = ['r08', 'r15', 'r22'].map((code) => { const t = { kind: 'base', code }; return [code, runP(allRows, t), runP(tt, t)]; }); }
       // super unique minions (rows with suMin: the part of a minion row that comes from super uniques) and the Hell-only Pandemonium areas
       { const cx = E.getCtx({ players: 1, party: 1, ladder: true, tz: false, mf: 0 }), S = E.sources(cx);
         F.suMinions = S.filter((s) => s.suMin > 0).map((s) => [s.area, s.mon, s.diff, s.suMin, s.perRun, s.tc, s.mlvl]);
@@ -646,7 +677,7 @@
         const EXP = { 'Pindleskin': [1.3, 1.3, 1.4, 1.5, 1.5, 2.1], 'Andariel': [1.8, 2.1, 2.2, 2.6, 2.6, 4.5], 'Countess': [2.3, 3.0, 3.0, 3.6, 3.6, 6.8], 'Summoner: boss only': [1.5, 1.9, 1.9, 2.3, 2.3, 4.1],
           'Summoner: + Arcane Sanctuary ghosts': [4.8, 5.2, 4.3, 4.8, 4.6, 7.5], 'Travincal council': [1.6, 1.6, 1.6, 1.8, 1.7, 2.5], 'Mephisto: boss only': [1.5, 1.9, 2.0, 2.4, 2.4, 4.2],
           'Mephisto: + Bremm (5 council)': [2.3, 3.0, 3.2, 3.8, 3.7, 6.7], 'Mephisto: + full council (7 council)': [2.3, 3.0, 3.2, 3.8, 3.7, 6.7], 'Shenk + Eldritch': [1.8, 1.9, 2.1, 2.3, 2.3, 3.6],
-          'Nihlathak': [2.3, 2.8, 3.0, 3.6, 3.5, 6.2], 'Ancient Tunnels': [3.6, 4.2, 3.5, 4.1, 4.0, 6.5], 'The Pit': [4.8, 5.4, 4.5, 5.1, 4.9, 8.1], 'Chaos: seal pop': [5.1, 5.3, 4.8, 5.5, 5.0, 8.4],
+          'Nihlathak': [2.3, 2.8, 3.0, 3.6, 3.5, 6.2], 'Ancient Tunnels': [3.6, 4.2, 3.5, 4.1, 4.0, 6.5], "Tal Rasha's Tombs: all seven": [11.5, 13.0, 10.6, 12.2, 11.5, 19.6], "Tal Rasha's Tombs: true tomb": [3.2, 3.7, 3.3, 3.8, 3.6, 6.0], 'The Pit': [4.8, 5.4, 4.5, 5.1, 4.9, 8.1], 'Chaos: seal pop': [5.1, 5.3, 4.8, 5.5, 5.0, 8.4],
           'Chaos: full clear': [10.0, 10.4, 8.9, 9.7, 8.5, 13.7], 'Baal': [6.2, 7.2, 6.6, 7.4, 6.7, 11.1], 'Cow Level': [9.8, 10.5, 7.5, 8.3, 8.3, 13.8] };
         const mk = (sc, ov) => ({ style: sc[0], teleport: sc[1], map: sc[2], sunder: !!sc[3], overhead: ov == null ? 0.5 : ov });   // the plan's A-F table was computed with 0.5 min overhead
         const FM = { missing: [], worst: 0, noTime: E.CONFIG.farms.filter((f) => !f.time).length, order: [], sunder: [], overhead: null, none: E.farmMinutes({ name: 'x' }, {}) };

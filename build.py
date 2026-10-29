@@ -267,13 +267,14 @@ def build(mode):
     # Maze cell counts: tools/maze_cells.py replays the cave generator (DrlgMaze.cpp) and counts the cells and the lvlprest rows of every maze level;
     # maze_cells.json holds the result. "cells" below = populated cells (Populate 1 rows of THIS mode's lvlprest.txt) per difficulty; floor_share /
     # preset_monsters weight the cell presets by the same expected row counts. A stale file (tables changed since it was made) is not used.
-    sim = {}
+    sim, tomb_kinds = {}, None
     mc_path = os.path.join(HERE, "tools", "maze_cells.json")
     if os.path.isfile(mc_path):
         with open(mc_path, encoding="utf-8") as f:
             mc = json.load(f)
         if mc["meta"]["digest"] == maze_cells.input_digest(TDIR):
             sim = {int(k): v["kinds_mean"] for k, v in mc["levels"].items()}
+            tomb_kinds = mc["levels"].get("66", {}).get("tomb_cases", {}).get("kinds")   # Tal Rasha's Tomb cases (staff / boss / plain), maze_cells.tomb_split
         else:
             print("warning: %s: tools/maze_cells.json is stale (levels / lvlmaze / lvlprest changed): run python -I tools/maze_cells.py; "
                   "cave cell counts fall back to the lvlmaze Rooms rule of thumb" % mode)
@@ -299,6 +300,7 @@ def build(mode):
     HELL_ONLY = {133, 134, 135, 136}
     ACT5_LINKED = {111: (64, 160), 112: (64, 160), 117: (64, 160)}
     FIXED_MAZE = {114, 116, 119, 125, 126, 127}
+    TOMB_LEVELS = set(range(66, 73))      # Tal Rasha's Tomb 1-7 (identical rows; maze_cells.tomb_split cases)
     levels = {}
     for r in rd("levels"):
         lid = num(r.get("Id"), -1)
@@ -342,6 +344,8 @@ def build(mode):
             if lid in sim:     # replayed generator: expected populated cells per difficulty (the engine then adds no special-preset cells)
                 L["geo"]["cells"] = [round(sum(v[d] for n, v in sim[lid].items() if populate.get(n)), 3) for d in range(3)]
                 L["geo"]["sim"] = 1
+                if tomb_kinds and lid in TOMB_LEVELS:   # every tomb gets it, so the seven stay identical (engine DUP_OF lists them once)
+                    L["geo"]["tomb"] = {c: [round(sum(v[d] for n, v in kk.items() if populate.get(n)), 3) for d in range(3)] for c, kk in tomb_kinds.items()}
         elif lid in ACT5_LINKED:
             L["geo"] = {"t": "area", "w": [ACT5_LINKED[lid][0]] * 3, "h": [ACT5_LINKED[lid][1]] * 3}
         else:
