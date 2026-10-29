@@ -612,10 +612,10 @@
         const cnt = (L, rank, area) => L.filter((s) => s.rank === rank && s.areaName === area && s.tz === tzOn).length;
         F.groups[tzOn ? 'tz' : 'noTz'] = { worst, members, grouped: grp.filter((s) => s.members).length, rawGroupable: raw.filter((s) => /champion|unique|minion|herald/.test(s.rank)).length,
           totRaw: tot(raw), totGrp: tot(grp), drifterChamp: cnt(grp, 'champion', 'Drifter Cavern'), drifterUnique: cnt(grp, 'unique', 'Drifter Cavern'),
-          drifterChampRaw: cnt(raw, 'champion', 'Drifter Cavern'), bloodMoorHerald: cnt(grp, 'herald', 'Blood Moor'), bloodMoorHeraldRaw: cnt(raw, 'herald', 'Blood Moor') };
+          drifterChampRaw: cnt(raw, 'champion', 'Drifter Cavern'), heraldRows: grp.filter((s) => s.rank === 'herald' && s.tz === tzOn).length, bloodMoorHeraldRaw: cnt(raw, 'herald', 'Blood Moor') };
       }
-      // All tiers (tier 0): one 'Herald tier N' row per tier, each equal to the per-monster herald of that tier (Blood Moor, Hell, Sunder Charm path via Monarch + Flame Rift)
-      { const all = E.areaSources(E.getCtx({ players: 1, party: 1, ladder: true, tz: true, clvl: 85, tier: 0, mf: 0 })).filter((s) => s.rank === 'herald' && s.areaName === 'Blood Moor' && s.diff === 2);
+      // All tiers (tier 0): one 'Herald tier N' row per tier over all terror-zone areas, each equal to the per-monster herald of that tier (Blood Moor, Hell, Sunder Charm path via Monarch + Flame Rift)
+      { const all = E.areaSources(E.getCtx({ players: 1, party: 1, ladder: true, tz: true, clvl: 85, tier: 0, mf: 0 })).filter((s) => s.rank === 'herald' && s.diff === 2);
         const names = all.map((s) => s.name), tg = { kind: 'unique', id: 'PreCrafted Flame Rift' };
         let worst = 0;
         for (const g of all) { const cx = E.getCtx({ players: 1, party: 1, ladder: true, tz: true, clvl: 85, tier: g.tier, mf: 0 }); const r = E.sources(cx).find((x) => x.rank === 'herald' && x.mon === 'zombie1' && x.areaName === 'Blood Moor' && x.diff === 2);
@@ -739,7 +739,7 @@
     // ---- best item level (ilvlCurve): argmax, first, flat band, single values == cardOdds ----
     { const T = E.builderTypes(), cv = res.curve = { cases: [] }, codesOf = (n) => E.builderBases(T.find((t) => t.name === n).code, -1);
       const key = (codes, re) => E.builderStats(codes).find((x) => re.test(x.key)).key;
-      for (const [nm, tn, cs, il] of [['boots FRW30 + fire31', 'Boots', [[/Faster Run/, 30], [/^Fire Resist/, 31]], 85], ['large charm +45 life', 'Large Charm', [[/^\+# to Life$/, 45]], 91], ['boots FRW30 + fire31 + light31 + MF16', 'Boots', [[/Faster Run/, 30], [/^Fire Resist/, 31], [/^Lightning Resist/, 31], [/Magic Items/, 16]], 68]]) {
+      for (const [nm, tn, cs, il] of [['boots FRW30 + fire31', 'Boots', [[/Faster Run/, 30], [/^Fire Resist/, 31]], 85], ['grand charm +45 life', 'Grand Charm', [[/^\+# to Life$/, 45]], 91], ['boots FRW30 + fire31 + light31 + MF16', 'Boots', [[/Faster Run/, 30], [/^Fire Resist/, 31], [/^Lightning Resist/, 31], [/Magic Items/, 16]], 68]]) {
         const codes = codesOf(tn), conds = cs.map(([re, m]) => ({ key: key(codes, re), min: m })), quals = ['magic', 'rare'], c = E.ilvlCurve(codes, conds, quals, null, {}), o = { name: nm, ilvl: il, q: {} };
         for (const q of quals) {
           const x = c[q], mx = Math.max.apply(null, x.p), fi = x.p.findIndex((v) => v > 0) + 1, one = E.cardOdds(codes, conds, il, [q], null, {}).total[q];

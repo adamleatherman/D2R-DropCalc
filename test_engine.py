@@ -1883,8 +1883,8 @@ def main():
             check(tag + ": first == lowest item level with odds > 0 (0 = never)", d["first"], d["firstWant"], 0)
             check(tag + ": flat band == contiguous range around best with odds >= 95% of best", d["band"], 1, 0)
             check(tag + ": the value at item level %d == cardOdds there (exact)" % c["ilvl"], d["one"], d["oneWant"], 0)
-    GC = [c for c in js["curve"]["cases"] if c["name"] == "large charm +45 life"][0]["q"]["magic"]
-    check("best item level: magic large charm +45 life first and best level is 91", GC["first"] * 1000 + GC["best"], 91091, 0)
+    GC = [c for c in js["curve"]["cases"] if c["name"] == "grand charm +45 life"][0]["q"]["magic"]
+    check("best item level: magic grand charm +45 life first and best level is 91", GC["first"] * 1000 + GC["best"], 91091, 0)
     # ---- affix families and per-character-level stats ----
     FM = js["fam"]
     check("family grouping: Bronze on small charm is ONE family (prefix, +Attack Rating) with its two tier rows", FM["bronze"]["n"] * 10 + FM["bronze"]["ids"], 12, 0)
@@ -2160,9 +2160,9 @@ def main():
     G_ = FA["groups"]["noTz"]
     fact("Drifter Cavern (Hell): one 'Champion monsters' row and one 'Unique monsters' row (was %d champion rows)" % G_["drifterChampRaw"], G_["drifterChamp"] == 1 and G_["drifterUnique"] == 1 and G_["drifterChampRaw"] > 1)
     G_ = FA["groups"]["tz"]
-    fact("terror zone Blood Moor (Hell): heralds merged into one row (was %d)" % G_["bloodMoorHeraldRaw"], G_["bloodMoorHerald"] == 1 and G_["bloodMoorHeraldRaw"] > 1)
+    fact("terror zone (Hell, tier 1, clvl 85): the heralds of every area merge into one row (Blood Moor alone had %d)" % G_["bloodMoorHeraldRaw"], G_["heraldRows"] == 1 and G_["bloodMoorHeraldRaw"] > 1)
     H_ = FA["heraldTiers"]
-    fact("All tiers: Blood Moor (Hell) lists Herald tier 1-5, each equal to that tier's per-monster herald (Flame Rift)", H_["names"] == ["Herald tier %d" % t for t in range(1, 6)] and H_["worst"] < 1e-9, " / ".join("%.3g" % x for x in H_["p"]))
+    fact("All tiers (Hell, clvl 85): Herald tier 1-5 rows over all terror-zone areas, each equal to that tier's per-monster herald in Blood Moor (Flame Rift)", H_["names"] == ["Herald tier %d (mlvl 90)" % t for t in range(1, 6)] and H_["worst"] < 1e-9, " / ".join("%.3g" % x for x in H_["p"]))
     T_ = FA["talTombs"]
     fact("the seven identical Tal Rasha's Tombs (66-72) are listed once, as area 66; no other area is a copy (copies %s)" % T_["dupOf"], T_["dupOf"] == [[k, 66] for k in range(67, 73)] and T_["areas"] == [66] and T_["maxRowsPerMon"] == 1, "areas %s, rows per monster %s" % (T_["areas"], T_["maxRowsPerMon"]))
     # ---- Pandemonium areas are Hell-only
