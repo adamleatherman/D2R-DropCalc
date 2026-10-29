@@ -65,8 +65,8 @@
   /** text (escaped) in the drop colour of item t; tip = hovering it shows the item tooltip (itemTipHtml) */
   const dropName = (t, text, tip) => tip && t && t.kind ? '<span class="itn ' + dropCls(t) + '" data-it="' + esc(itKey(t)) + '">' + esc(text) + '</span>'
     : dropCls(t) ? '<span class="' + dropCls(t) + '">' + esc(text) + '</span>' : esc(text);
-  /** in-game style tooltip of item t: name (and base) in the drop colour, set, type and tier, required level, quality level, sockets.
-   *  No stat lines: data.json has no unique / set item properties (build.py does not export them). */
+  /** in-game style tooltip of item t: name (and base) in the drop colour, set, type and tier, required level, quality level, stat lines (unique and set
+   *  items), sockets. */
   function itemTipHtml(t) {
     const u = t.kind === 'unique' ? E.uniqById[t.id] : t.kind === 'set' ? E.setById[t.id] : null, it = E.items[u ? u.code : t.code];
     if (!it) return '';
@@ -89,7 +89,11 @@
         for (const x of st.set.f) h += ln(x + ' (full set)', 'tip-full tip-small');
       }
     }
-    if (it.gs > 0) h += ln('Max sockets: ' + it.gs, 'tip-gray');   // gray, like a socketed item in game
+    // sockets (gray, like a socketed item in game). A base: the most it can hold (E.maxSockets: the type's limit, the base's gemsockets and its inventory
+    // size; stackable bases none). A unique or set item never drops socketed unless a stat line says so; without one, Larzuk's quest adds exactly 1.
+    const ms = it.st ? 0 : E.maxSockets(u ? u.code : t.code);
+    if (ms > 0 && !u) h += ln('Max sockets: ' + ms, 'tip-gray');
+    else if (ms > 0 && !(u.mods || []).some((m) => m[0] === 'sock')) h += ln('Larzuk socket quest: 1 socket', 'tip-gray');
     return h;
   }
   /** Every probability is shown as odds: "1 in 4,334,276", "1 in 1.50" below 10, "always" at p >= 1, "-" for none. */
@@ -148,6 +152,7 @@
   ];
 
   // ---------------- autocomplete ----------------
+  let hideTip = () => {};   // hides the item tooltip (set where the tooltip is made)
   function autocomplete(input, ul, source, onPick) {
     let items = [], hi = -1;
     function show() {
@@ -156,7 +161,7 @@
       const words = q.split(/\s+/);
       items = source().filter((x) => { const t = (x.search || x.label).toLowerCase(); return words.every((w) => t.indexOf(w) >= 0); })
         .sort((a, b) => (a.label.toLowerCase().startsWith(q) ? 0 : 1) - (b.label.toLowerCase().startsWith(q) ? 0 : 1)).slice(0, 40);
-      ul.innerHTML = items.map((x, i) => '<li data-i="' + i + '">' + dropName(x, x.label) + '</li>').join('');
+      ul.innerHTML = items.map((x, i) => '<li data-i="' + i + '">' + dropName(x, x.label, true) + '</li>').join('');   // hovering a suggestion shows its item tooltip
       ul.hidden = !items.length; hi = -1;
     }
     function pick(i) { const x = items[i]; if (!x) return; input.value = x.label; ul.hidden = true; onPick(x); }
@@ -171,7 +176,7 @@
       Array.from(ul.children).forEach((li, i) => li.classList.toggle('hi', i === hi));
       e.preventDefault();
     });
-    ul.addEventListener('mousedown', (e) => { const li = e.target.closest('li'); if (li) pick(+li.dataset.i); });
+    ul.addEventListener('mousedown', (e) => { const li = e.target.closest('li'); if (li) { hideTip(); pick(+li.dataset.i); } });   // the list closes under the pointer: the tooltip goes with it
     document.addEventListener('click', (e) => { if (!ul.contains(e.target) && e.target !== input) ul.hidden = true; });
   }
 
@@ -1434,6 +1439,7 @@
     autocomplete($('q1'), $('ac1'), () => INDEX, (x) => { target1 = x; runTab1(); });
     // item tooltip: hovering an item name (data-it) shows itemTipHtml next to the pointer
     const tip = document.createElement('div'); tip.className = 'itip'; tip.hidden = true; document.body.appendChild(tip);
+    hideTip = () => { tip.hidden = true; };
     let tipIdx = null, tipSrc = null;
     const placeTip = (e) => { const w = tip.offsetWidth, h = tip.offsetHeight; let x = e.clientX + 14, y = e.clientY + 18;
       if (x + w > innerWidth - 8) x = Math.max(8, e.clientX - w - 14); if (y + h > innerHeight - 8) y = Math.max(8, e.clientY - h - 12); tip.style.left = x + 'px'; tip.style.top = y + 'px'; };
