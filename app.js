@@ -350,10 +350,15 @@
     // headline: best per kill (monster rows), best per run (area rows in area mode, else monster rows)
     const best = (rs, g) => rs.reduce((a, x) => !a || g(x) > g(a) ? x : a, null);
     const bk = best(mon, (x) => x.c.target), br = best(areaMode() ? rows : mon.filter((x) => !x.src.herald && !x.src.quest), runP);   // a quest kill is not repeatable
-    let hl = '<b>' + dropName(target1, target1.label, true) + '</b>';
-    if (bk) hl += ' &middot; best per kill: ' + esc(srcWhere(bk.src)) + ', <b>' + odds(bk.c.target) + '</b>';
-    if (br && runP(br) > 0) hl += ' &middot; best per run: ' + esc(areaMode() ? br.src.areaName + ' (' + DIFF[br.src.diff] + ')' : srcWhere(br.src)) + ', <b>' + runsTxt(runP(br)) + '</b>, ~' + countFmt(E.trialsFor(runP(br), 0.5)) + ' runs for 50% / ~' + countFmt(E.trialsFor(runP(br), 0.9)) + ' for 90%';
-    $('hl1').innerHTML = hl;
+    const tile = (label, value, sub) => '<div class="tile"><div class="tl">' + label + '</div><div class="tv">' + value + '</div><div class="ts">' + sub + '</div></div>';
+    let tiles = '';
+    if (bk) tiles += tile('Best per kill', odds(bk.c.target), esc(srcWhere(bk.src)));
+    if (br && runP(br) > 0) {
+      const where = esc(areaMode() ? br.src.areaName + ' (' + DIFF[br.src.diff] + ')' : srcWhere(br.src));
+      tiles += tile('Best per run', odds(runP(br)), where) + tile('Runs for 50% / 90%', '~' + countFmt(E.trialsFor(runP(br), 0.5)) + ' / ~' + countFmt(E.trialsFor(runP(br), 0.9)), 'at the best source per run');
+    }
+    $('hl1').innerHTML = '<b>' + dropName(target1, target1.label, true) + '</b>' + (tiles ? '<div class="tiles">' + tiles + '</div>' : '');
+    $('ex1').hidden = true;
     const bkc = best(mon.filter((x) => !x.src.quest), (x) => x.c.target);   // the charts' per-kill source: a quest kill is not repeatable
     chIn = { sel, ctx, br, bk: bkc, bq }; renderCharts1();
     const lo = lowest(all.rows);
@@ -775,10 +780,10 @@
   }
 
   // ----- picked affix families (bd.picks: {id = family id, name, side, keys}) and their stats (bd.sel) -----
-  /** the pick a stat belongs to; null when no pick has it (deep link) or several do */
-  const pickOf = (key) => { const ps = bd.picks.filter((p) => p.keys.indexOf(key) >= 0); return ps.length === 1 ? ps[0] : null; };
+  /** the pick a stat belongs to: the first one that gives it (two picks can share a stat, e.g. attack rating as a prefix and a suffix); null when none */
+  const pickOf = (key) => bd.picks.find((p) => p.keys.indexOf(key) >= 0) || null;
   const pickFromRow = (r) => ({ id: r.id, name: r.name, side: r.side, g: r.g, keys: r.mods.map((m) => m.key).filter((k) => bd.stats.has(k)) });
-  /** the family that owns a picked stat (its block); null for "Stats (any affix that gives them)" (no pick, or several picks share the stat) */
+  /** the family that owns a picked stat (its block) */
   const famOf = (key) => { const p = pickOf(key); return p ? bd.fams.get(p.id) || null : null; };
   /** the weakest value of a family stat: lowest minimum (ge) or highest maximum (le) over its tiers */
   const weakest = (f, key, le) => { const iv = f && f.vals[key]; return !iv ? undefined : le ? iv[iv.length - 1][1] : iv[0][0]; };
@@ -884,24 +889,21 @@
       '<input type="range" class="thrr" step="1"' + sl + '><small class="note rn">' + rngNote(s) + '</small></div>') +
       (vals && !fx ? '<small class="note tn">' + esc(tierNote(s)) + '</small>' : '') + '<div class="od" data-k="c' + i + '"></div></div>';
   }
-  /** the item card: base and quality, the slot counter, then one block per picked affix family with the sliders of its stats; stats no pick owns go under "Stats (any affix that gives them)" */
+  /** the item card: base and quality, the slot counter, then one block per picked affix family with the sliders of its stats (a stat two picks share sits in the first) */
   function renderSel() {
     const box = $('sel2');
-    if (!bd.type) { box.className = 'note'; box.textContent = 'Pick an item type or base first.'; $('st2').disabled = true; return; }
+    if (!bd.type) { box.className = 'note'; box.textContent = 'Pick an item type or base first.'; return; }
     box.className = '';
     const HINT = 'Higher tiers and other affixes with this stat also count.';
-    const own = new Set(), blocks = bd.picks.map((p, pi) => {
-      const mine = []; bd.sel.forEach((s, i) => { if (pickOf(s.key) === p) { mine.push(rowHtml(s, i)); own.add(i); } });
+    const blocks = bd.picks.map((p, pi) => {
+      const mine = []; bd.sel.forEach((s, i) => { if (pickOf(s.key) === p) mine.push(rowHtml(s, i)); });
       const f = bd.fams.get(p.id);
       return '<div class="pk" title="' + esc(HINT) + '"><div class="pkh"><span><b>' + esc(p.name) + '</b> ' + sideTag(p) + (f ? ' &middot; ' + esc(f.desc) : '') + '</span><button class="rmp" data-id="' + esc(p.id) + '" title="remove this affix and its stats">remove</button></div>' +
-        (mine.length ? '<div class="od" data-k="g' + pi + '"></div>' : '') + (mine.join('') || '<div class="note">its stats are also picked by another affix (see below)</div>') + '</div>';
+        (mine.length ? '<div class="od" data-k="g' + pi + '"></div>' : '') + (mine.join('') || '<div class="note">its stats are also given by an affix above</div>') + '</div>';
     });
-    const other = bd.sel.map((s, i) => own.has(i) ? '' : rowHtml(s, i)).join('');
-    if (other) blocks.push('<div class="pk"><div class="pkh"><b>Stats (any affix that gives them)</b></div>' + other + '</div>');
     const q = $('ql2').value;
     box.innerHTML = '<div class="card"><div class="chd"><b>' + esc(bd.type.name) + '</b><span>' + (q ? QN[q] : 'Any quality') + '</span></div><div class="slots">' + slotLine() + '</div>' + (bd.sel.length ? '<div class="vd" hidden></div><div class="odt"><b>All picks, per item:</b> <span class="od" data-k="t"></span></div><div class="note odn"></div><div class="ilc"></div>' : '') +
-      (blocks.join('') || '<div class="note">Click an affix in the table, or add a stat by name below. Each stat gets a minimum value you can move with the slider.</div>') + '</div>';
-    $('st2').disabled = false;
+      (blocks.join('') || '<div class="note">Click an affix in the table, or choose one of the Popular items. Each of its stats gets a minimum value you can move with the slider.</div>') + '</div>';
     paintOdds(); requestOdds(); paintVerdict();
   }
 
@@ -1227,9 +1229,6 @@
     TA.onRow = onPickRow;
     autocomplete($('q2'), $('ac2'), () => TYPEOPTS, (x) => setType(x));
     $('pr2').addEventListener('change', () => { const p = E.CONFIG.itemPresets[parseInt($('pr2').value, 10)]; if (p) { loadPreset(p); $('pr2').value = E.CONFIG.itemPresets.indexOf(p); } });
-    // stat-first entry: any affix that gives the stat counts (the stat goes under "Stats (any affix that gives them)" in the card)
-    autocomplete($('st2'), $('acst2'), () => bd.type ? Array.from(bd.stats.values()).filter((st) => !bd.sel.some((s) => s.key === st.key)).map((st) => ({ key: st.key, label: st.text, search: st.text + ' ' + st.key })) : [],
-      (x) => { $('st2').value = ''; if (addStat(x.key)) { renderSel(); refit(true); changed(); } });
     $('tr2').addEventListener('change', () => { if (bd.type && bd.type.kind === 'type') refreshBuilder(); });
     $('ilr2').addEventListener('input', () => { $('il2').value = $('ilr2').value; });
     $('ilr2').addEventListener('change', () => { syncUrl(); requestTable(); });
@@ -1304,7 +1303,7 @@
     }
     $('pr2').innerHTML = '<option value="">Choose an item</option>' + opts + (grp ? '</optgroup>' : '');
   }
-  /** a preset loaded the way a link loads (applyUrl2): type or base, tier, quality, stats with their minimums ('max' = the best roll: addStat clamps) */
+  /** a preset loaded the way a link loads (applyUrl2): type or base, tier, quality, stats with their minimums ('max' = the best roll: addStat clamps); applyUrl2 picks the affixes that give them */
   function loadPreset(p) {
     const qs = new URLSearchParams();
     qs.set(p.b ? 'b2' : 't2', p.b || p.t); qs.set('tr2', p.tr === undefined ? -1 : p.tr); qs.set('q', p.q);
@@ -1326,12 +1325,15 @@
     bd.stats = new Map(E.builderStats(bd.codes).map((s) => [s.key, s])); bd.fams = E.builderFamilies(bd.codes);
     bd.sel = []; bd.picks = []; fitIdx = null;
     const byRow = new Map(); for (const f of bd.fams.values()) for (const id of f.ids) byRow.set(id, f);
-    for (const id of qs.getAll('p')) {   // ?p=<family id>: the picked affixes; an old link's tier row id (p12) maps to its family; links without p: the stats show under "Stats (any affix that gives them)"
+    for (const id of qs.getAll('p')) {   // ?p=<family id>: the picked affixes; an old link's tier row id (p12) maps to its family
       const f = bd.fams.get(id) || byRow.get(id); if (!f || bd.picks.some((p) => p.id === f.fid) || groupClash(f) || sideClash(f)) continue;
       if (!pickFromRow(f).keys.length) continue;
       addPick(f);
     }
-    for (const c of qs.getAll('a').concat(qs.getAll('c'))) { const i = c.lastIndexOf(':'); addStat(c.slice(0, i), parseFloat(c.slice(i + 1))); }
+    const as = qs.getAll('a').concat(qs.getAll('c')).map((c) => { const i = c.lastIndexOf(':'); return [c.slice(0, i), parseFloat(c.slice(i + 1))]; }).filter(([k, v]) => bd.stats.has(k) && !isNaN(v));
+    const open = as.filter(([k]) => !pickOf(k));   // stats no picked affix gives (a preset, or a link without p): the affixes that give them together are picked
+    if (open.length) for (const id of E.familiesFor(bd.codes, $('ql2').value, open, bd.picks.map((p) => p.id)).ids) { const f = bd.fams.get(id); if (f && pickFromRow(f).keys.length) addPick(f); }
+    for (const [k, v] of as) if (pickOf(k)) addStat(k, v);   // a stat no affix can give on this item is left out
     renderSel(); requestTable(); syncUrl(); updateAnalysis(); runFarm();
     document.getElementById('t2').click();
     return true;
@@ -1366,7 +1368,18 @@
     if (areas.some((x) => x.id === cur3)) $('ar3').value = cur3;
     fill3();
     $('info1').textContent = 'Ready. ' + INDEX.length + ' items indexed, ' + Object.keys(E.data.levels).length + ' areas, ' + Object.keys(E.data.monsters).length + ' monster types.';
+    fillEx1();
     updTier();
+  }
+  /** tab 1 before a search: a few staple items to try, and pointers to the other two tabs */
+  const EX1 = [['unique', 'Harlequin Crest'], ['base', 'Ber Rune'], ['base', 'Jah Rune'], ['unique', "Griffon's Eye"], ['unique', 'Arachnid Mesh'], ['unique', 'The Stone of Jordan'], ['set', "Tal Rasha's Guardianship"], ['base', 'Monarch']];
+  function fillEx1() {
+    const box = $('ex1'), its = EX1.map(([k, n]) => INDEX.find((x) => x.kind === k && x.label.indexOf(n + ' ') === 0)).filter(Boolean);
+    box.innerHTML = '<div class="note">Try one of these, or type any item above:</div>' + its.map((x, i) => '<button type="button" data-i="' + i + '">' + dropName(x, x.label.replace(/ - .*| \(.*/, ''), true) + '</button>').join('') +
+      '<div class="note">Or see what a farm drops in <a href="#" data-t="t2">2. Popular farms</a>, or the odds of an item with the stats you want in <a href="#" data-t="t3">3. Item builder</a>.</div>';
+    for (const b of box.querySelectorAll('button')) b.onclick = () => { target1 = its[+b.dataset.i]; $('q1').value = target1.label; runTab1(); };
+    for (const a of box.querySelectorAll('a')) a.onclick = (e) => { e.preventDefault(); $(a.dataset.t).click(); };
+    box.hidden = !!target1;
   }
   /** one-line "Your game" summary shown on the collapsed bar */
   function updGame() {
@@ -1380,7 +1393,7 @@
   async function switchMode(m) {
     const had2 = bd.sel.length > 0;
     await useEngine(m);
-    if (target1) { target1 = INDEX.find((x) => sameTarget(x, target1)) || null; if (!target1) { $('q1').value = ''; T1.rows = []; T1.render(); } }
+    if (target1) { target1 = INDEX.find((x) => sameTarget(x, target1)) || null; if (!target1) { $('q1').value = ''; T1.rows = []; T1.render(); $('head1').hidden = true; $('ex1').hidden = false; } }
     if (bd.type) {
       const o = TYPEOPTS.find((x) => x.kind === bd.type.kind && x.code === bd.type.code) || null;
       bd.type = o; bd.farm = null;
@@ -1438,6 +1451,8 @@
     $('qb1').checked = lsGet('d2dc-qb1');
     $('qb1').addEventListener('change', () => { lsSet('d2dc-qb1', $('qb1').checked); T1.render(); });
     $('g1').addEventListener('change', () => { T1.key = 'perrun'; T1.dir = -1; runTab1(); });   // both views start sorted by chance per run
+    let chW0 = document.documentElement.clientWidth, chT = 0;   // redraw the open charts at their new width (phone turned, window resized)
+    window.addEventListener('resize', () => { clearTimeout(chT); chT = setTimeout(() => { const w = document.documentElement.clientWidth; if (w === chW0) return; chW0 = w; if (chIn) renderCharts1(); renderCharts3(); }, 200); });
     $('charts3').open = lsOpen('d2dc-charts3'); $('charts3').addEventListener('toggle', () => { lsSet('d2dc-charts3', $('charts3').open); renderCharts3(); });   // only computed while open
     $('charts1').open = lsOpen('d2dc-charts1'); $('charts1').addEventListener('toggle', () => { lsSet('d2dc-charts1', chOpen()); if (chOpen() && target1) runTab1(); });   // only computed while open
     $('bld1').onclick = () => {   // tab 2 on this base
@@ -1517,7 +1532,12 @@
   }
 
   // ----- the two small charts in tab 1 ("Charts" under the headline): MF vs chance per run, and runs vs cumulative chance, both at the best-per-run source -----
-  const CH = { w: 640, h: 270, l: 84, r: 24, t: 16, b: 42 };
+  const CH = { w: 640, h: 270, l: 84, r: 24, t: 16, b: 42 };   // w is set per drawing (chFitW), the rest is fixed
+  /** the drawing width of the charts in el: the width they show at, 360 to 640, so the 11-12px labels stay that size on a phone (pair: two charts side by side when they fit) */
+  function chFitW(el, pair) {
+    const bw = (el && el.clientWidth) || document.documentElement.clientWidth - 32, each = pair && bw >= 658 ? (bw - 18) / 2 : bw;
+    return (CH.w = Math.max(360, Math.min(640, Math.round(each))));
+  }
   let chCache = null;   // { key, mfs, ps, P }
   let ch1Kill = (() => { try { return localStorage.getItem('d2dc-ch1mode') === 'kill'; } catch (e) { return false; } })();   // charts per kill (best per-kill source) instead of per run
   const chOpen = () => $('charts1').open;
@@ -1540,7 +1560,7 @@
   function chartHover(box, toX) {
     const svg = box.querySelector('svg'), xh = svg.querySelector('.xh'), hit = svg.querySelector('.hit'), tip = box.querySelector('.mftip');
     hit.addEventListener('mousemove', (e) => {
-      const r = svg.getBoundingClientRect(), v = toX((e.clientX - r.left) * CH.w / r.width); if (!v) return;
+      const r = svg.getBoundingClientRect(), v = toX((e.clientX - r.left) * svg.viewBox.baseVal.width / r.width); if (!v) return;
       xh.setAttribute('x1', v.x); xh.setAttribute('x2', v.x); xh.setAttribute('visibility', 'visible'); tip.innerHTML = v.html;
       tip.hidden = false; const bx = box.getBoundingClientRect(); let left = e.clientX - bx.left + 12; if (left + 190 > bx.width) left -= 210; tip.style.left = left + 'px'; tip.style.top = (e.clientY - bx.top - 10) + 'px';
     });
@@ -1601,6 +1621,7 @@
   let chIn = null;   // the inputs of the last runTab1: { sel, ctx, br, bq }
   function renderCharts1() {
     const box = $('ch1'); if (!chOpen()) return;
+    const W = chFitW(box, true);
     const c = chIn, kill = ch1Kill, row = c && (kill ? c.bk : c.br), u = kill ? 'kill' : 'run';
     const seg = '<div class="seg" role="group" aria-label="Chart per run or per kill"><button type="button" data-m="run"' + (kill ? '' : ' class="on"') + '>Per run (best source per run)</button><button type="button" data-m="kill"' + (kill ? ' class="on"' : '') + '>Per kill (best source per kill)</button></div>';
     const P = row ? (kill ? chKill(c.ctx, row.src, c.sel.mf, c.bq) : runP(row)) : 0;
@@ -1615,8 +1636,8 @@
     chSeg(box);
     const bs = box.querySelectorAll('.mfchart');
     if (bs[0]) chartHover(bs[0], (sx) => {
-      const v = (sx - CH.l) / (CH.w - CH.l - CH.r) * 1000, i = d.mfs.reduce((a, mf, k) => Math.abs(mf - v) < Math.abs(d.mfs[a] - v) ? k : a, 0), mf = d.mfs[i], p = d.ps[i];   // snaps to the computed MF values
-      return { x: CH.l + mf / 1000 * (CH.w - CH.l - CH.r), html: '<b>' + mf + '% MF</b><div>' + chOdds(p) + ' per ' + u + ' (' + (p * 100).toPrecision(3) + '%)</div>' };
+      const v = (sx - CH.l) / (W - CH.l - CH.r) * 1000, i = d.mfs.reduce((a, mf, k) => Math.abs(mf - v) < Math.abs(d.mfs[a] - v) ? k : a, 0), mf = d.mfs[i], p = d.ps[i];   // snaps to the computed MF values
+      return { x: CH.l + mf / 1000 * (W - CH.l - CH.r), html: '<b>' + mf + '% MF</b><div>' + chOdds(p) + ' per ' + u + ' (' + (p * 100).toPrecision(3) + '%)</div>' };
     });
     if (hv && bs[1]) chartHover(bs[1], hv);
   }
@@ -1633,6 +1654,7 @@
     det.hidden = !r; if (!r || !det.open) return;   // no item picked from the suggestions (or this farm does not drop it): no charts
     if (c3.quest) { box.innerHTML = '<div class="note">A boss quest kill happens once per character and difficulty, so there is no run count to chart.</div>'; return; }
     const P = r.runP, m = mins3(), nm = esc(r.t.name);
+    chFitW(box, true);
     if (!(P > 0)) { box.innerHTML = '<div class="note">No chance per run to chart.</div>'; return; }
     if (P >= 1) { box.innerHTML = '<div class="note">' + nm + ' drops on every run here.</div>'; return; }
     const a = runsChart(P, { title: 'How many runs until you find ' + nm + '?', aria: 'Chance of having found ' + nm + ' after a number of runs' });
@@ -1742,6 +1764,7 @@
     const C = E.CONFIG, R = C.run, h = (t) => '<h2>' + t + '</h2>', li = (xs) => '<ul>' + xs.map((x) => '<li>' + x + '</li>').join('') + '</ul>';
     const M = (x) => '<span class="math">' + x + '</span>';   // a formula, set in the math font (x is trusted markup: <i> variables, <sup> powers)
     const V = (x) => '<span class="math v"><i>' + x + '</i></span>';   // one variable in running text
+    chFitW($('about'), false);   // the About charts: one per row
     abHov.length = 0; const ab = (f, note) => { const c = f(abHov.length, note); abHov.push(c[1]); return c[0]; };   // build a chart and file its hover under its data-ab index
     return h('What this is') +
       '<p>A drop calculator for Diablo II: Resurrected, built straight from the game\'s own data tables (game data ' + esc(E.data.meta.gameVersion) + ', ' + (E.mode === 'lod' ? 'Lord of Destruction' : 'Reign of the Warlock') + ' mode). ' +

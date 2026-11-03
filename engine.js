@@ -45,10 +45,10 @@
     const clsKey = (c) => c === 'Warlock' ? '+# to Warlock Skills' : '+# to ' + c + ' Skill Levels';
     for (const c of CLS) add('Amulets and circlets', '2/10 ' + c + ' amulet', { t: 'amul', q: 'rare', a: [[clsKey(c), 2], ['+#% Faster Cast Rate', 10]], rotw: c === 'Warlock' ? 1 : 0 });
     for (const c of CLS) add('Amulets and circlets', '2/20/2 ' + c + ' circlet', { t: 'circ', q: 'rare', a: [[clsKey(c), 2], ['+#% Faster Cast Rate', 20], ['Socketed (#)', 2]], rotw: c === 'Warlock' ? 1 : 0 });
-    add('Rings and boots', '10 FCR ring', { t: 'ring', q: 'rare', a: [['+#% Faster Cast Rate', 10]] });
-    add('Rings and boots', '30 FRW tri-res boots (30 fire / cold / lightning)', { t: 'boot', q: 'rare', a: [['+#% Faster Run/Walk', 30], [RES.Fire, 30], [RES.Cold, 30], [RES.Lightning, 30]] });
+    add('Rings, boots and shields', '10 FCR ring', { t: 'ring', q: 'rare', a: [['+#% Faster Cast Rate', 10]] });
+    add('Rings, boots and shields', '30 FRW tri-res boots (30 fire / cold / lightning)', { t: 'boot', q: 'rare', a: [['+#% Faster Run/Walk', 30], [RES.Fire, 30], [RES.Cold, 30], [RES.Lightning, 30]] });
+    add('Rings, boots and shields', 'Jmod: Jeweler\'s Monarch of Deflecting (magic, 4 sockets)', { b: 'uit', q: 'magic', a: [['Socketed (#)', 4], ['+#% Faster Block Rate', 20], ['#% Increased Chance of Blocking', 20]] });   // a finished magic shield (sockets for jewels / runes), not a runeword base
     // runeword bases
-    add('Runeword bases', 'Jmod: Jeweler\'s Monarch of Deflecting', { b: 'uit', q: 'magic', a: [['Socketed (#)', 4], ['+#% Faster Block Rate', 20], ['#% Increased Chance of Blocking', 20]] });
     for (const [b, n] of [['utp', 'Archon Plate'], ['uui', 'Dusk Shroud'], ['xtp', 'Mage Plate']]) add('Runeword bases', 'Enigma / CoH base: 3 socket superior ' + n + ' (15% ED)', { b, q: 'sup', a: [['Socketed (#)', 3], ['+#% Enhanced Defense', 15]] });
     for (const [b, n] of [['uit', 'Monarch'], ['crs', 'Crystal Sword']]) add('Runeword bases', 'Spirit base: 4 socket ' + n, { b, q: 'normal', a: [['Socketed (#)', 4]] });
     for (const [b, n] of [['7s8', 'Thresher'], ['7wc', 'Giant Thresher'], ['7pa', 'Cryptic Axe']]) add('Runeword bases', 'Infinity / Insight base: ethereal 4 socket ' + n, { b, q: 'normal', a: [['Ethereal', 1], ['Socketed (#)', 4]] });
@@ -2215,6 +2215,40 @@
       }
       return fams;
     }
+    /** The affix families (builderFamilies ids) that give the wanted stats [[key, min]] together on one item of quality q ('' = any): each stat from a family whose
+     *  rolls reach its min (a min above every family's best = the best roll), no two families of one affix group and side, no more prefixes / suffixes than the
+     *  quality allows (the families in `have` already take their slots and groups). Fewest families, then fewest stats beyond the wanted ones, then the highest rolls.
+     *  { ids (new families), missing (wanted keys no family can add) } */
+    function familiesFor(codes, q, wants, have) {
+      const fams = builderFamilies(codes), mine = (have || []).map((id) => fams.get(id)).filter(Boolean);
+      const usable = Array.from(fams.values()).filter((f) => (!q || f.quals.indexOf(q) >= 0) && mine.indexOf(f) < 0);
+      const le = (m) => m.max <= 0 && m.min < 0;
+      const best = new Map(); for (const f of usable) for (const m of f.mods) best.set(m.key, Math.max(best.has(m.key) ? best.get(m.key) : -Infinity, le(m) ? -m.min : m.max));
+      const need = new Map(wants.map(([k, v]) => [k, v]));
+      const reach = (f, k) => { const m = f.mods.find((x) => x.key === k); if (!m) return false; const v = need.get(k); return le(m) ? m.min <= v : m.max >= Math.min(v, best.get(k)); };
+      const rare = (!q || q === 'rare') && codes.some((c) => items[c].cr), lim = { prefix: rare ? CONFIG.rareMaxPerSide : 1, suffix: rare ? CONFIG.rareMaxPerSide : 1, auto: 1, superior: 1 };
+      const keys = Array.from(need.keys()).sort((a, b) => usable.filter((f) => reach(f, a)).length - usable.filter((f) => reach(f, b)).length);
+      const fits = (f, chosen) => {
+        const all = mine.concat(chosen);
+        if (f.g && all.some((x) => x.g === f.g && x.side === f.side)) return false;
+        return !(f.side in lim) || all.filter((x) => x.side === f.side).length < lim[f.side];
+      };
+      let top = null;   // { cost, chosen, miss }
+      const covered = (k, chosen) => mine.concat(chosen).some((f) => f.keys.indexOf(k) >= 0 && reach(f, k));
+      const dfs = (i, chosen, miss) => {
+        const cost = miss.length * 1000 + chosen.length * 10 + chosen.reduce((a, f) => a + f.keys.filter((k) => !need.has(k)).length, 0);
+        if (top && cost >= top.cost) return;
+        if (i === keys.length) { top = { cost, chosen, miss }; return; }
+        const k = keys[i];
+        if (covered(k, chosen)) { dfs(i + 1, chosen, miss); return; }
+        const cand = usable.filter((f) => chosen.indexOf(f) < 0 && reach(f, k) && fits(f, chosen))
+          .sort((a, b) => b.keys.filter((x) => need.has(x)).length - a.keys.filter((x) => need.has(x)).length || a.keys.length - b.keys.length || (b.mods.find((m) => m.key === k).max - a.mods.find((m) => m.key === k).max));
+        for (const f of cand) dfs(i + 1, chosen.concat([f]), miss);
+        dfs(i + 1, chosen, miss.concat([k]));   // no family for this stat
+      };
+      dfs(0, [], []);
+      return { ids: top.chosen.map((f) => f.id), missing: top.miss };
+    }
     /** Allowed threshold values of a family stat: the values of `iv` (merged intervals) inside [lo, hi], ascending; the whole family set when none is left (the other
      *  picks squeeze the range off every tier). null when there would be more than `cap` (the caller then uses a plain range). */
     function allowedValues(iv, lo, hi, cap) {
@@ -2658,7 +2692,7 @@
     return {
       CONFIG, data: D, farmMinutes, DIFFS, items, types, getCtx, playersN, adjNoDrop, dist, upgradeTC, areaSources, DUP_OF, areaLabel, areaRun, areaRolls, listShares, bossPacks,
       mode, heraldsAvailable, sunderChance, sunderPaths, isSunder, adjQuality, heraldSpawnPct, quality, qualityTotals, sources, runSources, srcDist, chanceFor, dropsOf, baseQualityChance, affixLevel, minIlvlForAlvl, eligible, maxSockets, affixProb, rareProbFromSamples, cardOdds, ilvlCurve, minLevels, staffDist, staffBase,
-      statList, describe, describeAt, itemStats, sliderWhat, affixSearch, searchIndex, baseTypes, metaCache, uniqById, setById, uniqByCode, setByCode, prettyId, tzLevel,
+      statList, describe, describeAt, itemStats, familiesFor, sliderWhat, affixSearch, searchIndex, baseTypes, metaCache, uniqById, setById, uniqByCode, setByCode, prettyId, tzLevel,
       eligibleUniques, eligibleSets, condProb, trialsFor,
       builderTypes, builderBases, builderCatalog, builderStats, builderFamilies, familyTable, familyIdOf, allowedValues, snapValue, tierFor, perLevelDiv, perLevelAt, builderAffixTable, baseDropWeights, affixAppearance, planCombo, comboForBase, comboAnalysis, feasibleAny, fitIndex, fitsCombo, statRange, explainCombo, groupName,
       qualityPossible, ethItem, ethChance, plainSocketMax, plainSocketDist, extrasDist, QUALS, QLABEL, SOCK_KEY, ETH_KEY,

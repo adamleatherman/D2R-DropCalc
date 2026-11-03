@@ -884,7 +884,7 @@
       app(ES, 'shared group: boots', 'utb', 99);
       E.CONFIG.gameMode = 'rotw';
     }
-    // ---- popular item presets (CONFIG.itemPresets): the type or base exists, every stat key is a builder stat of it, its quality is feasible ----
+    // ---- popular item presets (CONFIG.itemPresets): the type or base exists, every stat key is a builder stat of it, its quality is feasible, an affix to pick gives each stat ----
     res.presets = { n: E.CONFIG.itemPresets.length, groups: Array.from(new Set(E.CONFIG.itemPresets.map((p) => p.group))), bad: { rotw: [], lod: [] } };
     for (const [mode, EE] of [['rotw', E], ['lod', EL]]) {
       E.CONFIG.gameMode = mode;
@@ -897,6 +897,8 @@
         const conds = p.a.map(([k, v]) => ({ key: k, min: v === 'max' ? st.get(k).max : v }));
         const an = EE.comboAnalysis(codes, conds, { qualities: [p.q] });
         if (!an[p.q].ok) res.presets.bad[mode].push(p.name + ': not possible as ' + p.q + ' (' + an[p.q].why.join(' ') + ')');
+        const ff = EE.familiesFor(codes, p.q, conds.map((c) => [c.key, c.min]), []);   // the affixes the builder picks for it: every stat from one of them
+        if (ff.missing.length) res.presets.bad[mode].push(p.name + ': no affix to pick for ' + ff.missing.join(', '));
       }
     }
     E.CONFIG.gameMode = 'rotw';

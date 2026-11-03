@@ -1787,7 +1787,7 @@ def main():
     PR = js["presets"]
     check("item presets: %d presets in %d groups" % (PR["n"], len(PR["groups"])), 1 if PR["n"] >= 40 and len(PR["groups"]) >= 6 else 0, 1)
     for mode_ in ("rotw", "lod"):
-        check("item presets load in %s (type / base, stat keys, quality feasible)" % mode_, len(PR["bad"][mode_]), 0, note="; ".join(PR["bad"][mode_])[:400])
+        check("item presets load in %s (type / base, stat keys, quality feasible, an affix picked for every stat)" % mode_, len(PR["bad"][mode_]), 0, note="; ".join(PR["bad"][mode_])[:400])
     LB = B["labels"]
     idx_sk = {r["*Id"]: r for r in RU.skills}
     def sk_levels(sid, lvl):
