@@ -1,11 +1,11 @@
 # Plan: popular item presets in the item builder
 
 Status: phase 1 done (2026-10-29): 67 presets in `CONFIG.itemPresets` (engine.js), a Popular items list in the builder, a test that
-every preset loads in both modes. Differences from the table below: picks are stats only (under "Stats (any affix that gives them)", no
-affix families, which keeps the presets independent of family ids); rare amulets are 2/10 (amulets roll at most 10% FCR, 20 needs a craft);
+every preset loads in both modes. Differences from the table below: presets list stats only (independent of family ids); since 2026-11-03
+loading one picks the affix families that give them (`Engine.familiesFor`) and the free "Stats (any affix ...)" entry is gone; rare amulets are 2/10 (amulets roll at most 10% FCR, 20 needs a craft);
 the 7 MF charm has a 5@ variant but no 20 life one (MF and life are both suffixes); tri-res boots are fire / cold / lightning >= 30; Spirit
 and Infinity bases load as normal quality (switch to superior by hand); the chosen preset is not stored in the URL (the link already holds
-the full builder state). Phase 2 not started. Written 2026-10-28.
+the full builder state). Phase 2 not started; it is now planned in detail in `docs/plans/rare-points.md` (2026-11-03). Written 2026-10-28.
 
 ## Goal
 
@@ -46,7 +46,7 @@ community "good" minimum; the user can edit everything after loading.
 | Jewelry and gear | 2/20/2 circlet | rare | +2 to class skills, 20% FCR, 2 sockets |
 | Jewelry and gear | 30 FRW tri-res boots | rare | 30% FRW, three resistances (each >= 30 where they roll) |
 | Jewelry and gear | 10 FCR ring (base for the point presets of phase 2) | rare | 10% FCR |
-| Runeword bases | Jmod (Jeweler's Monarch of Deflecting) | magic | 4 sockets, 20% faster block rate, 20% increased block |
+| Jewelry and gear | Jmod (Jeweler's Monarch of Deflecting; a finished magic shield, not a runeword base) | magic | 4 sockets, 20% faster block rate, 20% increased block |
 | Runeword bases | Enigma / Chains of Honor base: 3 sockets body armor (Archon Plate, Dusk Shroud, Mage Plate) | superior | 3 sockets (+15% ED for superior) |
 | Runeword bases | Spirit base: 4 socket Monarch / Crystal Sword | normal or superior | 4 sockets |
 | Runeword bases | Infinity / Insight base: ethereal 4 socket Thresher / Giant Thresher / Cryptic Axe | normal or superior | ethereal, 4 sockets |
@@ -79,6 +79,8 @@ list of conditions** (each with its minimum), next to the existing "all of these
     resistances}.
 * UI: the "N of" group shows its count control and its conditions in one box; the odds table and the farm search use it
   like any other condition.
+
+* The point scale (researched 2026-11-03) and the full design are in `docs/plans/rare-points.md`.
 
 ## Tests
 
